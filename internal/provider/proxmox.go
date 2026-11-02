@@ -1139,8 +1139,8 @@ func firstRoutable(addrs []pve.IPAddress) string {
 // The port is deliberately not configurable: the guest's sshd is the one
 // cloud-init provisions, on 22. TargetConfig.Port belongs to the remote-Lima
 // provider's hop, which has no counterpart here.
-func (p *proxmoxProvider) sshHost(host string) *lima.SSHHost {
-	return lima.NewSSHHost(lima.SSHConfig{
+func (p *proxmoxProvider) sshHost(host string) *sshx.Conn {
+	return sshx.New(sshx.Config{
 		Host:         host,
 		User:         p.ciUser,
 		IdentityPath: p.identityPath,
@@ -1167,7 +1167,7 @@ func (p *proxmoxProvider) sshHost(host string) *lima.SSHHost {
 // the connection it was built for alongside it. The caller needs that handle to
 // annotate an ssh-level failure (see transportError) — it is the only thing that
 // knows whether a transport log was being written and where.
-func (p *proxmoxProvider) guestArgv(ctx context.Context, name string, tty bool, argv ...string) ([]string, *lima.SSHHost, error) {
+func (p *proxmoxProvider) guestArgv(ctx context.Context, name string, tty bool, argv ...string) ([]string, *sshx.Conn, error) {
 	ip, err := p.guestIP(ctx, name)
 	if err != nil {
 		return nil, nil, err
@@ -1201,7 +1201,7 @@ const sshExitTransport = 255
 // the task never reported anything at all. The annotation says which layer
 // failed, and names the two env vars that make the NEXT occurrence
 // self-diagnosing instead of leaving the same two-line trace.
-func transportError(err error, h *lima.SSHHost) error {
+func transportError(err error, h *sshx.Conn) error {
 	var ee *exec.ExitError
 	if err == nil || !errors.As(err, &ee) || ee.ExitCode() != sshExitTransport {
 		return err

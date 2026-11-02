@@ -9,8 +9,7 @@ type muxOptOutKey struct{}
 // the connection-multiplexing master, and it exists because sharing is only a
 // good trade for SHORT commands.
 //
-// Every ssh sand runs to a given target reuses one master (see
-// internal/lima.SSHHost's muxFlags), and
+// Every ssh sand runs to a given target reuses one master (see muxFlags), and
 // with ControlMaster=auto the master is whichever connection got there first —
 // which may be a command sand considers disposable and kills on a cancelled
 // context. When a master dies, EVERY session multiplexed through it dies in the
@@ -36,8 +35,9 @@ func WithoutMux(ctx context.Context) context.Context {
 }
 
 // MuxSuppressed reports whether ctx carries WithoutMux's opt-out. Whatever builds
-// an ssh argv from a context consults it: internal/lima.SSHHost for both
-// limactl over the hop and the Proxmox provider's direct guest ssh.
+// an ssh argv from a context consults it, which in practice is Conn.SSHArgvCtx:
+// internal/lima.SSHHost builds limactl-over-the-hop argvs with it and the
+// Proxmox provider builds its direct guest ssh with it.
 func MuxSuppressed(ctx context.Context) bool {
 	if ctx == nil {
 		return false

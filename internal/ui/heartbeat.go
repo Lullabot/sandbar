@@ -60,7 +60,7 @@ package ui
 // what signals the child, and nothing synchronizes that against the process exit
 // a moment later. And on the LOCAL Lima path the direct child is limactl, not
 // ssh: cancelling kills limactl and leaves the ssh GRANDCHILD running until
-// WaitDelay closes the pipes two seconds on (lima.waitDelay), which a quitting
+// WaitDelay closes the pipes two seconds on (sshx.WaitDelay), which a quitting
 // process never reaches. Where the reported prompts actually come from — a remote
 // member or Proxmox, whose transport execs ssh directly (lima.SSHHost,
 // proxmoxProvider.runSSH) — ssh IS the direct child and the cancel does reach it.

@@ -40,8 +40,8 @@ const WaitDelay = 2 * time.Second
 // precedence, so this can never mask one.
 //
 // The inheritor is real, not hypothetical: the FIRST mux ssh to a target
-// (ControlMaster=auto + ControlPersist, internal/lima/sshhost.go) forks a background master,
-// and on OpenSSH builds that do not detach its stderr, that master holds the
+// (ControlMaster=auto + ControlPersist, see muxFlags) forks a background
+// master, and on OpenSSH builds that do not detach its stderr, that master holds the
 // pipe for the whole ControlPersist window. Observed in the field: a Proxmox
 // base build's ten-minute dependency install — the first ssh into the fresh
 // guest, and therefore the connection that BECAME the master — succeeded and
