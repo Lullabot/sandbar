@@ -125,7 +125,7 @@ const (
 	probeTimeout = 2 * time.Second
 	// forwardWaitDelay bounds how long a killed forwarder may hold its pipes
 	// before they are closed out from under it — the same hazard, and the
-	// same remedy, as internal/lima's runner (an ssh child can outlive the
+	// same remedy, as internal/sshx.WaitDelay (an ssh child can outlive the
 	// process that spawned it and keep the pipes open forever).
 	forwardWaitDelay = 2 * time.Second
 	// diffBaseTimeout bounds the base lookup, the FIRST thing Run does and
@@ -366,7 +366,7 @@ func (s *Session) Run(ctx context.Context, w io.Writer) (string, error) {
 	//
 	// Cancelling is necessary but NOT sufficient, and that is measured on a
 	// real Lima VM rather than assumed: `limactl shell` forks an ssh child
-	// which the cancel does not reach (the hazard internal/lima's runner
+	// which the cancel does not reach (the hazard internal/sshx.WaitDelay
 	// documents), so the guest server keeps listening — and Lima keeps
 	// forwarding its port — long after the CLI has exited. Every abnormal
 	// exit therefore has to reach into the guest and stop it as well. A

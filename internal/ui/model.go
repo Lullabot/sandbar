@@ -298,7 +298,7 @@ type model struct {
 	// board, that reconcile OPENS a fresh connection per running VM — two, counting
 	// the sweep — synchronously, inside the very Update that returns tea.Quit.
 	//
-	// Both probes are lima.WithoutMux, so none of those connections can ride the
+	// Both probes are sshx.WithoutMux, so none of those connections can ride the
 	// control master: each is a full handshake and, for anyone whose agent asks
 	// (1Password, a hardware key), its own approval prompt. Worse, the process
 	// exits moments later while they are still handshaking — nothing kills them,
