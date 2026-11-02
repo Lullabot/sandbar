@@ -170,11 +170,6 @@ jobs:
       - name: Build sand from the checkout
         run: go build -o sand ./cmd/sand
 
-      # This isolated SSH-only VM is deleted before the base-building tests.
-      # Check both receiving filesystems after dropped-path uploads/downloads.
-      - name: Dropped-path file transfers end-to-end
-        run: LIMA_E2E=1 go test -tags limae2e -timeout 15m -run '^TestE2EDroppedTransferPathsMoveContents$' ./internal/ui/
-
       # Run the actual entrypoint, non-interactively, forcing a true
       # from-scratch base build with --rebuild. Base reuse/re-apply is the
       # default path now (a stale base converges in place rather than
@@ -731,6 +726,17 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+
+      # A LOCAL Lima test, not a remote one: it lives here because it shares
+      # nothing with any job's VMs and this is the shortest leg, so it runs in
+      # parallel instead of lengthening lima-e2e. It boots a plain Debian VM
+      # under an isolated LIMA_HOME (isolateHostState), deletes it on cleanup,
+      # and checks both receiving filesystems after dropped-path
+      # uploads/downloads. Runs before the second user exists, so it cannot
+      # touch that user's Lima home.
+      - name: Dropped-path file transfers end-to-end
+        if: matrix.suite == 'lifecycle'
+        run: LIMA_E2E=1 go test -tags limae2e -timeout 15m -run '^TestE2EDroppedTransferPathsMoveContents$' ./internal/ui/
 
       - name: Create the loopback "remote" user with passwordless ssh
         run: |

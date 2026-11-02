@@ -325,9 +325,7 @@ the wall-clock time rather than their sum):
   from CI, and no third-party coverage service. The run uploads `coverage.out` +
   `coverage.html` as an artifact.
 - `lima-e2e` — builds `sand` and provisions a real Lima VM end to end under
-  QEMU+KVM on the hosted runner. First runs the isolated UI dropped-path
-  upload/download test, checking contents on both receiving filesystems.
-  (It does not run the fast Go suite — that's the `unit` job.) It checks all
+  QEMU+KVM on the hosted runner. (It does not run the fast Go suite — that's the `unit` job.) It checks all
   four agent executables in a clone, their absence from the base, and
   remembered choices in the next create.
 - `cmd-e2e` — the `cmd/sand` `limae2e` tests (headless create + `--recreate`
@@ -337,6 +335,9 @@ the wall-clock time rather than their sum):
   `TestE2ERemoteLimaTemplateRoundTrip`, `lifecycle` runs every other `TestE2E`
   test (via `-skip`). A new VM-booting test there lands in `lifecycle` by
   default; give it its own leg if it is slow and independent.
+  The `lifecycle` leg also runs the isolated local-Lima UI dropped-path
+  upload/download test, checking contents on both receiving filesystems; it
+  is the shortest leg, so it absorbs that test without lengthening the run.
 - `mutation` — **advisory** gremlins mutation testing over the core packages
   (`provision`, `registry`, `vm`, `lima`; `ui` is out of the initial scope).
   Non-blocking (`continue-on-error`).
