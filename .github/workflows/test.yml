@@ -105,15 +105,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # `limactl clone` copies the provisioned qcow2 (the runner's ext4 isn't
-      # copy-on-write), so base + clone roughly double the disk footprint.
-      # Reclaim the preinstalled toolchains we don't use to avoid disk-full.
-      - name: Free up runner disk
-        run: |
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
-            /usr/local/share/powershell /usr/share/swift || true
-          df -h /
-
       - name: Set up Lima (installs QEMU, configures KVM + SSH)
         id: lima
         uses: lima-vm/lima-actions/setup@55627e31b78637bf254a8b2a14da8ea7d12564e5 # v1.1.0
@@ -617,10 +608,6 @@ jobs:
   # minimal base (sand-cmde2e-base, all tool flags off) and tiny clones, and
   # assert the headless create records a managed VM and that the --recreate
   # managed-gate holds against a real registry.
-  #
-  # No "Free up runner disk" step: one minimal base plus one small clone at a
-  # time is a fraction of what lima-e2e's full-toolchain claude-ci needs, and
-  # the cleanup costs a minute or more of wall-clock time on its own.
   cmd-e2e:
     runs-on: ubuntu-26.04
     timeout-minutes: 30
@@ -695,14 +682,6 @@ jobs:
     name: remote-lima-e2e (${{ matrix.suite }})
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      # Same disk pressure as lima-e2e: the remote user builds its own base
-      # image under ~sand-remote-e2e/.lima.
-      - name: Free up runner disk
-        run: |
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
-            /usr/local/share/powershell /usr/share/swift || true
-          df -h /
 
       - name: Set up Lima (installs QEMU, configures KVM + SSH)
         id: lima
