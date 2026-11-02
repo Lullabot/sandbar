@@ -48,6 +48,7 @@ import (
 	sandbar "github.com/lullabot/sandbar"
 	"github.com/lullabot/sandbar/internal/baseimage"
 	"github.com/lullabot/sandbar/internal/lima"
+	"github.com/lullabot/sandbar/internal/profiles"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/pve"
 	"github.com/lullabot/sandbar/internal/vm"
@@ -712,7 +713,7 @@ func (p *proxmoxProvider) runPlaybookPhase(ctx context.Context, name string, cfg
 	// aptUpgrade is false: the finalize phase never asks for an apt upgrade
 	// (only the Lima flow's 30-day in-place refresh does, and
 	// there is no in-place refresh for a template).
-	vars, err := provision.BuildExtraVars(cfg, phase, hostname, false)
+	vars, err := provision.BuildExtraVars(cfg, phase, hostname, profiles.TypeProxmox, false)
 	if err != nil {
 		return fmt.Errorf("proxmox: building extra-vars (%s phase): %w", phase, err)
 	}

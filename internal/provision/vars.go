@@ -3,6 +3,7 @@ package provision
 import (
 	"fmt"
 
+	"github.com/lullabot/sandbar/internal/profiles"
 	"github.com/lullabot/sandbar/internal/vm"
 	"gopkg.in/yaml.v3"
 )
@@ -29,7 +30,13 @@ type varItem struct {
 // aptUpgrade=true from ensureBaseStopped's 30-day age check) — never for the
 // cold base build and never for a clone's finalize phase, so every clone from a
 // fresh base skips the upgrade entirely.
-func BuildExtraVars(cfg vm.CreateConfig, phase, hostname string, aptUpgrade bool) ([]byte, error) {
+//
+// backend is the connection-profile type the VM runs on. It reaches the guest
+// (with the VM's name) only so the agent-context role can tell an agent facts
+// it cannot discover from inside: the name host-side `sand` commands take
+// (the hostname may be customised away from it) and which answer applies to
+// reaching a guest port from the workstation.
+func BuildExtraVars(cfg vm.CreateConfig, phase, hostname string, backend profiles.Type, aptUpgrade bool) ([]byte, error) {
 	items := []varItem{
 		{"user_name", cfg.User},
 		{"base_hostname", hostname},
@@ -102,6 +109,8 @@ func BuildExtraVars(cfg vm.CreateConfig, phase, hostname string, aptUpgrade bool
 			varItem{"toolset_pi", cfg.WithPi},
 			varItem{"user_git_user_name", cfg.GitName},
 			varItem{"user_git_user_email", cfg.GitEmail},
+			varItem{"sandbar_vm_name", cfg.Name},
+			varItem{"sandbar_profile_type", string(backend)},
 		)
 		if cfg.CloneURL != "" {
 			forge, err := vm.ResolveCloneForge(cfg.CloneURL, cfg.CloneForge)

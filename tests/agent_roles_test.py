@@ -54,7 +54,7 @@ class AgentRolesTest(unittest.TestCase):
                     selections.extend({role} for role in AGENTS)
                 for selected in selections:
                     with self.subTest(phase=phase, selected=sorted(selected)):
-                        for role in (*AGENTS, "agent-cleanup", "agent-clipboard"):
+                        for role in (*AGENTS, "agent-context", "agent-cleanup", "agent-clipboard"):
                             (directory / role).unlink(missing_ok=True)
                         variables = {"provision_phase": phase, **{
                             "toolset_" + ("claude" if role == "claude-code" else role): role in selected
@@ -62,6 +62,7 @@ class AgentRolesTest(unittest.TestCase):
                         self.run_play(directory, play, variables)
                         for role in AGENTS:
                             self.assertEqual((directory / role).exists(), role in selected and phase != "base", role)
+                        self.assertEqual((directory / "agent-context").exists(), bool(selected) and phase != "base")
                         self.assertEqual((directory / "agent-cleanup").exists(), phase == "base")
                         self.assertEqual((directory / "agent-clipboard").exists(), phase != "finalize")
 
