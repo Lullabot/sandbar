@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/paste"
 	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
@@ -113,7 +112,7 @@ exits non-zero.
 func pasteImageTarget(l vmLookup, name string) (vm.VM, error) {
 	found, err := l.Get(name)
 	if err != nil {
-		if errors.Is(err, lima.ErrNoSuchInstance) {
+		if errors.Is(err, vm.ErrNotFound) {
 			return vm.VM{}, fmt.Errorf("sand paste-image: no VM named %q (run 'sand' to list instances)", name)
 		}
 		return vm.VM{}, fmt.Errorf("sand paste-image: %w", err)

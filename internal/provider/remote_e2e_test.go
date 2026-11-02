@@ -496,8 +496,8 @@ func TestE2ERemoteLimaTemplateRoundTrip(t *testing.T) {
 	if err := remote.DeleteTemplate(ctx, templateInstance, &delLog); err != nil {
 		t.Fatalf("DeleteTemplate: %v\n%s", err, delLog.String())
 	}
-	if _, err := remote.Get(templateInstance); !errors.Is(err, lima.ErrNoSuchInstance) {
-		t.Fatalf("remote Get(%q) after DeleteTemplate = %v, want lima.ErrNoSuchInstance", templateInstance, err)
+	if _, err := remote.Get(templateInstance); !errors.Is(err, vm.ErrNotFound) {
+		t.Fatalf("remote Get(%q) after DeleteTemplate = %v, want vm.ErrNotFound", templateInstance, err)
 	}
 	if _, err := remote.HostFiles().Stat(remoteDir); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("template instance dir %q still present on the remote host after DeleteTemplate (err=%v)", remoteDir, err)

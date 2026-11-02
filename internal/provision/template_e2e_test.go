@@ -183,8 +183,8 @@ func TestTemplateRoundTrip(t *testing.T) {
 	if err := prov.DeleteTemplate(ctx, templateInstance, &delLog); err != nil {
 		t.Fatalf("DeleteTemplate: %v\n%s", err, delLog.String())
 	}
-	if _, err := cli.Get(templateInstance); !errors.Is(err, lima.ErrNoSuchInstance) {
-		t.Fatalf("Get(%q) after DeleteTemplate = %v, want lima.ErrNoSuchInstance", templateInstance, err)
+	if _, err := cli.Get(templateInstance); !errors.Is(err, vm.ErrNotFound) {
+		t.Fatalf("Get(%q) after DeleteTemplate = %v, want vm.ErrNotFound", templateInstance, err)
 	}
 	dir := filepath.Join(lima.LocalFiles().LimaHome(), templateInstance)
 	if _, err := lima.LocalFiles().Stat(dir); !errors.Is(err, fs.ErrNotExist) {

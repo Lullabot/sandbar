@@ -742,7 +742,7 @@ func (p *Provisioner) prepareBaseAndClone(ctx context.Context, cfg vm.CreateConf
 // requireTemplate fails unless the named golden-template instance exists.
 func (p *Provisioner) requireTemplate(name string) error {
 	if _, err := p.Lima.Get(name); err != nil {
-		if errors.Is(err, lima.ErrNoSuchInstance) {
+		if errors.Is(err, vm.ErrNotFound) {
 			return fmt.Errorf("template %q not found: %w", name, err)
 		}
 		return err
