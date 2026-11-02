@@ -48,6 +48,13 @@
       when:
         - toolset_pi | default(false) | bool
         - provision_phase | default('full') != 'base'
+    # Installs the agents selected above, all at once, after their roles have
+    # written every configuration file (see roles/agent-install for why that
+    # ordering matters).
+    - role: agent-install
+      when:
+        - provision_phase | default('full') != 'base'
+        - (toolset_claude | default(false) | bool) or (toolset_codex | default(false) | bool) or (toolset_opencode | default(false) | bool) or (toolset_pi | default(false) | bool)
     - role: agent-context
       when:
         - provision_phase | default('full') != 'base'

@@ -70,7 +70,7 @@ values:
 | Phase | What runs | When |
 |---|---|---|
 | `base` | Shared setup: `base`, `user`, `agent-clipboard`, `agent-cleanup`, (conditionally) `samba`, `dev-tools` | Building or maintaining the shared base before cloning; clipboard support is common to every agent and cleanup removes legacy agent installs |
-| `finalize` | Per-VM setup: `base`, `user`, selected agent roles, `agent-context`, `project` | Against each clone; selected agents and their global context install here |
+| `finalize` | Per-VM setup: `base`, `user`, selected agent roles, `agent-install`, `agent-context`, `project` | Against each clone; selected agents and their global context install here |
 | `full` | Everything, in one pass | The default when the phase isn't otherwise specified |
 
 This split is what lets `sand` build one expensive base image and clone it
@@ -80,7 +80,7 @@ identity-specific work against each clone.
 ## Roles
 
 `roles/` contains `base`, `user`, `agent-clipboard`, `agent-cleanup`, `samba`, `dev-tools`,
-`mkcert-ca`, `claude-code`, `codex`, `opencode`, `pi`, `agent-context`,
+`mkcert-ca`, `claude-code`, `codex`, `opencode`, `pi`, `agent-install`, `agent-context`,
 `self-review`, and `project`.
 `site.yml` runs them in that order, gated by
 `provision_phase` as above. `samba` is worth calling out specifically:
@@ -88,6 +88,18 @@ identity-specific work against each clone.
 run (files move with `limactl copy` or `scp` instead of a Samba share),
 so the role exists in the tree and is exercised by CI's syntax check, but it
 does not execute on the `sand` path.
+
+The four agent roles write configuration only. `agent-install` runs after
+them, when at least one agent is selected, and starts every selected
+installer at once as an Ansible async job, then waits on each under its own
+task name (`Install Claude Code using the official installer`, and so on), so
+finalize costs the slowest installer rather than all of them in turn. OpenCode
+and Pi share one `npm install`, because two npm processes writing one prefix
+are not safe. Running after the configuration roles is deliberate: nothing
+Ansible manages edits `~/.bashrc` or an agent's settings while an installer
+runs, and Claude Code's create-only settings are seeded before `claude
+install` can create them. Each wait gives up after `agent_install_timeout`
+seconds (900 by default) rather than blocking forever.
 
 `agent-context` runs after the selected agent roles, during `full` or
 `finalize` only when at least one of Claude Code, Codex, Pi, or OpenCode is

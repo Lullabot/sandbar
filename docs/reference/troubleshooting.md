@@ -44,8 +44,9 @@ It always rebuilds, regardless of the staleness check.
 ## Proxmox: provisioning hangs at "Install Claude Code"
 
 **Symptom:** on the Proxmox backend, provisioning a VM runs the playbook
-fine until the `claude-code : Install Claude Code using the official installer`
-task, where it hangs indefinitely with no output. On the guest, the
+fine until the `agent-install : Install Claude Code using the official installer`
+task, where it waits with no output until the installer's timeout
+(`agent_install_timeout`, 15 minutes by default) fails it. On the guest, the
 `claude … install` process sits pegged at ~100% CPU (state `R`) with no network
 sockets and making almost no syscalls.
 

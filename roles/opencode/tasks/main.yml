@@ -8,17 +8,9 @@
   ansible.builtin.set_fact:
     user_home: "{{ ansible_facts.getent_passwd[user_name][4] }}"
 
-# Official npm distribution from https://opencode.ai/download; Node.js is
-# already in the base image. A separate
-# user-local prefix keeps the executable outside the settings restored on reset.
-- name: Install the latest OpenCode release
-  ansible.builtin.command:
-    argv: [npm, install, --global, --prefix, "{{ user_home }}/.local", "@opencode/cli@latest"]
-  become: true
-  become_user: "{{ user_name }}"
-  environment:
-    HOME: "{{ user_home }}"
-
+# The OpenCode binary itself is installed by roles/agent-install, which runs
+# after every agent role so the installers can run concurrently without racing
+# this role's edits to ~/.bashrc and the agent's own configuration.
 - name: Add ~/.local/bin to PATH in ~/.bashrc
   ansible.builtin.lineinfile:
     path: "{{ user_home }}/.bashrc"
