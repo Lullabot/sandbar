@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 
+	"github.com/lullabot/sandbar/internal/guestsh"
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/vm"
@@ -160,7 +161,7 @@ func (p *limaProvider) AttachArgv(v vm.VM) []string {
 
 // AttachArgvControl is AttachArgv in tmux control mode. See Provider.AttachArgvControl.
 func (p *limaProvider) AttachArgvControl(v vm.VM) []string {
-	return lima.AttachArgvMode(v.Name, lima.GuestHome(v.Dir), os.Getenv("COLORTERM"), lima.AttachControl)
+	return lima.AttachArgvMode(v.Name, lima.GuestHome(v.Dir), os.Getenv("COLORTERM"), guestsh.AttachControl)
 }
 
 // RunArgv runs one interactive command in a guest directory. See Provider.RunArgv.

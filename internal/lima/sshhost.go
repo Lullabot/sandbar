@@ -39,6 +39,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/lullabot/sandbar/internal/guestsh"
 )
 
 // SSHConfig is the connection identity for a remote Lima host. It is secret-free:
@@ -1198,24 +1200,24 @@ func splitGuestEndpoint(s string) (instance, path string, isGuest bool) {
 // --- interactive attach across the hop ------------------------------------------
 
 // AttachArgv wraps the local attach argv in `ssh -t <host> …`, keeping the guest
-// tmux expression byte-for-byte identical (it reuses AttachArgv, so guestAttachExpr
-// is never retyped) — the single most destructive thing to get wrong (see
-// attach.go). Each element of the limactl argv is shell-quoted for the remote
+// tmux expression byte-for-byte identical (it reuses AttachArgv, so the guestsh
+// expression is never retyped) — the single most destructive thing to get
+// wrong (see internal/guestsh). Each element of the limactl argv is shell-quoted for the remote
 // shell ssh re-parses the joined command through; -t allocates the PTY the nested
 // tmux client needs (ssh -t -> limactl shell -> guest bash -> tmux). --workdir
 // still precedes the instance name, because AttachArgv put it there and quoting
 // preserves order. The caller execs the result against its real TTY.
 func (h *SSHHost) AttachArgv(name, guestHome, colorterm string) []string {
-	return h.AttachArgvMode(name, guestHome, colorterm, AttachFullScreen)
+	return h.AttachArgvMode(name, guestHome, colorterm, guestsh.AttachFullScreen)
 }
 
 // AttachArgvMode is AttachArgv with the tmux client mode chosen explicitly.
 //
 // Note what control mode means over ssh: the DCS handshake rides the ssh
 // connection to the LOCAL terminal, which is fine — ssh is a transparent byte
-// pipe, unlike a tmux pane (see AttachControl). So `sand shell --cc` works
+// pipe, unlike a tmux pane (see guestsh.AttachControl). So `sand shell --cc` works
 // against a remote-profile VM exactly as it does against a local one.
-func (h *SSHHost) AttachArgvMode(name, guestHome, colorterm string, mode AttachMode) []string {
+func (h *SSHHost) AttachArgvMode(name, guestHome, colorterm string, mode guestsh.AttachMode) []string {
 	// The `ssh -t <target> <shell-quoted local argv>` construction IS sshCommand
 	// with tty=true; reuse it rather than re-spelling the quoting loop the file's
 	// header calls load-bearing.

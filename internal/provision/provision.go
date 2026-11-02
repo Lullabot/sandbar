@@ -648,8 +648,8 @@ func (p *Provisioner) needsReboot(ctx context.Context, name string) bool {
 }
 
 // hasLiveTmux reports whether the guest's persistent `main` tmux session
-// (internal/lima/attach.go) is up. `=main` is an exact-match target, matching
-// guestAttachExpr's own care to never match a same-prefixed session.
+// (internal/guestsh) is up. `=main` is an exact-match target, matching
+// guestsh's own care to never match a same-prefixed session.
 func (p *Provisioner) hasLiveTmux(ctx context.Context, name string) bool {
 	var buf bytes.Buffer
 	err := p.Lima.Shell(ctx, name, nil, &buf, "tmux", "has-session", "-t", "=main")
@@ -1398,7 +1398,7 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 	// through the CLI/TUI paths that always operate on a freshly (re)created
 	// name). A stop+start of a RUNNING VM destroys the guest's persistent `main`
 	// tmux session and everything running in it — the precise disaster
-	// internal/lima/attach.go's lingering session exists to prevent — so a live
+	// internal/guestsh's lingering session exists to prevent — so a live
 	// session is never bounced through silently.
 	//
 	// We warn and proceed rather than refuse: refusing would leave Reset's own

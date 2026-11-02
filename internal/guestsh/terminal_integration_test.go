@@ -1,4 +1,4 @@
-package lima
+package guestsh
 
 import (
 	"fmt"

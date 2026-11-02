@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/lullabot/sandbar/internal/baseimage"
-	"github.com/lullabot/sandbar/internal/lima"
+	"github.com/lullabot/sandbar/internal/guestsh"
 	"github.com/lullabot/sandbar/internal/pve"
 	"github.com/lullabot/sandbar/internal/vm"
 )
@@ -1275,7 +1275,7 @@ func TestProxmoxAttachArgvWrapsTheGuestTmuxExpression(t *testing.T) {
 	if idx < 0 {
 		t.Fatalf("AttachArgv missing the guest target: %v", got)
 	}
-	want := lima.GuestAttachArgv("truecolor")
+	want := guestsh.AttachArgv("truecolor")
 	if tail := got[idx+1:]; len(tail) != 3 || tail[0] != want[0] || tail[1] != want[1] {
 		t.Fatalf("AttachArgv tail = %v; want %v", tail, want)
 	}

@@ -15,6 +15,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/lullabot/sandbar/internal/guestsh"
 )
 
 // These tests are the executable specification of the SSH host-access
@@ -647,8 +649,8 @@ func TestSSHAttachArgvPreservesGuestExpr(t *testing.T) {
 	// The guest expression survives BYTE-FOR-BYTE (only shell-quoted for the remote
 	// shell), and destroy-unattached still never touches `main`.
 	last := got[len(got)-1]
-	if !strings.Contains(last, guestAttachExpr("", "")) {
-		t.Fatalf("the guest tmux expression was not preserved byte-for-byte in the remote attach argv.\nlast argv element:\n\t%s\nwant it to contain:\n\t%s", last, guestAttachExpr("", ""))
+	if !strings.Contains(last, guestsh.AttachArgv("")[2]) {
+		t.Fatalf("the guest tmux expression was not preserved byte-for-byte in the remote attach argv.\nlast argv element:\n\t%s\nwant it to contain:\n\t%s", last, guestsh.AttachArgv("")[2])
 	}
 
 	// The remote argv's tail (after the `ssh -t <mux flags> target` prefix) must

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lullabot/sandbar/internal/guestsh"
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/vm"
 )
@@ -41,7 +42,7 @@ func (s stubVMLister) AttachArgv(v vm.VM) []string {
 // AttachArgvControl mirrors AttachArgv in tmux control mode, the same way the
 // real providers do.
 func (s stubVMLister) AttachArgvControl(v vm.VM) []string {
-	return lima.AttachArgvMode(v.Name, lima.GuestHome(v.Dir), "", lima.AttachControl)
+	return lima.AttachArgvMode(v.Name, lima.GuestHome(v.Dir), "", guestsh.AttachControl)
 }
 
 // TestShellAttachArgvNotRunning verifies the central refusal: a VM that

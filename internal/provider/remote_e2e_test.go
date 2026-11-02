@@ -248,7 +248,7 @@ func TestE2ERemoteLima(t *testing.T) {
 		}
 	}
 
-	// --- attach argv: ssh -t ... limactl shell ... bash -c <guestAttachExpr>,
+	// --- attach argv: ssh -t ... limactl shell ... bash -c <guestsh expression>,
 	// and exec-ready -------------------------------------------------------
 	v, err := remote.Get(name)
 	if err != nil {
@@ -512,7 +512,7 @@ func TestE2ERemoteLimaTemplateRoundTrip(t *testing.T) {
 // kills the client session (the same effect as closing that terminal), and then
 // asks the guest directly (over a PLAIN, non-interactive remote.ShellOut, not a
 // second nested attach) whether `main` is still there — the headline claim this
-// whole feature exists for (see internal/lima/attach.go's guestAttachExpr).
+// whole feature exists for (see internal/guestsh's guestAttachExpr).
 func assertGuestMainSurvivesDetach(t *testing.T, remote provider.Provider, vmName string, argv []string) {
 	t.Helper()
 	sock := t.TempDir() + "/sand-remote-e2e.sock"
