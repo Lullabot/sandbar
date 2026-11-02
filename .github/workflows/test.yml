@@ -101,7 +101,7 @@ jobs:
 
   lima-e2e:
     runs-on: ubuntu-26.04
-    timeout-minutes: 60 # +15 for the cmd/sand limae2e create/recreate tests
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -149,6 +149,20 @@ jobs:
           restore-keys: |
             sand-apt-
 
+      # The published base image (~1 GB qcow2) that every create starts from,
+      # in the store baseimage.Acquire reads before downloading. The key is the
+      # generated manifest, which pins the release and the SHA-256, so a new
+      # base image release misses and saves a fresh copy. There are no
+      # restore-keys: an older release's image sits under a different version
+      # directory and could never satisfy a newer pin. A restored file is not
+      # trusted blindly — Acquire re-verifies the digest on a hit and downloads
+      # again if it does not match.
+      - name: Cache the published base image
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.lima/_sand/images
+          key: sand-base-image-${{ hashFiles('internal/baseimage/manifest_generated.go') }}
+
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
@@ -160,15 +174,6 @@ jobs:
       # Check both receiving filesystems after dropped-path uploads/downloads.
       - name: Dropped-path file transfers end-to-end
         run: LIMA_E2E=1 go test -tags limae2e -timeout 15m -run '^TestE2EDroppedTransferPathsMoveContents$' ./internal/ui/
-
-      # The cmd/sand limae2e tests build their own minimal base
-      # (sand-cmde2e-base, all tool flags off) and tear it and their tiny
-      # clones down in TestMain/Cleanup, so they run FIRST — on maximum free
-      # disk — and reclaim everything before the heavy claude-ci provision
-      # below. They assert the headless create records a managed VM and that
-      # the --recreate managed-gate holds against a real registry.
-      - name: cmd/sand end-to-end (headless create + --recreate gate)
-        run: LIMA_E2E=1 go test -tags limae2e -timeout 30m -run E2E ./cmd/sand/
 
       # Run the actual entrypoint, non-interactively, forcing a true
       # from-scratch base build with --rebuild. Base reuse/re-apply is the
@@ -611,6 +616,59 @@ jobs:
           tail -n 200 cold.log || true
           tail -n 200 warm.log || true
 
+  # The cmd/sand limae2e tests, split out of lima-e2e so they run beside it
+  # instead of ahead of it: they share nothing with that job's VMs, and at
+  # ~4.5 minutes they were its largest serial block. They build their own
+  # minimal base (sand-cmde2e-base, all tool flags off) and tiny clones, and
+  # assert the headless create records a managed VM and that the --recreate
+  # managed-gate holds against a real registry.
+  #
+  # No "Free up runner disk" step: one minimal base plus one small clone at a
+  # time is a fraction of what lima-e2e's full-toolchain claude-ci needs, and
+  # the cleanup costs a minute or more of wall-clock time on its own.
+  cmd-e2e:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Lima (installs QEMU, configures KVM + SSH)
+        id: lima
+        uses: lima-vm/lima-actions/setup@55627e31b78637bf254a8b2a14da8ea7d12564e5 # v1.1.0
+
+      - name: Cache Lima image downloads
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/lima
+          key: lima-${{ steps.lima.outputs.version }}
+          restore-keys: |
+            lima-
+
+      # See lima-e2e: the same key, so whichever job finishes first saves it
+      # and the other's save is a harmless "already exists" notice.
+      - name: Cache apt packages fetched during base builds
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/sand/apt-cache
+          key: sand-apt-${{ hashFiles('site.yml', 'roles/**', 'group_vars/**') }}
+          restore-keys: |
+            sand-apt-
+
+      - name: Cache the published base image
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.lima/_sand/images
+          key: sand-base-image-${{ hashFiles('internal/baseimage/manifest_generated.go') }}
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      # -v so each test's duration is in the log: the step's total alone does
+      # not say which of the create/recreate cases is worth making cheaper.
+      - name: cmd/sand end-to-end (headless create + --recreate gate)
+        run: LIMA_E2E=1 go test -tags limae2e -timeout 25m -run E2E -v ./cmd/sand/
+
   # Remote-Lima-over-SSH, end to end, on a single runner: the "remote" is this
   # same machine reached over REAL ssh as a SECOND local user (sand-remote-e2e).
   # That second account owns its own $HOME and therefore its own ~/.lima — the
@@ -620,9 +678,26 @@ jobs:
   # transport for real — ssh argv + quoting, remote limactl on the
   # non-interactive PATH, HostFiles over ssh, remote base build — without
   # needing a second machine.
+  #
+  # Two matrix legs, because the suite's two VM-booting tests are independent
+  # (each builds its own base under its own name) and together took ~5.5
+  # minutes run one after the other. `template` runs only the golden-template
+  # round trip; `lifecycle` runs everything else, including the sub-second
+  # forward and provenance tests.
   remote-lima-e2e:
     runs-on: ubuntu-26.04
-    timeout-minutes: 60
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - suite: lifecycle
+            run: TestE2E
+            skip: ^TestE2ERemoteLimaTemplateRoundTrip$
+          - suite: template
+            run: ^TestE2ERemoteLimaTemplateRoundTrip$
+            skip: ""
+    name: remote-lima-e2e (${{ matrix.suite }})
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -643,6 +718,15 @@ jobs:
         with:
           path: ~/.cache/lima
           key: lima-${{ steps.lima.outputs.version }}
+
+      # Restore only: the published image lands in the second user's Lima
+      # home, which this runner user cannot save from. lima-e2e and cmd-e2e
+      # populate the same key.
+      - name: Restore the cached published base image
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.lima/_sand/images
+          key: sand-base-image-${{ hashFiles('internal/baseimage/manifest_generated.go') }}
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -701,14 +785,22 @@ jobs:
           [ "$perms" = "600" ] || { echo "::error::Lima user key has mode $perms, want 600"; exit 1; }
 
       # The remote user downloads its own Debian image into its own
-      # ~/.cache/lima; seed it from the runner user's restored cache so a warm
-      # cache saves the download on both sides.
-      - name: Share the cached image download with the remote user
+      # ~/.cache/lima, and its own published base image into its own
+      # ~/.lima/_sand/images; seed both from the runner user's restored caches
+      # so a warm cache saves the downloads on both sides.
+      - name: Share the cached image downloads with the remote user
         run: |
           if [ -d "$HOME/.cache/lima" ]; then
             sudo mkdir -p /home/sand-remote-e2e/.cache
             sudo cp -a "$HOME/.cache/lima" /home/sand-remote-e2e/.cache/lima
             sudo chown -R sand-remote-e2e:sand-remote-e2e /home/sand-remote-e2e/.cache
+          fi
+          if [ -d "$HOME/.lima/_sand/images" ]; then
+            # As the remote user, so ~/.lima keeps the umask-077 mode the user
+            # setup step gave it (install -d would reset an existing dir's mode).
+            sudo -u sand-remote-e2e -H bash -c 'umask 077; mkdir -p ~/.lima/_sand'
+            sudo cp -a "$HOME/.lima/_sand/images" /home/sand-remote-e2e/.lima/_sand/images
+            sudo chown -R sand-remote-e2e:sand-remote-e2e /home/sand-remote-e2e/.lima/_sand
           fi
 
       # The suite skips cleanly unless LIMA_REMOTE_E2E=1 and a reachable
@@ -738,7 +830,7 @@ jobs:
           LIMA_REMOTE_E2E_HOST=localhost \
           LIMA_REMOTE_E2E_USER=sand-remote-e2e \
           LIMA_REMOTE_E2E_IDENTITY="$HOME/.ssh/remote_e2e" \
-            go test -tags limae2e -timeout 45m -run TestE2E -v ./internal/provider/ || rc=$?
+            go test -tags limae2e -timeout 40m -run '${{ matrix.run }}' -skip '${{ matrix.skip }}' -v ./internal/provider/ || rc=$?
           kill "$SNAP_PID" 2>/dev/null || true
           exit "$rc"
 
