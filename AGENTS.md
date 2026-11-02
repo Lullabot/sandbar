@@ -349,6 +349,11 @@ the wall-clock time rather than their sum):
 The VM jobs cache the published base image (`~/.lima/_sand/images`) keyed on
 `internal/baseimage/manifest_generated.go`. `lima-e2e` and `cmd-e2e` save it;
 the remote legs only restore it and copy it into the second user's Lima home.
+Because a PR can read only its own caches and the default branch's, and
+`test.yml` does not run on pushes to main, `.github/workflows/base-image-cache.yml`
+seeds that key from main: on a push that changes the manifest, daily (a
+`lookup-only` check, so a hit transfers nothing), and on demand. Keep its cache
+`path` and key expression byte-identical to `test.yml`'s.
 
 **Triggers:** `pull_request` (including release PRs), `workflow_dispatch`, and
 a weekly `schedule`. Main pushes run release automation without repeating the

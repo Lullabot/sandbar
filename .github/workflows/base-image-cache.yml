@@ -1,0 +1,81 @@
+# Seed the published-base-image cache that test.yml's VM jobs restore, from
+# the default branch, so every pull request can read it.
+#
+# GitHub scopes a cache to the ref that saved it: a PR can read caches saved by
+# its own merge ref or by the default branch, never another PR's. test.yml runs
+# on pull_request (and a weekly schedule), not on pushes to main, so without
+# this workflow each new PR's first run would download the ~1 GB image cold and
+# save a copy only it could use.
+#
+# The key is the content of the pinned manifest — the same hashFiles() test.yml
+# computes — so a manifest bump merged to main seeds the new image here before
+# the next PR needs it. The path must stay byte-identical to test.yml's
+# (`~/.lima/_sand/images`): the path is part of the cache version, and a
+# different spelling is a different cache.
+name: Base image cache
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - internal/baseimage/manifest_generated.go
+      - .github/workflows/base-image-cache.yml
+  workflow_dispatch:
+  # A cache unused for 7 days is evicted. PR runs that hit it keep it alive;
+  # this lookup re-seeds it after a quiet spell. A hit costs one API lookup,
+  # not a 1 GB transfer (lookup-only).
+  schedule:
+    - cron: "30 5 * * *" # daily 05:30 UTC
+
+permissions:
+  contents: read
+
+concurrency:
+  group: base-image-cache
+  cancel-in-progress: false
+
+jobs:
+  seed:
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Look up the cache
+        id: lookup
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.lima/_sand/images
+          key: sand-base-image-${{ hashFiles('internal/baseimage/manifest_generated.go') }}
+          lookup-only: true
+
+      # Lay the file out exactly where baseimage.Acquire looks
+      # (<LIMA_HOME>/_sand/images/<version>/<filename>), so a restored cache is a
+      # hit there. The runners are amd64, so only that entry is fetched. The
+      # manifest is generated with a fixed layout; if parsing ever comes back
+      # empty, fail rather than cache something Acquire would not find.
+      - name: Download and verify the pinned amd64 image
+        if: steps.lookup.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          m=internal/baseimage/manifest_generated.go
+          version=$(sed -n 's/.*Manifest{Version: "\([^"]*\)".*/\1/p' "$m")
+          line=$(grep '"amd64":' "$m")
+          url=$(sed -n 's/.*URL: "\([^"]*\)".*/\1/p' <<<"$line")
+          file=$(sed -n 's/.*Filename: "\([^"]*\)".*/\1/p' <<<"$line")
+          sha=$(sed -n 's/.*SHA256: "\([0-9a-f]\{64\}\)".*/\1/p' <<<"$line")
+          for v in version url file sha; do
+            [ -n "${!v}" ] || { echo "::error::could not read $v from $m"; exit 1; }
+          done
+          dir="$HOME/.lima/_sand/images/$version"
+          mkdir -p "$dir"
+          curl -fsSL --retry 3 -o "$dir/$file" "$url"
+          echo "$sha  $dir/$file" | sha256sum -c -
+          ls -l "$dir"
+
+      - name: Save the cache
+        if: steps.lookup.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.lima/_sand/images
+          key: sand-base-image-${{ hashFiles('internal/baseimage/manifest_generated.go') }}
