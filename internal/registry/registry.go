@@ -208,9 +208,9 @@ type Template struct {
 	Source string
 	// CreatedAt is when the template was saved.
 	CreatedAt time.Time
-	// PlaybookVersion is the source VM's base image version stamp at capture
-	// time (see provision.PlaybookVersion), so a later clone can tell whether
-	// the template predates the current playbook.
+	// PlaybookVersion is the source VM's recorded base revision at capture
+	// time. Its format belongs to the provider (published image, template
+	// preparation or legacy playbook hash); empty means unknown history.
 	PlaybookVersion string
 	// ToolsetKey is Config's rendered tool-set selection at capture time (see
 	// vm.CreateConfig.ToolsetKey), stored alongside Config for the same reason

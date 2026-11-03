@@ -234,6 +234,13 @@ all enabled profiles. Commands acting on an existing VM
 (`reset`, `shell`, `land`, `paste-image`) use `resolveVMProfile` to find its
 owning profile through the marker, registry, then live listing.
 
+Template list/form freshness compares `registry.Template.PlaybookVersion`
+(the source VM's recorded base revision, copied at snapshot time) with
+`RevisionProvider.DesiredBaseRevision(t.Config)` through
+`provider.CheckUpdates`; comparing it with the current playbook hash
+mislabels published images. A template whose source has no recorded
+revision is unknown, not current.
+
 **A reset keeps the target VM's identity and project.** Its name, base image,
 clone URL, and Git service come from its recorded configuration. The TUI locks
 the name, repository, and Git service rows (`fieldLocked` in `internal/ui/form.go`); `sandbar reset`
