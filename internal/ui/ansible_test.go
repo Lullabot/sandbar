@@ -8,7 +8,7 @@ import (
 )
 
 // The fixtures are REAL, CAPTURED output — contiguous slices of actual
-// `sand create` runs against real Lima (limactl 2.1.3, Debian 13 guest),
+// `sandbar create` runs against real Lima (limactl 2.1.3, Debian 13 guest),
 // verbatim down to limactl's hostagent chatter: the provisioner's own step
 // banners, the guest's SAND_ANSIBLE_TASK_TOTAL marker, and the Ansible run
 // through PLAY RECAP. Writing this parser against imagined output is how you
@@ -171,7 +171,7 @@ func TestAnsibleParserAcrossReadBoundaries(t *testing.T) {
 
 // The parser's own grammar, on the shapes the real output showed: a role-less
 // task, a role task, a handler (which names the work but does not advance the
-// count), sand's phase banners (the only signal during the minutes before
+// count), sandbar's phase banners (the only signal during the minutes before
 // Ansible starts), and the marker that resets the counter between the two
 // playbook runs a single create streams down one pipe.
 func TestAnsibleParserGrammar(t *testing.T) {
@@ -308,12 +308,12 @@ func TestAnsibleParserStampsAndClearsTheTaskTimer(t *testing.T) {
 		t.Fatalf("a second run marker left the previous run's stamp: %v", p.progress.TaskStarted)
 	}
 
-	// So does one of sand's own phase banners, which supersedes Ansible
+	// So does one of sandbar's own phase banners, which supersedes Ansible
 	// entirely and may introduce a phase that runs no playbook at all.
 	p.feed("TASK [base : Set hostname] ****\n")
 	p.feed("==> Stopping base image \"sandbar-base\"…\n")
 	if !p.progress.TaskStarted.IsZero() {
-		t.Fatalf("a sand phase banner left a task stamp standing: %v", p.progress.TaskStarted)
+		t.Fatalf("a sandbar phase banner left a task stamp standing: %v", p.progress.TaskStarted)
 	}
 }
 

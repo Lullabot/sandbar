@@ -2025,12 +2025,12 @@ func TestLandingPublishCollectsAgainstTheCanonicalBaseBranch(t *testing.T) {
 // opens by naming SHAs and closes with the instruction to rebase, so a
 // single unwrapped line showed the part the user can do nothing about and
 // lost the part they can. Nothing else in this pane has that shape — a
-// clipped change set is one `sand publish` away from being read in full,
+// clipped change set is one `sandbar publish` away from being read in full,
 // while this text is the only account of why nothing happened.
 func TestLandingPublishErrorWraps(t *testing.T) {
 	m, v, fakeDO := landingPublishForkFixture(t)
 	longErr := "drupalorg: the range to publish contains 1 merge commit(s) " +
-		"(36c84f849059d55300a7f1ae082df37b02bd4218), which sand cannot publish. " +
+		"(36c84f849059d55300a7f1ae082df37b02bd4218), which sandbar cannot publish. " +
 		"Rebase this branch on the upstream branch instead of merging, and then try publishing again"
 	fakeDO.baseTipErr = errors.New(longErr)
 

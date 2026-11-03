@@ -170,7 +170,7 @@ const (
 
 	// minBudget is the floor every derived budget is clamped to, so classify
 	// always returns a renderable mode — there is no terminal size at which
-	// sand shows a "terminal too small" wall.
+	// sandbar shows a "terminal too small" wall.
 	minBudget = 1
 
 	// fullHeaderMinHeight/messagesMinHeight are the terminal-height

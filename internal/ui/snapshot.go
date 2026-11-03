@@ -88,7 +88,7 @@ func (m model) updateSnapshotPrompt(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 // launchSnapshot validates the typed name, refuses an obvious collision (an
 // existing template/VM/base already answering to it — mirroring the
-// headless `sand template snapshot` command's own guard), then starts the
+// headless `sandbar template snapshot` command's own guard), then starts the
 // job through the shared beginStream plumbing. On success it stashes this
 // job's template metadata in m.pendingSnapshots so the provisionDoneMsg
 // handler (model.go) can build and persist the registry.Template once the

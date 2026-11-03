@@ -63,7 +63,7 @@ var AgentStatePaths = []string{
 //
 // ~/.ssh/authorized_keys is excluded because restoring it would hand the REBUILT
 // VM the OLD VM's key set — and ssh into the rebuilt VM is how the finalize
-// playbook, the heartbeat and every `sand shell` get in. The two files are all
+// playbook, the heartbeat and every `sandbar shell` get in. The two files are all
 // but always identical (Lima's per-host key is shared by every instance in a
 // Lima home), so restoring it buys nothing, while the case where they differ is
 // a VM nobody can log into, discovered halfway through its own reset. A

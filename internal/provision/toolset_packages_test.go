@@ -80,7 +80,7 @@ func resolveBasePackages(t *testing.T, extraVars map[string]string) []string {
 
 // TestBaseToolsetPackages_DefaultSelectionMatchesToday is the backwards-
 // compatibility acceptance criterion: with no tool-set
-// extra-vars supplied (mirroring an unconfigured `sand create`, whose
+// extra-vars supplied (mirroring an unconfigured `sandbar create`, whose
 // vm.DefaultCreateConfig() selects all three tools), the packages Ansible
 // actually resolves for the base phase must still contain ddev, golang, and
 // default-jdk-headless — exactly what base_packages installed

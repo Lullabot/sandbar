@@ -63,7 +63,7 @@ func TestMarkerScanScriptRoundTrip(t *testing.T) {
 		t.Fatalf("write stray: %v", err)
 	}
 
-	cmd := exec.Command("sh", "-c", markerScanScript, "sand", home, MarkerFilename)
+	cmd := exec.Command("sh", "-c", markerScanScript, "sandbar", home, MarkerFilename)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

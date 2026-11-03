@@ -1,6 +1,6 @@
 # Releases
 
-How `sand` releases are cut and published.
+How `sandbar` releases are cut and published.
 
 ## The pipeline
 
@@ -16,7 +16,7 @@ jobs, `release-please` then `goreleaser`:
    release PR creates the `vX.Y.Z` tag and a **draft** GitHub Release
    rather than a published one.
 2. **GoReleaser** (`.goreleaser.yaml`) then adopts that draft
-   (`use_existing_draft: true`), cross-compiles `sand` for
+   (`use_existing_draft: true`), cross-compiles `sandbar` for
    darwin+linux × amd64+arm64 with `CGO_ENABLED=0`, uploads the archives
    into the draft, publishes it, and pushes an updated formula to the
    `lullabot/homebrew-sandbar` tap.
@@ -53,7 +53,7 @@ are not cancelled by later runs.
 
 GoReleaser's `brews:` publisher (not `homebrew_casks:`) pushes to
 `lullabot/homebrew-sandbar`. A cask is deliberately not used: casks are
-macOS-only, and `sand` needs to `brew install` on both macOS and Linux, so
+macOS-only, and `sandbar` needs to `brew install` on both macOS and Linux, so
 a formula is the only cross-platform option.
 
 ## Docs releases

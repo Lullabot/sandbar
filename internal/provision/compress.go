@@ -62,7 +62,7 @@ func tarCompressFlags(ctx context.Context, cli guestRunner, name string, out io.
 	// reset: it is the BASE that has to be refreshed. A user staring at a slow
 	// copy has no way to deduce any of that from silence, and the remedy is one
 	// command.
-	note(out, "Note: %q has no zstd, so this copy is compressed with gzip — several times slower on a large tree. `sand create --rebuild` refreshes the base image so new VMs get it.", name)
+	note(out, "Note: %q has no zstd, so this copy is compressed with gzip — several times slower on a large tree. `sandbar create --rebuild` refreshes the base image so new VMs get it.", name)
 	return []string{"-z"}
 }
 

@@ -1,6 +1,6 @@
 package ui
 
-// board.go is sand's HOME SURFACE and its ONLY roster: a grid of tiles (task
+// board.go is sandbar's HOME SURFACE and its ONLY roster: a grid of tiles (task
 // 07 renders one; this file composes them), a focus ring that moves in two
 // dimensions, and the single-key verbs that act on the tile under the ring.
 // There is no second render path, no table, and no toggle back to one.
@@ -85,7 +85,7 @@ const ghostFocusName = "\x00new"
 // reverts to a bare name.
 func (m model) ghostFocusVM() vmHandle { return vmHandle{Scope: m.activeScope(), Name: ghostFocusName} }
 
-// isBaseImage reports whether name is a sand base image: a clone source for a
+// isBaseImage reports whether name is a sandbar base image: a clone source for a
 // managed VM, or the default base name even before any clone exists. Base images
 // are the heavy, identity-free images each VM is cloned from — they are NOT
 // workspaces, they get no tile (see boardVMs), and stop-all skips them.
@@ -262,7 +262,7 @@ func (m *model) syncBoard() {
 		// But only once the fleet is READY (at least one member connected). Before
 		// that the board is empty because nothing has landed, not because the host is
 		// bare, and adopting the ghost here would stick: the identity pin would then
-		// hold the ring on it as the real tiles arrived, so sand would open with the
+		// hold the ring on it as the real tiles arrived, so sandbar would open with the
 		// empty slot selected and enter would create a VM rather than open the first
 		// one. showsGhost folds that readiness check in.
 		if m.showsGhost() {
@@ -762,7 +762,7 @@ func (m model) updateBoard(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, m.keys.StopAll):
 		targets := m.stopAllTargets()
 		if len(targets) == 0 {
-			m.logMsg("no running sand VMs to stop")
+			m.logMsg("no running sandbar VMs to stop")
 			return m, nil
 		}
 		names := make([]string, len(targets))
@@ -770,9 +770,9 @@ func (m model) updateBoard(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			names[i] = t.Name
 		}
 		m.confirm = &confirmState{
-			prompt:  fmt.Sprintf("Stop %d running sand VMs (%s)?", len(targets), summarizeNames(names, m.width)),
+			prompt:  fmt.Sprintf("Stop %d running sandbar VMs (%s)?", len(targets), summarizeNames(names, m.width)),
 			run:     m.stopAllCmds(targets),
-			working: fmt.Sprintf("stopping %d sand VMs…", len(targets)),
+			working: fmt.Sprintf("stopping %d sandbar VMs…", len(targets)),
 		}
 		return m, nil
 	}
@@ -1099,14 +1099,14 @@ func (m model) renderCell(i int, vms []boardVM, traits []vmTraits, uniform fleet
 // straight off the registry, because a VM mid-create is not in the registry yet —
 // it is not recorded managed until its build SUCCEEDS. Reading the registry
 // blindly would paint the one tile the user is actually watching as "base none ·
-// external": a VM sand is building this second, labelled as somebody else's. Its
+// external": a VM sandbar is building this second, labelled as somebody else's. Its
 // base comes from the job that is building it (BaseName only — the config also
 // carries the clone token, and nothing that renders may reach one), and it is
-// sand's by definition, because that is why it has a tile at all.
+// sandbar's by definition, because that is why it has a tile at all.
 //
 // Managed therefore ends up TRUE for every tile on the board, which makes it
 // uniform by construction and the managed/external badge unreachable — exactly
-// what tile.go predicts once the board filters to sand's own VMs.
+// what tile.go predicts once the board filters to sandbar's own VMs.
 func (m model) traitsOf(v boardVM) vmTraits {
 	// Base and managed come from the provenance marker first — the same source
 	// boardVMs gates the roster on — and only fall back to the registry when
@@ -1145,7 +1145,7 @@ func (m model) traitsOf(v boardVM) vmTraits {
 // A SUCCEEDED build is deliberately NOT one of them. Its VM is in the managed index
 // — that is what success means — so it already has a tile, and admitting it here as
 // well means the roster stops listening to the index. The job registry retains
-// every run for the whole session, so a VM created in sand and then deleted OUTSIDE
+// every run for the whole session, so a VM created in sandbar and then deleted OUTSIDE
 // it (`limactl delete web`) kept its tile forever: Reconcile dropped it from the
 // index, but the retained succeeded job kept re-admitting it. The tile rendered
 // from a synthetic record — "○ Stopped · disk ?/? · never used" — and every verb on

@@ -1,7 +1,7 @@
 # Browser review of changes
 
 `self-review-serve` serves a checkout's diff as a review page. It is what
-`sand land NAME PATH --review` runs on the user's behalf, and it is installed
+`sandbar land NAME PATH --review` runs on the user's behalf, and it is installed
 in this guest, so you can start it yourself and hand the user a URL. Run it
 in the checkout, in its own tmux window or in the background, because it
 keeps running until the review is finished:
@@ -24,7 +24,7 @@ Whether that URL opens on the workstation depends on the profile type in
 - `local`: Lima forwards the port, so the printed URL works as-is.
 - `proxmox` or `remote-ssh`: the server listens only on the guest's
   loopback, which the workstation cannot reach. Stop it and give the user
-  `sand land NAME PATH --review` to run on their workstation instead; it
+  `sandbar land NAME PATH --review` to run on their workstation instead; it
   starts the same server, sets up the forward, and opens the browser.
 
 For a repository cloned after the VM was created,

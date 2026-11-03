@@ -1,12 +1,12 @@
 # Development
 
-How to build, test, and iterate on `sand` locally.
+How to build, test, and iterate on `sandbar` locally.
 
 ## Repository layout
 
-`sand` has two halves that share one repo:
+`sandbar` has two halves that share one repo:
 
-- **A Go TUI/CLI** (`cmd/sand`, `internal/…`) that creates, clones, resets,
+- **A Go TUI/CLI** (`cmd/sandbar`, `internal/…`) that creates, clones, resets,
   and manages VMs — on this machine or another one with
   [Lima](https://lima-vm.io), or on a Proxmox host through its API — plus a
   host-side secrets store.
@@ -25,15 +25,15 @@ Inside `internal/`:
 | `ui` | The Bubble Tea model, views, and commands (board/form/secrets/progress/…). |
 | `secrets`, `registry`, `manage`, `browse`, `vm` | Host-side secrets store, managed-VM index, shared registry bookkeeping, file browser, domain types. |
 
-Entrypoint: `cmd/sand/main.go`. There are three paths: a headless `sand create`
-(`internal/manage`), the TUI, and a standalone `sand shell`
-(`cmd/sand/shell.go`).
+Entrypoint: `cmd/sandbar/main.go`. There are three paths: a headless `sandbar create`
+(`internal/manage`), the TUI, and a standalone `sandbar shell`
+(`cmd/sandbar/shell.go`).
 
 ### Why the `limactl` CLI, not a Go API
 
 Lima is written in Go, but it doesn't publish a stable public Go API — its
 `pkg/…` packages are internal and change between releases, and importing
-them would pull Lima's whole dependency tree into `sand` and pin it to a
+them would pull Lima's whole dependency tree into `sandbar` and pin it to a
 single Lima version. `internal/lima` instead wraps the `limactl` CLI itself,
 using its structured output (`--format json` for `list`, `--format
 '{{ .Field }}'` templates for single values) as the supported, documented
@@ -47,8 +47,8 @@ to "ignored" rather than failing the listing.
 ## Build, run, format, vet
 
 ```
-go build ./cmd/sand      # build the binary
-go run ./cmd/sand        # run the TUI
+go build ./cmd/sandbar      # build the binary
+go run ./cmd/sandbar        # run the TUI
 gofmt -l .               # must print nothing; format before committing
 go vet ./...
 ```
@@ -150,5 +150,5 @@ To change what the board shows, edit the seeded values in the generator — that
 keeps the image reproducible instead of hand-captured. If you would rather shoot
 a *live* board with your own VMs and real host stats, the
 [VHS](https://github.com/charmbracelet/vhs) tape next to the image still works
-(`cd docs/images && vhs board.tape`); it drives a real `sand` session, so keep a
+(`cd docs/images && vhs board.tape`); it drives a real `sandbar` session, so keep a
 VM or two around first.

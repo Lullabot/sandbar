@@ -385,7 +385,7 @@ func seedProxmoxProfile(t *testing.T, name, host, node, pool string) profiles.Pr
 // TestBuildProfileProviderProxmox proves buildProfileProvider's new
 // TypeProxmox branch constructs a real provider.NewProxmox binding without
 // error — mirroring provider.BuildFleet's own buildBinding (fleet_test.go's
-// TestBuildFleet_ProxmoxProfile) and cmd/sand/resolve.go's
+// TestBuildFleet_ProxmoxProfile) and cmd/sandbar/resolve.go's
 // providerForProfile. Construction reads only the (real, valid) token file
 // on disk; it does no network round trip, so this stays fast and safe here
 // exactly as it is for RemoteSSH/Local.

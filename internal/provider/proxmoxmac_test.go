@@ -165,7 +165,7 @@ func TestProxmoxResetKeepsTheMACAddress(t *testing.T) {
 }
 
 // A reset whose VM is already gone has no MAC to keep, and must not treat that
-// as a failure: `sand create --recreate` legitimately runs against a name whose
+// as a failure: `sandbar create --recreate` legitimately runs against a name whose
 // VM was destroyed out from under it.
 func TestProxmoxNicMACsMissingVMIsNotAnError(t *testing.T) {
 	m := newPVEMock(t)

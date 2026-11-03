@@ -107,7 +107,7 @@ func ResumeStage(dir string) (g *StageGuard, m ResetManifest, legacy bool, err e
 			return nil, m, false, fmt.Errorf("read %s: %w", resetManifestName, err)
 		}
 		if m.Schema > resetManifestSchema {
-			return nil, m, false, fmt.Errorf("%s in %s was written by a newer sand (schema %d, this one reads %d); upgrade sand to resume from it", resetManifestName, dir, m.Schema, resetManifestSchema)
+			return nil, m, false, fmt.Errorf("%s in %s was written by a newer sandbar (schema %d, this one reads %d); upgrade sandbar to resume from it", resetManifestName, dir, m.Schema, resetManifestSchema)
 		}
 		if err := checkArchives(dir, m.Plan); err != nil {
 			return nil, m, false, err

@@ -1,7 +1,7 @@
 # Secrets and tokens
 
 The user manages this VM's secrets on their workstation, with `e` on the
-VM's tile in the `sand` TUI. `sand` rewrites the guest files below whole
+VM's tile in the `sandbar` TUI. `sandbar` rewrites the guest files below whole
 each time it applies secrets: when the VM starts and whenever the user saves.
 Edits made to them in the guest are lost, so ask the user to add or change a
 secret there instead. Never print secret values.

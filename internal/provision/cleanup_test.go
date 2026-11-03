@@ -123,10 +123,10 @@ func TestTailBytes(t *testing.T) {
 
 	big := []byte(strings.Repeat("boot loop\n", 200)) // 2000 bytes
 	got := tailBytes(big, 100)
-	if len(got) > 100+len("[sand: truncated — this is the last ~100 of 2000 bytes]\n") {
+	if len(got) > 100+len("[sandbar: truncated — this is the last ~100 of 2000 bytes]\n") {
 		t.Errorf("tail is longer than the cap plus its header: %d bytes", len(got))
 	}
-	if !bytes.HasPrefix(got, []byte("[sand: truncated")) {
+	if !bytes.HasPrefix(got, []byte("[sandbar: truncated")) {
 		t.Errorf("truncation was not announced: %q", got)
 	}
 	body := got[bytes.IndexByte(got, '\n')+1:]

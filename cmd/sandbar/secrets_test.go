@@ -136,7 +136,7 @@ func TestSettleSecretsSeedsTheCloneToken(t *testing.T) {
 
 // TestSettleSecretsAppliesExistingSecretsWithoutAToken is the reset half: a
 // rebuilt VM comes up with none of the secrets the old one had, and nothing
-// else will write them until its next start. `sand create --recreate` skipped
+// else will write them until its next start. `sandbar create --recreate` skipped
 // this entirely, so a recreated VM silently lost its secrets until someone
 // happened to start it from the TUI.
 func TestSettleSecretsAppliesExistingSecretsWithoutAToken(t *testing.T) {

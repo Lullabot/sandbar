@@ -170,7 +170,7 @@ func TestAttachArgvDestroyUnattachedOnGroupedSessionOnly(t *testing.T) {
 
 // TestAttachArgvGroupedSessionNamedInTheGuest: the grouped session's name must be
 // chosen by the guest at attach time, not computed on the host, or two concurrent
-// `sand shell` invocations can pick the same name and the second one fails.
+// `sandbar shell` invocations can pick the same name and the second one fails.
 func TestAttachArgvGroupedSessionNamedInTheGuest(t *testing.T) {
 	argv := AttachArgv("claude", "/home/debian.guest", "")
 	_, grouped, _ := splitGuestExpr(t, argv)
@@ -402,7 +402,7 @@ func TestAttachArgvControlModeFlagsBothNewSessionsOnly(t *testing.T) {
 }
 
 // TestAttachArgvDefaultModeIsUnchanged is the regression guard on the mode-less
-// entrypoints: AttachArgv and guestsh.AttachArgv are what every caller but `sand
+// entrypoints: AttachArgv and guestsh.AttachArgv are what every caller but `sandbar
 // shell --cc` uses, and adding control mode must not have leaked a `-CC` into
 // any of them.
 func TestAttachArgvDefaultModeIsUnchanged(t *testing.T) {

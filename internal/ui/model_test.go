@@ -52,7 +52,7 @@ func newTestModel(t *testing.T) model {
 // version into the real ~/.lima/_sand/sandbar-base.playbook-version — stamping the
 // developer's base image as freshly built from a playbook it had never seen, without
 // building anything at all. A stamp is only as good as the rebuild it records, and a
-// false one is worse than none: baseStale then reports the base as current and sand
+// false one is worse than none: baseStale then reports the base as current and sandbar
 // SKIPS the rebuild the user actually needs, silently cloning from a stale image.
 //
 // A fake Runner stops a test from RUNNING limactl. It does nothing about the files

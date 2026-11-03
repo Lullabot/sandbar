@@ -1,6 +1,6 @@
 ---
 name: sandbar-environment
-description: Use when working in a Sandbar development VM and the task involves this VM's name or connection type; host-side `sand` commands the user runs on their workstation (shell, land, browser review, reset, resizing, upgrading sand); reaching a guest port or web server from the workstation; where secrets and tokens come from; tmux usage (prefix key, bindings, sessions) or the clipboard; or the preinstalled tools.
+description: Use when working in a Sandbar development VM and the task involves this VM's name or connection type; host-side `sandbar` commands the user runs on their workstation (shell, land, browser review, reset, resizing, upgrading sandbar); reaching a guest port or web server from the workstation; where secrets and tokens come from; tmux usage (prefix key, bindings, sessions) or the clipboard; or the preinstalled tools.
 ---
 
 <!-- Sandbar-managed environment skill -->
@@ -12,7 +12,7 @@ for authorized guest system changes when needed. Keep the guest/workstation
 boundary in mind: guest paths and processes are not host paths or processes.
 
 - For this VM's name and connection profile type, read [this-vm.md](references/this-vm.md). Read it first whenever a later answer depends on either.
-- For `sand` actions the user runs on their workstation, in the TUI or the CLI, and what a reset deletes, read [host.md](references/host.md).
+- For `sandbar` actions the user runs on their workstation, in the TUI or the CLI, and what a reset deletes, read [host.md](references/host.md).
 - For opening a guest port or web server in the workstation's browser, read [ports.md](references/ports.md).
 - For where secrets and Git tokens come from, read [secrets.md](references/secrets.md).
 - For showing the user a diff in their browser, read [review.md](references/review.md).

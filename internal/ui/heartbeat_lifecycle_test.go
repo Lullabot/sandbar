@@ -431,7 +431,7 @@ func TestHeartbeatDiesCleanlyWhenTheVMStopsUnderneathIt(t *testing.T) {
 		t.Fatalf("the gauge is stuck at the reading the VM died on: %+v", s)
 	}
 
-	// And sand does not now throw a fresh `limactl shell` at a VM it cannot reach on
+	// And sandbar does not now throw a fresh `limactl shell` at a VM it cannot reach on
 	// every single refresh: a heartbeat that died on its own earns a cooldown.
 	for i := 0; i < 5; i++ {
 		l.send(vmsLoadedMsg{vms: vms("web", "Running")})
@@ -591,7 +591,7 @@ func TestStaleSampleIsDroppedAndItsReadLoopEnds(t *testing.T) {
 
 // A transport that flaps must be VISIBLE. Before this, a lost guest connection
 // showed up only as the gauges quietly emptying — which reads as "the VM is
-// idle", not "sand cannot reach it" — so a control master dying every few minutes
+// idle", not "sandbar cannot reach it" — so a control master dying every few minutes
 // and taking every session with it was undiagnosable without SAND_SSH_DEBUG.
 //
 // The line is gated on the connection having WORKED: a stream that never produced

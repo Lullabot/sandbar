@@ -55,13 +55,13 @@ func loadSecretStore(out io.Writer) secretStore {
 //
 //   - The token passed for the clone becomes the VM's forge-specific secret, so it can
 //     be rotated later from the secrets editor without a rebuild. The TUI has
-//     always done this with the create form's token; a `sand create
+//     always done this with the create form's token; a `sandbar create
 //     --clone-token` recorded nothing, so the same VM built headlessly had no
 //     secret to edit.
 //   - The VM's stored secrets are written into the guest NOW. Create and Reset
 //     each end with their own start, so nothing else will apply them until the
 //     VM's next start — and for a reset that is the sharp edge: the rebuilt
-//     guest came up with none of the secrets the old one had, and `sand create
+//     guest came up with none of the secrets the old one had, and `sandbar create
 //     --recreate` left it that way until the user happened to start it from the
 //     TUI.
 //

@@ -330,7 +330,7 @@ func TestHealSaysWhatItDid(t *testing.T) {
 // rule; this proves it is actually wired to something that runs, which is the
 // half that silently rots when a handler is refactored.
 //
-// It is also the closest thing to the reported symptom: a `sand` that has been
+// It is also the closest thing to the reported symptom: a `sandbar` that has been
 // restarted since the build, so there is no local job anywhere, meeting a marker
 // left in-flight days ago.
 func TestRefreshHealsAnAbandonedMarkerEndToEnd(t *testing.T) {

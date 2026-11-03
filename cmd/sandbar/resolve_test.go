@@ -24,7 +24,7 @@ func newTestStore(t *testing.T) *profiles.Store {
 	return s
 }
 
-// TestResolveProfileNameUnknown verifies `sand create --profile <name>`
+// TestResolveProfileNameUnknown verifies `sandbar create --profile <name>`
 // fails with a clear error naming the bad value when no profile has that
 // name — an explicit name is a promise to use exactly that profile, so it
 // must never silently fall back to last-used/Local.
@@ -128,7 +128,7 @@ func stubNoProvenanceOwners(t *testing.T) {
 	provenanceOfForProfile = func(profiles.Profile, string) (bool, error) { return false, nil }
 }
 
-// TestResolveShellProviderAmbiguous verifies `sand shell NAME` refuses to
+// TestResolveShellProviderAmbiguous verifies `sandbar shell NAME` refuses to
 // guess when NAME is owned by more than one enabled connection profile: it
 // must list the candidate profiles by name (not just error out blindly), and
 // an explicit --profile must disambiguate.
@@ -238,7 +238,7 @@ func TestProviderForProfileEmptyHostErrors(t *testing.T) {
 }
 
 // TestResolveShellProviderFallsBackToUnmanagedProbeWhenRegistryEmpty is
-// finding 7's regression test: before this task, `sand shell NAME` attached
+// finding 7's regression test: before this task, `sandbar shell NAME` attached
 // to ANY VM the (single) configured backend listed, managed or not (e.g. the
 // base image `sand-base`, or a hand-made limactl VM). With more than one
 // enabled profile, the registry alone now decides ownership, so an
@@ -359,7 +359,7 @@ func TestResolveShellProviderUnmanagedProbeToleratesListErrors(t *testing.T) {
 
 // TestResolveShellProviderSingleProfileIgnoresRegistry verifies that with
 // only one enabled profile (the common, unconfigured case), resolveShellProvider
-// uses it directly without consulting the registry at all — preserving `sand
+// uses it directly without consulting the registry at all — preserving `sandbar
 // shell`'s original behaviour of attaching to ANY VM the one configured
 // backend knows about, managed or not.
 func TestResolveShellProviderSingleProfileIgnoresRegistry(t *testing.T) {

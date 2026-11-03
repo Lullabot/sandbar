@@ -41,7 +41,7 @@ import (
 // temporary directory first and prints where they went, which is the difference
 // between reading a log and reproducing a failure.
 
-// cleanupInstance removes an instance sand created but did not finish creating.
+// cleanupInstance removes an instance sandbar created but did not finish creating.
 // Best-effort by design: it runs on a path that is ALREADY failing, so it reports
 // what it did and never replaces the error that brought us here.
 //
@@ -174,7 +174,7 @@ func tailBytes(data []byte, max int) []byte {
 	if i := bytes.IndexByte(tail, '\n'); i >= 0 {
 		tail = tail[i+1:]
 	}
-	header := fmt.Sprintf("[sand: truncated — this is the last ~%d of %d bytes]\n", len(tail), len(data))
+	header := fmt.Sprintf("[sandbar: truncated — this is the last ~%d of %d bytes]\n", len(tail), len(data))
 	return append([]byte(header), tail...)
 }
 

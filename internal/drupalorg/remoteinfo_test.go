@@ -6,7 +6,7 @@ import (
 )
 
 // TestParseRemoteInfo covers the parser both surfaces now share. It lived as
-// two identical private copies — one in cmd/sand, one in internal/ui — whose
+// two identical private copies — one in cmd/sandbar, one in internal/ui — whose
 // error text had already drifted apart; this is the single test that replaces
 // both.
 func TestParseRemoteInfo(t *testing.T) {

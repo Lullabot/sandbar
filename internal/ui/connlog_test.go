@@ -4,7 +4,7 @@ package ui
 // log: a REMOTE member announces connecting / connected / reconnecting /
 // reconnected as its state transitions, a deliberate disable announces the
 // disconnect for any profile type, and the LOCAL member's automatic lifecycle
-// stays silent (it is the machine sand runs on, not a connection — and the
+// stays silent (it is the machine sandbar runs on, not a connection — and the
 // zero-config board must stay bit-identical to the pre-profiles TUI).
 
 import (

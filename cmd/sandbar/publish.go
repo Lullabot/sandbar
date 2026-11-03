@@ -87,7 +87,7 @@ type destPublisher interface {
 	Publish(ctx context.Context, dest drupalorg.Destination, cs drupalorg.ChangeSet) (drupalorg.Result, error)
 }
 
-// runPublish implements the `sand publish NAME PATH [ISSUE]` subcommand: the
+// runPublish implements the `sandbar publish NAME PATH [ISSUE]` subcommand: the
 // headless entry point that resolves a destination, collects the change set
 // from a guest checkout, shows the confirmation, requires an explicit human
 // yes, publishes, and prints the result.
@@ -111,7 +111,7 @@ func runPublish(args []string) error {
 	yesFlag := fs.Bool("yes", false, "Confirm publication non-interactively — the non-interactive form of the human confirmation this command otherwise asks for on a terminal. Pass it only after you have reviewed the printed confirmation yourself; it is never read from an environment variable.")
 	allowOutsideNSFlag := fs.Bool("allow-outside-issue-namespace", false, "Allow the commit destination to fall outside the issue/<module>-<issue> fork namespace — the only way past the destination guard, and the only way to publish straight to a canonical drupal.org project")
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), `Usage: sand publish NAME PATH [ISSUE] [--yes] [--allow-outside-issue-namespace] [--profile <name>]
+		fmt.Fprintf(fs.Output(), `Usage: sandbar publish NAME PATH [ISSUE] [--yes] [--allow-outside-issue-namespace] [--profile <name>]
 
 Publish PATH's local commits (inside the VM named NAME) to the drupal.org
 issue fork for issue ISSUE, using the workstation's own drupal.org token —
@@ -125,8 +125,8 @@ the issue, so it is read from there. Give ISSUE explicitly to override that,
 or when the checkout's remote is the canonical "project/<module>" repository
 and so names no issue at all.
 
-The named VM must already exist and be running (see 'sand' to list
-instances, or 'sand create' to make one). If NAME is managed under more than
+The named VM must already exist and be running (see 'sandbar' to list
+instances, or 'sandbar create' to make one). If NAME is managed under more than
 one connection profile, --profile picks which one to act on.
 `)
 	}
@@ -138,7 +138,7 @@ one connection profile, --profile picks which one to act on.
 	}
 	if fs.NArg() < 2 || fs.NArg() > 3 {
 		fs.Usage()
-		return errors.New("sand publish: need a VM NAME and a checkout PATH, and optionally an ISSUE number")
+		return errors.New("sandbar publish: need a VM NAME and a checkout PATH, and optionally an ISSUE number")
 	}
 	name := fs.Arg(0)
 	path := fs.Arg(1)
@@ -150,7 +150,7 @@ one connection profile, --profile picks which one to act on.
 	if fs.NArg() == 3 {
 		n, convErr := strconv.Atoi(fs.Arg(2))
 		if convErr != nil || n <= 0 {
-			return fmt.Errorf("sand publish: invalid ISSUE %q: must be a positive integer", fs.Arg(2))
+			return fmt.Errorf("sandbar publish: invalid ISSUE %q: must be a positive integer", fs.Arg(2))
 		}
 		issue = n
 	}
@@ -164,9 +164,9 @@ one connection profile, --profile picks which one to act on.
 	// or, worse, mid-replay after some commits already landed.
 	if _, err := drupalorg.LoadToken(); err != nil {
 		if errors.Is(err, drupalorg.ErrNoToken) {
-			return fmt.Errorf("sand publish: publication is unavailable: %w", err)
+			return fmt.Errorf("sandbar publish: publication is unavailable: %w", err)
 		}
-		return fmt.Errorf("sand publish: %w", err)
+		return fmt.Errorf("sandbar publish: %w", err)
 	}
 
 	store := loadStore()
@@ -180,7 +180,7 @@ one connection profile, --profile picks which one to act on.
 
 	p, err := resolveShellProvider(store, reg, name, *profileFlag)
 	if err != nil {
-		return fmt.Errorf("sand publish: %w", err)
+		return fmt.Errorf("sandbar publish: %w", err)
 	}
 	if err := p.Preflight(); err != nil {
 		return err
@@ -199,7 +199,7 @@ one connection profile, --profile picks which one to act on.
 
 	dp, err := newLiveDestPublisher()
 	if err != nil {
-		return fmt.Errorf("sand publish: %w", err)
+		return fmt.Errorf("sandbar publish: %w", err)
 	}
 
 	return doPublish(ctx, os.Stdout, os.Stdin, isTerminal(os.Stdin), providerCollector{p: p}, dp, v, path, issue, *yesFlag, *allowOutsideNSFlag)
@@ -209,23 +209,23 @@ one connection profile, --profile picks which one to act on.
 // for this command. requireRunningVM's DECISIONS (unknown vs. not-running)
 // and their wording are reused verbatim rather than invented a second time
 // for the same fact — see runPublish's doc comment — but its error text is
-// hardcoded with land.go's own "sand land:" prefix (it is land.go's
+// hardcoded with land.go's own "sandbar land:" prefix (it is land.go's
 // helper, after all), which would otherwise misreport this command's own
 // name. Only that prefix is swapped, via CutPrefix rather than a bare
 // TrimPrefix, so a future edit to land.go's wording that drops the prefix
 // is not silently double-prefixed here — it fails loudly (falls back to
 // wrapping the whole original message) instead of guessing.
 func rewordRequireRunningVMError(err error) error {
-	rest, ok := strings.CutPrefix(err.Error(), "sand land: ")
+	rest, ok := strings.CutPrefix(err.Error(), "sandbar land: ")
 	if !ok {
-		return fmt.Errorf("sand publish: %w", err)
+		return fmt.Errorf("sandbar publish: %w", err)
 	}
-	return fmt.Errorf("sand publish: %s", rest)
+	return fmt.Errorf("sandbar publish: %s", rest)
 }
 
 // reorderPublishFlags moves every recognised flag token (and, for --profile,
-// its value) ahead of the positional arguments, so "sand publish NAME PATH
-// ISSUE --yes" parses the same as "sand publish --yes NAME PATH ISSUE" under
+// its value) ahead of the positional arguments, so "sandbar publish NAME PATH
+// ISSUE --yes" parses the same as "sandbar publish --yes NAME PATH ISSUE" under
 // flag.FlagSet, which otherwise stops parsing flags at the first non-flag
 // token. Mirrors land.go's reorderLandFlags, extended with this command's
 // own boolean flags. Anything else is left positional so an unrecognised
@@ -292,10 +292,10 @@ func doPublish(ctx context.Context, stdout io.Writer, stdin io.Reader, tty bool,
 
 	if issue <= 0 {
 		if target.Issue <= 0 {
-			return fmt.Errorf("sand publish: checkout %q's remote names the canonical project rather than an issue fork, so it cannot say which issue this work belongs to — pass the ISSUE number explicitly", path)
+			return fmt.Errorf("sandbar publish: checkout %q's remote names the canonical project rather than an issue fork, so it cannot say which issue this work belongs to — pass the ISSUE number explicitly", path)
 		}
 		issue = target.Issue
-		fmt.Fprintf(stdout, "sand publish: issue %d, read from this checkout's remote\n", issue)
+		fmt.Fprintf(stdout, "sandbar publish: issue %d, read from this checkout's remote\n", issue)
 	}
 
 	dest, err := dp.ResolveDestination(ctx, target.Module, issue, allowOutsideNS)
@@ -313,7 +313,7 @@ func doPublish(ctx context.Context, stdout io.Writer, stdin io.Reader, tty bool,
 		return err
 	}
 	if len(cs.Commits) == 0 {
-		fmt.Fprintf(stdout, "sand publish: nothing to publish — no local commits beyond what %s already holds and what %s's %s branch already carries\n",
+		fmt.Fprintf(stdout, "sandbar publish: nothing to publish — no local commits beyond what %s already holds and what %s's %s branch already carries\n",
 			dest.ForkPath, dest.ParentPath, dest.ParentBranch)
 		return nil
 	}
@@ -341,7 +341,7 @@ func doPublish(ctx context.Context, stdout io.Writer, stdin io.Reader, tty bool,
 		// A decline publishes nothing and is not an error: see the plan's
 		// "Destination selection and confirmation" section and this
 		// command's own acceptance criteria.
-		fmt.Fprintln(stdout, "sand publish: declined — nothing was published")
+		fmt.Fprintln(stdout, "sandbar publish: declined — nothing was published")
 		return nil
 	}
 
@@ -352,7 +352,7 @@ func doPublish(ctx context.Context, stdout io.Writer, stdin io.Reader, tty bool,
 	// an error path that forfeits the report.
 	reportResult(stdout, res)
 	if pubErr != nil {
-		return fmt.Errorf("sand publish: %w", pubErr)
+		return fmt.Errorf("sandbar publish: %w", pubErr)
 	}
 
 	syncCheckout(ctx, stdout, in, tty, coll, v, path, dest.Branch)
@@ -431,7 +431,7 @@ func confirmPublish(stdout io.Writer, stdin *bufio.Reader, tty, yes bool) (bool,
 		return true, nil
 	}
 	if !tty {
-		return false, errors.New("sand publish: refusing to publish: stdin is not a terminal, so there is no human to confirm this; re-run with --yes after reviewing the confirmation above, or run this from an interactive terminal")
+		return false, errors.New("sandbar publish: refusing to publish: stdin is not a terminal, so there is no human to confirm this; re-run with --yes after reviewing the confirmation above, or run this from an interactive terminal")
 	}
 	fmt.Fprint(stdout, "Publish the above to drupal.org? [y/N] ")
 	line, _ := stdin.ReadString('\n')
@@ -521,18 +521,18 @@ func newLiveDestPublisher() (*liveDestPublisher, error) {
 func (l *liveDestPublisher) ResolveDestination(ctx context.Context, module string, issue int, allowOutsideIssueNS bool) (drupalorg.Destination, error) {
 	forkPath, err := drupalorg.ForkPath(module, issue)
 	if err != nil {
-		return drupalorg.Destination{}, fmt.Errorf("sand publish: %w", err)
+		return drupalorg.Destination{}, fmt.Errorf("sandbar publish: %w", err)
 	}
 	fork, err := l.client.Project(ctx, forkPath)
 	if err != nil {
 		if drupalorg.IsNotFound(err) {
-			return drupalorg.Destination{}, fmt.Errorf("sand publish: no issue fork at %q — create one from the issue page on drupal.org first: %w", forkPath, err)
+			return drupalorg.Destination{}, fmt.Errorf("sandbar publish: no issue fork at %q — create one from the issue page on drupal.org first: %w", forkPath, err)
 		}
-		return drupalorg.Destination{}, fmt.Errorf("sand publish: resolving fork %q: %w", forkPath, err)
+		return drupalorg.Destination{}, fmt.Errorf("sandbar publish: resolving fork %q: %w", forkPath, err)
 	}
 	dest, err := drupalorg.NewDestination(module, issue, forkPath, fork, allowOutsideIssueNS)
 	if err != nil {
-		return drupalorg.Destination{}, fmt.Errorf("sand publish: %w", err)
+		return drupalorg.Destination{}, fmt.Errorf("sandbar publish: %w", err)
 	}
 	return dest.WithMergeRequestTitle(drupalorg.LookupIssueTitle(ctx, l.client, module, issue)), nil
 }
@@ -549,11 +549,11 @@ func (l *liveDestPublisher) ResolveDestination(ctx context.Context, module strin
 // syncs. Refusing names the gap instead of guessing past it.
 func (l *liveDestPublisher) ResolveBaseTip(ctx context.Context, dest drupalorg.Destination) (string, error) {
 	if dest.ParentBranch == "" {
-		return "", fmt.Errorf("sand publish: %s reports no default branch, so there is no canonical base branch to collect against; publication cannot tell your commits apart from the base branch's own", dest.ParentPath)
+		return "", fmt.Errorf("sandbar publish: %s reports no default branch, so there is no canonical base branch to collect against; publication cannot tell your commits apart from the base branch's own", dest.ParentPath)
 	}
 	tip, err := l.client.BranchTip(ctx, dest.ParentPath, dest.ParentBranch)
 	if err != nil {
-		return "", fmt.Errorf("sand publish: reading %s's %s branch: %w", dest.ParentPath, dest.ParentBranch, err)
+		return "", fmt.Errorf("sandbar publish: reading %s's %s branch: %w", dest.ParentPath, dest.ParentBranch, err)
 	}
 	return tip, nil
 }
@@ -588,7 +588,7 @@ type providerCollector struct {
 func (c providerCollector) ResolveTarget(ctx context.Context, v vm.VM, path string) (drupalorg.RemoteTarget, string, error) {
 	out, err := provider.RunCaptured(ctx, c.p, v, path, drupalorg.BuildRemoteInfoCommand())
 	if err != nil {
-		return drupalorg.RemoteTarget{}, "", fmt.Errorf("sand publish: resolving %q's remote and upstream branch: %w", path, err)
+		return drupalorg.RemoteTarget{}, "", fmt.Errorf("sandbar publish: resolving %q's remote and upstream branch: %w", path, err)
 	}
 	remoteURL, upstream, err := drupalorg.ParseRemoteInfo(out)
 	if err != nil {
@@ -597,7 +597,7 @@ func (c providerCollector) ResolveTarget(ctx context.Context, v vm.VM, path stri
 
 	target, err := drupalorg.TargetFromRemoteURL(remoteURL)
 	if err != nil {
-		return drupalorg.RemoteTarget{}, "", fmt.Errorf("sand publish: checkout %q: %w", path, err)
+		return drupalorg.RemoteTarget{}, "", fmt.Errorf("sandbar publish: checkout %q: %w", path, err)
 	}
 	return target, upstream, nil
 }
@@ -605,15 +605,15 @@ func (c providerCollector) ResolveTarget(ctx context.Context, v vm.VM, path stri
 func (c providerCollector) Collect(ctx context.Context, v vm.VM, path, forkBase, projectBase string) (drupalorg.ChangeSet, error) {
 	script, err := drupalorg.BuildCollectCommand(forkBase, projectBase)
 	if err != nil {
-		return drupalorg.ChangeSet{}, fmt.Errorf("sand publish: %w", err)
+		return drupalorg.ChangeSet{}, fmt.Errorf("sandbar publish: %w", err)
 	}
 	collected, err := provider.RunCaptured(ctx, c.p, v, path, script)
 	if err != nil {
-		return drupalorg.ChangeSet{}, fmt.Errorf("sand publish: collecting changes from %q: %w", path, err)
+		return drupalorg.ChangeSet{}, fmt.Errorf("sandbar publish: collecting changes from %q: %w", path, err)
 	}
 	cs, err := drupalorg.ParseCollect(string(collected))
 	if err != nil {
-		return drupalorg.ChangeSet{}, fmt.Errorf("sand publish: %w", err)
+		return drupalorg.ChangeSet{}, fmt.Errorf("sandbar publish: %w", err)
 	}
 	return cs, nil
 }

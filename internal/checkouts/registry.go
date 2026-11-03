@@ -4,7 +4,7 @@
 // branch, forge, push state, and dirty state. It is the single source of
 // truth every land consumer reads: the unlanded-work tile badge, the
 // zero-guest-contact delete guard, the Landing pane, and the headless
-// `sand land` CLI.
+// `sandbar land` CLI.
 //
 // This package is a pure data layer. It knows nothing about Bubble Tea, the
 // TUI model, or how a sweep talks to a guest (limactl shell, git plumbing) —
@@ -344,7 +344,7 @@ func LoadFrom(path string) (*Registry, error) {
 	}
 	if probe.Version > currentVersion {
 		return r, fmt.Errorf(
-			"checkout registry %s has schema version %d, but this sand only understands %d; upgrade sand",
+			"checkout registry %s has schema version %d, but this sandbar only understands %d; upgrade sandbar",
 			path, probe.Version, currentVersion)
 	}
 

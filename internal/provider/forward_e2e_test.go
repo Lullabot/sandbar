@@ -3,7 +3,7 @@
 // forward_e2e_test.go closes the one gap the review feature shipped with: every
 // other test of Provider.ForwardArgv asserts the SHAPE of the argv it returns
 // and stops there, so nothing ever ran that argv through the real ssh binary
-// against a real target. The forwarding seam is what makes `sand land --review`
+// against a real target. The forwarding seam is what makes `sandbar land --review`
 // reachable on the remote-Lima and Proxmox backends, and an argv that is
 // well-formed but wrong — a missing -N, a mis-ordered -L, an option the local
 // ssh rejects — would pass every unit test and fail on contact.

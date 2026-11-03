@@ -450,7 +450,7 @@ func TestReorderLandFlags(t *testing.T) {
 
 // --- --review: usage text and argument validation ---
 
-// The --review action is only discoverable if `sand land --help` names it
+// The --review action is only discoverable if `sandbar land --help` names it
 // beside --pr/--web AND says the thing that distinguishes it: it needs no
 // pushed branch. landUsage is a plain io.Writer function precisely so this can
 // be asserted without capturing the process's real stderr.
@@ -461,7 +461,7 @@ func TestLandUsageDocumentsReview(t *testing.T) {
 
 	for _, want := range []string{
 		"--review",
-		"sand land NAME PATH --review",
+		"sandbar land NAME PATH --review",
 		"no pushed branch",
 		"--review -- HEAD~2",
 		"HEAD~2...HEAD",
@@ -469,7 +469,7 @@ func TestLandUsageDocumentsReview(t *testing.T) {
 		"saved review is still carried in",
 	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("sand land usage missing %q; got:\n%s", want, out)
+			t.Errorf("sandbar land usage missing %q; got:\n%s", want, out)
 		}
 	}
 }
@@ -482,7 +482,7 @@ func TestRunLandReviewArgValidation(t *testing.T) {
 	}{
 		{name: "review with pr", args: []string{"vm", "/path", "--review", "--pr"}, wantErr: "cannot be used together"},
 		{name: "review with web", args: []string{"vm", "/path", "--review", "--web"}, wantErr: "cannot be used together"},
-		{name: "review without path", args: []string{"vm", "--review"}, wantErr: "run 'sand land NAME' to list them"},
+		{name: "review without path", args: []string{"vm", "--review"}, wantErr: "run 'sandbar land NAME' to list them"},
 		// --clean deletes a saved review, so a user who typed it and got a
 		// resumed review anyway would have lost the thing they asked to
 		// discard. Refused, never ignored.

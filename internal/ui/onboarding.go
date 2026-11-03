@@ -142,11 +142,11 @@ func (m model) onboardingLines() []string {
 			lines = append(lines, m.clipLine(line))
 		}
 	}
-	lines = append(lines, m.clipLine(titleStyle.Render("Welcome to sand")), "")
-	add("Sand creates disposable development VMs for your coding agents.")
+	lines = append(lines, m.clipLine(titleStyle.Render("Welcome to sandbar")), "")
+	add("Sandbar creates disposable development VMs for your coding agents.")
 	if isWarpTerminal() {
 		lines = append(lines, "")
-		add("Warp warning: Sand and Claude Code can have terminal compatibility issues in Warp. Try another terminal if keys or rendering misbehave.")
+		add("Warp warning: Sandbar and Claude Code can have terminal compatibility issues in Warp. Try another terminal if keys or rendering misbehave.")
 	}
 	lines = append(lines, "")
 	add("Your guest shell runs inside tmux. To leave a CLI tool running, detach with C-a d (press Ctrl+A, then d). Reattach from the VM shell later.")

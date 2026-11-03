@@ -4,9 +4,9 @@
 // (and the LIMA_E2E env var) — it never runs in the normal `go test ./...`. It
 // formalises, as asserted Go tests, the two cross-process claims the
 // `lima-e2e` CI job otherwise only checks informally against the headless
-// `sand create` entrypoint:
+// `sandbar create` entrypoint:
 //
-//  1. TestE2EHeadlessCreateRecordsManaged — a headless `sand create` (driven
+//  1. TestE2EHeadlessCreateRecordsManaged — a headless `sandbar create` (driven
 //     via doHeadlessCreate, exactly as runCreate calls it) produces a VM that
 //     both `limactl list` and the on-disk managed-VM registry agree exists —
 //     the registry write must actually survive a reload, not just live in the
@@ -15,14 +15,14 @@
 //     holds against a REAL registry and a REAL provisioner: a sand-created VM
 //     can be recreated via --recreate (and the recreate genuinely REPLACES the
 //     instance, proved with an in-guest sentinel file that must NOT survive
-//     it), while --recreate against a VM sand did not create is refused with
+//     it), while --recreate against a VM sandbar did not create is refused with
 //     the "recreate refused" error and leaves that VM completely untouched
 //     (proved the same way: a sentinel file planted before the refused call is
 //     still there after it).
 //
 // Run (needs limactl + nested virt/KVM; downloads the Debian 13 image once):
 //
-//	LIMA_E2E=1 go test -tags limae2e -timeout 30m -run E2E ./cmd/sand/
+//	LIMA_E2E=1 go test -tags limae2e -timeout 30m -run E2E ./cmd/sandbar/
 //
 // This runs in the `lima-e2e` CI job (.github/workflows/test.yml), not the
 // fast `unit` job.
@@ -122,7 +122,7 @@ func TestMain(m *testing.M) {
 }
 
 // TestE2EHeadlessCreateRecordsManaged is the create half of the e2e coverage: driving
-// doHeadlessCreate — the exact function runCreate (sand create's real entry
+// doHeadlessCreate — the exact function runCreate (sandbar create's real entry
 // point) calls — against a real Lima client and a real, file-backed registry
 // must leave the new VM both listed by `limactl list` AND recorded managed,
 // and that managed record must survive a fresh load from disk (not just live
@@ -173,7 +173,7 @@ func TestE2EHeadlessCreateRecordsManaged(t *testing.T) {
 	}
 
 	// AND that record actually persisted to disk: reload the registry from the
-	// same path an entirely separate process (a later `sand` invocation) would
+	// same path an entirely separate process (a later `sandbar` invocation) would
 	// use, and confirm it agrees.
 	reloaded, err := registry.LoadFrom(regPath)
 	if err != nil {
@@ -187,7 +187,7 @@ func TestE2EHeadlessCreateRecordsManaged(t *testing.T) {
 // TestE2ERecreateRoundTrip is the recreate half of the e2e coverage: (a) a
 // sand-created VM can be recreated via --recreate, and the recreate really
 // replaces the instance rather than no-op'ing; (b) --recreate against a VM
-// sand did not create is refused with the "recreate refused" error, and the
+// sandbar did not create is refused with the "recreate refused" error, and the
 // refusal leaves that VM completely untouched.
 func TestE2ERecreateRoundTrip(t *testing.T) {
 	if os.Getenv("LIMA_E2E") == "" {
@@ -249,7 +249,7 @@ func TestE2ERecreateRoundTrip(t *testing.T) {
 		t.Fatalf("pre-recreate sentinel survived --recreate (got %q, want %q) — the VM was not actually replaced", got, "absent")
 	}
 
-	// --- (b) --recreate against a VM sand did not create is refused, and does
+	// --- (b) --recreate against a VM sandbar did not create is refused, and does
 	// not touch it. ---
 	const unmanagedName = "sand-cmde2e-unmanaged"
 	_ = cli.Delete(unmanagedName, true)
@@ -261,7 +261,7 @@ func TestE2ERecreateRoundTrip(t *testing.T) {
 
 	// Create the VM directly through the provisioner, bypassing doHeadlessCreate
 	// (and therefore registry.Add) entirely, so it is a real, running instance
-	// that is simply NOT in the managed registry — exactly the "sand did not
+	// that is simply NOT in the managed registry — exactly the "sandbar did not
 	// create this" case --recreate must refuse.
 	if err := prov.CreateVMWithOptions(context.Background(), unmanagedCfg, provision.CreateOptions{}, io.Discard); err != nil {
 		t.Fatalf("create unmanaged VM directly via the provisioner: %v", err)

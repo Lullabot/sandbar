@@ -1,7 +1,7 @@
 # Release pipeline. On a push to `main`, release-please maintains a release PR
 # that collects the changelog from Conventional Commit messages; merging that PR
 # makes this workflow cut the release: release-please creates the `vX.Y.Z` tag
-# and a *draft* GitHub Release, then GoReleaser cross-compiles `sand` for
+# and a *draft* GitHub Release, then GoReleaser cross-compiles `sandbar` for
 # darwin/linux x amd64/arm64, uploads the archives into that draft, publishes
 # it, and pushes an updated formula to the `lullabot/homebrew-sandbar` tap.
 #

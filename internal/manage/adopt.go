@@ -4,7 +4,7 @@ package manage
 // package-local AdoptProvenancer seam (see internal/registry/adopt.go's
 // package comment for why registry cannot import internal/provider directly)
 // and gates the one-time adoption migration (registry.Adopt) to run AT MOST
-// ONCE PER PROCESS PER TARGET. The create path (cmd/sand/create.go) and the
+// ONCE PER PROCESS PER TARGET. The create path (cmd/sandbar/create.go) and the
 // TUI's first board load (internal/ui/model.go's vmsLoadedMsg handler) are
 // both natural triggers for this — whichever runs first for a given scope
 // wins, and Adopt itself is idempotent besides, so calling it twice for the
@@ -101,6 +101,6 @@ func AdoptOnce(ctx context.Context, entries []registry.ManagedEntry, live []vm.V
 	// failure (see its doc comment); the returned error is a summary a
 	// caller cannot otherwise observe, so it is worth one more log line here.
 	if _, err := registry.Adopt(ctx, entries, liveNames, provenancerAdapter{prov}); err != nil {
-		log.Printf("sand: provenance adoption for %s had errors: %v", scope.Provider, err)
+		log.Printf("sandbar: provenance adoption for %s had errors: %v", scope.Provider, err)
 	}
 }

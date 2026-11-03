@@ -14,7 +14,7 @@ import (
 
 // refreshInterval is how often the board re-lists the fleet while it is live.
 // Long enough that a `limactl list` call every tick is not worth thinking
-// about; short enough that a VM started or stopped from outside sand (another
+// about; short enough that a VM started or stopped from outside sandbar (another
 // terminal, another tool) shows up without the user having to touch a key. It
 // is also backoffSteps[0] (fleet.go): a healthy member and a member on its
 // first errored retry poll at the same rate; only a persistent failure slows.

@@ -378,7 +378,7 @@ var (
 )
 
 // MergeCommitsError reports that the range to publish contains merge
-// commits, which sand cannot publish, and names them.
+// commits, which sandbar cannot publish, and names them.
 //
 // It is a typed error rather than a formatted string because the two
 // surfaces phrase their own wrapping differently and a test should be able
@@ -402,7 +402,7 @@ type MergeCommitsError struct {
 
 func (e *MergeCommitsError) Error() string {
 	return fmt.Sprintf(
-		"drupalorg: the range to publish contains %d merge commit(s) (%s), which sand cannot publish. "+
+		"drupalorg: the range to publish contains %d merge commit(s) (%s), which sandbar cannot publish. "+
 			"Rebase this branch on the upstream branch instead of merging, and then try publishing again",
 		len(e.SHAs), strings.Join(e.SHAs, ", "),
 	)

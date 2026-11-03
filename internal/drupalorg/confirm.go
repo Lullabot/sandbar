@@ -36,7 +36,7 @@ const maxRenderedContentBytes = 2 << 20 // 2 MiB
 // its kind, path (and previous path for a move), and the resulting content.
 // Binary content is named as binary with its size rather than dumped.
 //
-// It is pure — no I/O, no terminal escapes — so cmd/sand can print it and
+// It is pure — no I/O, no terminal escapes — so cmd/sandbar can print it and
 // the TUI can put it in a view without either reimplementing the
 // confirmation.
 //

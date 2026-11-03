@@ -83,7 +83,7 @@ var fieldLabels = []string{
 // fieldInfo is the per-field help shown for the focused field. Forge-specific
 // clone-token guidance is selected by cloneTokenHelp below.
 var fieldInfo = []string{
-	"Required. The VM's name, and the name you'll pass to `sand shell`. Letters, digits and '-'; must differ from the base image.",
+	"Required. The VM's name, and the name you'll pass to `sandbar shell`. Letters, digits and '-'; must differ from the base image.",
 	"VM hostname inside the guest. Blank → same as the instance name.",
 	"Primary VM user. Blank → your host username (a matching user is created in the guest).",
 	"Required. git user.name written into the VM's git config.",
@@ -104,12 +104,12 @@ var fieldInfo = []string{
 }
 
 // hostGit seeds a git-identity field from the host git config. The headless
-// `sand create` path seeds the same way, so both share vm.HostGitConfig as the
+// `sandbar create` path seeds the same way, so both share vm.HostGitConfig as the
 // single source of truth (mirroring hostUser/vm.HostUser below).
 func hostGit(key string) string { return vm.HostGitConfig(key) }
 
 // hostUser defaults the primary VM user to the host username (Lima creates a
-// matching guest user). The headless `sand create` path defaults the same way,
+// matching guest user). The headless `sandbar create` path defaults the same way,
 // so both share vm.HostUser as the single source of truth.
 func hostUser() string { return vm.HostUser() }
 
@@ -484,7 +484,7 @@ func (m *model) setDefaultFormProfile() {
 	list := m.formProfiles()
 	if len(list) == 0 {
 		// Nothing enabled to select (a degenerate store) — fall back exactly as
-		// sand did before this field existed.
+		// sandbar did before this field existed.
 		m.formProfileIdx = 0
 		m.formScope = m.activeScope()
 		return
@@ -719,13 +719,13 @@ type formToggle struct {
 
 // createToggles is create mode's toggle list: the base-image tool-set
 // (default on) and the rebuild intent (default off, wired to the same path
-// `sand create --rebuild` uses — see submitForm).
+// `sandbar create --rebuild` uses — see submitForm).
 //
 // "Rebuild base image" is OMITTED while a template is selected as the clone
 // source (m.formTemplateName != ""): a template create skips the base image
 // entirely (task 3's CreateOptions.TemplateSource branch), so rebuilding it
 // would have no effect on the VM about to be created — mirroring the headless
-// `sand create --template`/`--rebuild` mutual exclusion.
+// `sandbar create --template`/`--rebuild` mutual exclusion.
 func (m model) createToggles() []formToggle {
 	t := []formToggle{
 		{
@@ -1243,7 +1243,7 @@ func (m model) submitForm() (tea.Model, tea.Cmd) {
 	}
 	m.formErr = nil
 	// toolRebuild carries the "Rebuild base image" toggle's intent through to
-	// the same code path `sand create --rebuild` uses: the rebuild happens
+	// the same code path `sandbar create --rebuild` uses: the rebuild happens
 	// under the base lock inside CreateVMWithOptions, not as a pre-lock delete
 	// here (see provision.CreateOptions.Rebuild).
 	opts := provision.CreateOptions{Rebuild: m.toolRebuild}
@@ -1340,7 +1340,7 @@ func (m model) submitReset(cfg vm.CreateConfig) (tea.Model, tea.Cmd) {
 	}
 	// A VM whose registry entry carries golden-template provenance
 	// (registry.AddScopedWithTemplate — the create form's source selector, or
-	// `sand create --template`) must have its Reset re-clone from that
+	// `sandbar create --template`) must have its Reset re-clone from that
 	// template, not be treated as an ordinary base image to build/converge —
 	// this is what routes Reset into the same skip-base clone branch a
 	// template create takes (task 3's ResetOptions.TemplateSource; Reset only
@@ -1604,7 +1604,7 @@ func (m model) profileSelectorRow() string {
 }
 
 // lockedFieldValue renders a locked field's value, saying so in words when
-// there is none — an empty line beside a label reads as "sand lost this", where
+// there is none — an empty line beside a label reads as "sandbar lost this", where
 // a VM that simply cloned no repo has nothing to show and never will.
 func lockedFieldValue(v string) string {
 	if strings.TrimSpace(v) == "" {

@@ -3,7 +3,7 @@
 // into checkout rows. It knows nothing about how the command actually gets to
 // a guest — no limactl, no Bubble Tea, no goroutines or timers. That wiring
 // belongs to internal/ui/sweepshell.go (the long-lived sweep shell, a sibling
-// of the heartbeat) and cmd/sand/land.go (the headless `sand land` one-shot
+// of the heartbeat) and cmd/sandbar/land.go (the headless `sandbar land` one-shot
 // sweep); both call BuildSweepCommand and ParseSweep so the detection and
 // classification logic is written, and tested, exactly once.
 //
@@ -246,7 +246,7 @@ done
 // against a guest: a bounded, read-only `find` + per-checkout `git` reads,
 // exactly as documented on sweepScriptTemplate. It takes no arguments and
 // performs no I/O itself — the TUI's sweep shell wraps it in its own
-// long-lived `limactl shell` + ~60s loop, and `sand land` runs it once for a
+// long-lived `limactl shell` + ~60s loop, and `sandbar land` runs it once for a
 // headless one-shot sweep; both feed its stdout to ParseSweep.
 func BuildSweepCommand() string {
 	r := strings.NewReplacer(

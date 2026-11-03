@@ -226,7 +226,7 @@ func Load() (*Store, error) {
 // an empty store (not an error). A corrupt file is moved aside to
 // "<path>.corrupt" — so a later save cannot silently clobber recoverable data —
 // and the error is returned for the caller to surface. A file stamped with a
-// version newer than this build understands is refused with an "upgrade sand"
+// version newer than this build understands is refused with an "upgrade sandbar"
 // error. A v1 (or unversioned) file, or a v2 file, is transparently migrated:
 // no connection scope existed before version 3, so every VM either format
 // recorded is lifted under registry.LocalScope with its secrets (and, for v2,
@@ -271,7 +271,7 @@ func readStore(path string) (scopedVMs, error) {
 	}
 
 	if probe.Version > schemaVersion {
-		return out, fmt.Errorf("secrets store at %s is version %d but this build understands only version %d — upgrade sand", path, probe.Version, schemaVersion)
+		return out, fmt.Errorf("secrets store at %s is version %d but this build understands only version %d — upgrade sandbar", path, probe.Version, schemaVersion)
 	}
 
 	if probe.Version <= 1 {
@@ -456,7 +456,7 @@ func (s *Store) Remove(vm string, connScope registry.Scope) error {
 // The re-read matters for the same reason it does in internal/registry: save
 // rewrites the WHOLE file from an in-memory map, so a long-running TUI holding
 // the store it read at startup would otherwise erase the secrets a `sand
-// create`/`sand reset` in another terminal had just written for a different VM.
+// create`/`sandbar reset` in another terminal had just written for a different VM.
 // Two writers editing the SAME VM's pairs concurrently still resolve
 // last-writer-wins for that VM — this store's API replaces a VM's scopes
 // wholesale, so there is no finer merge to make — but they no longer take each
