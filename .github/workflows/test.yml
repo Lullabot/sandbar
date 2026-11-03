@@ -720,8 +720,8 @@ jobs:
       - name: Create the loopback "remote" user with passwordless ssh
         run: |
           # Create the home from an empty skeleton. The runner image installs
-          # its Rust toolchain into /etc/skel (.rustup, .cargo), and copying
-          # that into a new home made `useradd -m` take 6-110s. This user
+          # toolchains into /etc/skel (.rustup, .cargo, .nvm, .dotnet: 814 MB),
+          # and copying that into a new home made `useradd -m` take 6-110s. This user
           # needs none of it: limactl is on the default non-interactive PATH,
           # which the ssh check below proves.
           sudo useradd -m -k "$(mktemp -d)" -s /bin/bash sand-remote-e2e
