@@ -348,7 +348,7 @@ jobs:
       # then opens that exact URL to cover the shipped client and session key.
       - name: Install the browser smoke-test driver
         run: |
-          npm install --prefix "$RUNNER_TEMP/review-browser" --no-audit --no-fund playwright@1.56.1
+          npm install --prefix "$RUNNER_TEMP/review-browser" --no-audit --no-fund playwright@1.64.1
           "$RUNNER_TEMP/review-browser/node_modules/.bin/playwright" install --with-deps chromium
 
       - name: Drive `sand land --review` end to end (serve, submit, tear down)
