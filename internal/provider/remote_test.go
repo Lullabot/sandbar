@@ -35,8 +35,8 @@ func newRemote(t *testing.T) provider.Provider {
 //
 // The target is located by value rather than by a fixed index: NewSSHHost may
 // thread OpenSSH connection-multiplexing flags (-o ControlMaster=... etc, see
-// internal/lima/sshhost.go) in between `-t` and the target, and this
-// black-box test has no access to SSHHost's unexported controlDir to predict
+// internal/sshx) in between `-t` and the target, and this black-box test
+// has no access to sshx.Conn's unexported controlDir to predict
 // whether it did.
 func TestRemoteProviderAttachArgv(t *testing.T) {
 	p := newRemote(t)

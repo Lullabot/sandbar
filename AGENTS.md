@@ -111,10 +111,15 @@ it is not where prose belongs.
   the agent-environment marker. It is the only place in sand that knows tmux
   exists. Lima wraps its argv in `limactl shell` (`lima.AttachArgv`); Proxmox
   wraps the same argv in `ssh -t`. Never retype the expression in a backend.
-- `sshx` — ssh transport pieces shared by every backend that runs ssh:
-  `WithoutMux`/`MuxSuppressed` (keep long-lived probes off the shared
-  ControlMaster) and `WaitDelay`/`SuccessDespiteHeldPipes`, which every
-  executor of ssh or limactl must use together.
+- `sshx` — the ssh/scp argv every backend runs, built and never executed
+  (`sshx.Conn`): remote-token quoting, identity selection, the throwaway-guest
+  host-key posture, keepalives, ControlMaster sharing and its `WithoutMux`
+  opt-out, the `SAND_SSH_DEBUG` log, and the `-N -L` port forward. It also
+  holds `WaitDelay`/`SuccessDespiteHeldPipes`, which every executor of ssh or
+  limactl must use together. `lima.SSHHost` wraps a `Conn` with the Lima half
+  (the `LIMA_HOME=… limactl` prefix, instance files, the two-stage copy, the
+  remote lock); the Proxmox provider uses a `Conn` directly, and imports
+  `internal/lima` only for the `HostFiles` seam.
 - `provision` — orchestrates create/reset (base build, `limactl clone`,
   finalize) and the Ansible run; `staging.go` moves data across a reset.
   Depends on `*lima.Client` and the `Host` seam (for base-image file access),
@@ -1009,7 +1014,7 @@ comment at `roles/agent-clipboard/tasks/main.yml`.
   destroy the guest journal holding the explanation, and `SAND_SSH_DEBUG` writes
   ssh's protocol log to a FILE (`-E`) — never to stderr, which every guest-command
   caller merges into the stream the TUI's progress parser reads. The
-  keepalive options in `sshBase` (`internal/lima/sshhost.go`) belong to the same
+  keepalive options in `sshBase` (`internal/sshx`) belong to the same
   story: without them a reaped connection hangs forever instead of failing, and a
   hang carries no evidence at all.
 
