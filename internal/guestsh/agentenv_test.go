@@ -1,4 +1,4 @@
-package lima
+package guestsh
 
 import (
 	"os"
@@ -14,7 +14,7 @@ import (
 // case for a VM provisioned before the marker existed, would never get it.
 func TestGuestAttachExprMarksAgentEnvironment(t *testing.T) {
 	for _, mode := range []AttachMode{AttachFullScreen, AttachControl} {
-		argv := GuestAttachArgvMode("truecolor", mode)
+		argv := AttachArgvMode("truecolor", mode)
 		if expr := argv[len(argv)-1]; !strings.HasPrefix(expr, agentEnvironmentCmd+"if tmux has-session") {
 			t.Errorf("mode %d: attach expression does not start with the agent-environment marker command:\n%s", mode, expr)
 		}

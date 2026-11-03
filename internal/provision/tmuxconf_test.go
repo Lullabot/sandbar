@@ -38,7 +38,7 @@ func TestTmuxConfEnablesTheClipboard(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("%s does not contain %q. Without both the `set-clipboard on` and the `clipboard`"+
 				" terminal-feature lines, copying text inside the guest silently puts nothing on the user's"+
-				" clipboard — see internal/lima.terminalSetupCmds for the measurements.", tmuxConfPath, want)
+				" clipboard — see internal/guestsh.terminalSetupCmds for the measurements.", tmuxConfPath, want)
 		}
 	}
 }

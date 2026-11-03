@@ -45,6 +45,7 @@ import (
 	"time"
 
 	"github.com/lullabot/sandbar/internal/baseimage"
+	"github.com/lullabot/sandbar/internal/guestsh"
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/profiles"
 	"github.com/lullabot/sandbar/internal/provision"
@@ -1383,8 +1384,8 @@ func execSSH(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr
 
 // AttachArgv wraps the SAME guest tmux expression the Lima providers use in an
 // `ssh -t` to the VM, so `sand shell` and the TUI's S verb behave identically on
-// every backend. The expression comes from lima.GuestAttachArgv rather than
-// being retyped here — see that function and internal/lima/attach.go for why a
+// every backend. The expression comes from guestsh.AttachArgv rather than
+// being retyped here — see internal/guestsh for why a
 // second copy of it is the most destructive drift in the codebase.
 //
 // Unlike the Lima providers there is no --workdir to pass: `limactl shell`
@@ -1398,19 +1399,19 @@ func execSSH(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr
 // returning an ssh to the bare instance name could connect to an unrelated
 // machine that happens to answer to it on the local network.
 func (p *proxmoxProvider) AttachArgv(v vm.VM) []string {
-	return p.attachArgvMode(v, lima.AttachFullScreen)
+	return p.attachArgvMode(v, guestsh.AttachFullScreen)
 }
 
 // AttachArgvControl is AttachArgv in tmux control mode. See Provider.AttachArgvControl.
 func (p *proxmoxProvider) AttachArgvControl(v vm.VM) []string {
-	return p.attachArgvMode(v, lima.AttachControl)
+	return p.attachArgvMode(v, guestsh.AttachControl)
 }
 
 // attachArgvMode is the body both attach entrypoints share, including the
 // bounded address lookup and the fail-loudly argv described above — so the
 // control-mode path cannot drift into resolving the guest differently, or into
 // falling back to a bare instance name that could reach an unrelated machine.
-func (p *proxmoxProvider) attachArgvMode(v vm.VM, mode lima.AttachMode) []string {
+func (p *proxmoxProvider) attachArgvMode(v vm.VM, mode guestsh.AttachMode) []string {
 	ctx, cancel := context.WithTimeout(context.Background(), attachResolveTimeout)
 	defer cancel()
 
@@ -1418,7 +1419,7 @@ func (p *proxmoxProvider) attachArgvMode(v vm.VM, mode lima.AttachMode) []string
 	if err != nil {
 		return failArgv(fmt.Sprintf("sand: cannot attach to %q: %v", v.Name, err))
 	}
-	return p.sshHost(ip).SSHArgv(true, lima.GuestAttachArgvMode(os.Getenv("COLORTERM"), mode)...)
+	return p.sshHost(ip).SSHArgv(true, guestsh.AttachArgvMode(os.Getenv("COLORTERM"), mode)...)
 }
 
 // RunArgv returns the full argv that runs ONE interactive guest command (expr)

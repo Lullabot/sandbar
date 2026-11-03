@@ -3,6 +3,7 @@ package provider
 import (
 	"os"
 
+	"github.com/lullabot/sandbar/internal/guestsh"
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/vm"
@@ -45,7 +46,7 @@ func (p *remoteLimaProvider) AttachArgv(v vm.VM) []string {
 
 // AttachArgvControl is AttachArgv in tmux control mode. See Provider.AttachArgvControl.
 func (p *remoteLimaProvider) AttachArgvControl(v vm.VM) []string {
-	return p.host.AttachArgvMode(v.Name, lima.GuestHomeVia(p.host, v.Dir), os.Getenv("COLORTERM"), lima.AttachControl)
+	return p.host.AttachArgvMode(v.Name, lima.GuestHomeVia(p.host, v.Dir), os.Getenv("COLORTERM"), guestsh.AttachControl)
 }
 
 // RunArgv is AttachArgv's one-command sibling, ssh-wrapped the same way. See

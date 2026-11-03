@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/lullabot/sandbar/internal/guestsh"
 )
 
 // These tests are the executable specification of the guest attach command. They
@@ -226,7 +228,7 @@ func TestAttachArgvGuestBranchesOnMain(t *testing.T) {
 func TestAttachArgvColorterm(t *testing.T) {
 	// Forwarded: `-e COLORTERM=<v>` is spliced into BOTH new-session commands. It must
 	// be `-e` on the session, not an `export` before the expression — see
-	// guestAttachExpr: tmux hands a new pane the server's environment, so an exported
+	// guestsh.guestAttachExpr: tmux hands a new pane the server's environment, so an exported
 	// value is dropped for every attach after the one that started the server.
 	expr, grouped, mainBranch := splitGuestExpr(t, AttachArgv("claude", "/home/debian.guest", "truecolor"))
 	if strings.Contains(expr, "export COLORTERM") {
@@ -234,7 +236,7 @@ func TestAttachArgvColorterm(t *testing.T) {
 	}
 	// `new-session` is no longer the first word after `tmux` — the clipboard
 	// settings run ahead of it in the same command sequence, and must (see
-	// terminalSetupCmds) — so the assertion is on `-e` landing on the new-session
+	// guestsh.terminalSetupCmds) — so the assertion is on `-e` landing on the new-session
 	// itself, not on its adjacency to the `tmux` that starts the sequence.
 	if !strings.Contains(mainBranch, `new-session -e COLORTERM=truecolor -s main`) {
 		t.Errorf("the `main` branch does not set COLORTERM via `-e`:\n\t%s", mainBranch)
@@ -375,7 +377,7 @@ func TestRunArgvDropsAnUnsafeColorterm(t *testing.T) {
 // command's EXIT STATUS, and a control-mode client there would answer a yes/no
 // question with a protocol stream.
 func TestAttachArgvControlModeFlagsBothNewSessionsOnly(t *testing.T) {
-	argv := AttachArgvMode("web", "/home/u.guest", "", AttachControl)
+	argv := AttachArgvMode("web", "/home/u.guest", "", guestsh.AttachControl)
 	expr, grouped, mainBranch := splitGuestExpr(t, argv)
 
 	for _, tc := range []struct{ name, branch string }{
@@ -383,7 +385,7 @@ func TestAttachArgvControlModeFlagsBothNewSessionsOnly(t *testing.T) {
 		{"main", mainBranch},
 	} {
 		// `-CC` sits directly after `tmux` and ahead of every command, not
-		// glued to new-session: terminalSetupCmds' `start-server \; set -s …`
+		// glued to new-session: guestsh.terminalSetupCmds' `start-server \; set -s …`
 		// runs in between, and tmux takes client flags only before commands.
 		cc := strings.Index(tc.branch, "tmux -CC ")
 		if cc < 0 || !strings.Contains(tc.branch[cc:], "new-session") {
@@ -400,7 +402,7 @@ func TestAttachArgvControlModeFlagsBothNewSessionsOnly(t *testing.T) {
 }
 
 // TestAttachArgvDefaultModeIsUnchanged is the regression guard on the mode-less
-// entrypoints: AttachArgv and GuestAttachArgv are what every caller but `sand
+// entrypoints: AttachArgv and guestsh.AttachArgv are what every caller but `sand
 // shell --cc` uses, and adding control mode must not have leaked a `-CC` into
 // any of them.
 func TestAttachArgvDefaultModeIsUnchanged(t *testing.T) {
@@ -409,19 +411,19 @@ func TestAttachArgvDefaultModeIsUnchanged(t *testing.T) {
 		argv []string
 	}{
 		{"AttachArgv", AttachArgv("web", "/home/u.guest", "truecolor")},
-		{"AttachArgvMode(AttachFullScreen)", AttachArgvMode("web", "/home/u.guest", "truecolor", AttachFullScreen)},
-		{"GuestAttachArgv", GuestAttachArgv("truecolor")},
-		{"GuestAttachArgvMode(AttachFullScreen)", GuestAttachArgvMode("truecolor", AttachFullScreen)},
+		{"AttachArgvMode(guestsh.AttachFullScreen)", AttachArgvMode("web", "/home/u.guest", "truecolor", guestsh.AttachFullScreen)},
+		{"guestsh.AttachArgv", guestsh.AttachArgv("truecolor")},
+		{"guestsh.AttachArgvMode(guestsh.AttachFullScreen)", guestsh.AttachArgvMode("truecolor", guestsh.AttachFullScreen)},
 	} {
 		if got := strings.Join(tc.argv, " "); strings.Contains(got, "-CC") {
-			t.Errorf("%s emitted a control-mode client. Only an explicit AttachControl may:\n\t%s", tc.name, got)
+			t.Errorf("%s emitted a control-mode client. Only an explicit guestsh.AttachControl may:\n\t%s", tc.name, got)
 		}
 	}
 
 	// The default-mode expression must still be byte-identical to the mode-less
-	// one, so the refactor that introduced AttachMode cannot have moved a token.
-	if a, b := AttachArgv("web", "/h", "truecolor"), AttachArgvMode("web", "/h", "truecolor", AttachFullScreen); !slices.Equal(a, b) {
-		t.Errorf("AttachArgv and AttachArgvMode(AttachFullScreen) disagree:\n\t%q\n\t%q", a, b)
+	// one, so the refactor that introduced guestsh.AttachMode cannot have moved a token.
+	if a, b := AttachArgv("web", "/h", "truecolor"), AttachArgvMode("web", "/h", "truecolor", guestsh.AttachFullScreen); !slices.Equal(a, b) {
+		t.Errorf("AttachArgv and AttachArgvMode(guestsh.AttachFullScreen) disagree:\n\t%q\n\t%q", a, b)
 	}
 }
 
@@ -432,7 +434,7 @@ func TestAttachArgvDefaultModeIsUnchanged(t *testing.T) {
 // on detach), and a second way of building the expression is exactly how such a
 // guarantee gets lost — so it is re-asserted here rather than assumed to carry.
 func TestAttachArgvControlModeKeepsDestroyUnattachedOffMain(t *testing.T) {
-	_, grouped, mainBranch := splitGuestExpr(t, AttachArgvMode("web", "/h", "", AttachControl))
+	_, grouped, mainBranch := splitGuestExpr(t, AttachArgvMode("web", "/h", "", guestsh.AttachControl))
 
 	if !strings.Contains(grouped, `set-option -t "$s" destroy-unattached on`) {
 		t.Errorf("the grouped session does not set destroy-unattached on ITSELF, so every second --cc attach leaks an orphan session:\n\t%s", grouped)
@@ -443,7 +445,7 @@ func TestAttachArgvControlModeKeepsDestroyUnattachedOffMain(t *testing.T) {
 }
 
 func TestAttachArgvClaudeTerminalSettings(t *testing.T) {
-	for _, mode := range []AttachMode{AttachFullScreen, AttachControl} {
+	for _, mode := range []guestsh.AttachMode{guestsh.AttachFullScreen, guestsh.AttachControl} {
 		_, grouped, main := splitGuestExpr(t, AttachArgvMode("claude", "/home/debian.guest", "", mode))
 		for _, branch := range []string{grouped, main} {
 			for _, setting := range []string{

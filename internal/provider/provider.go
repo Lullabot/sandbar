@@ -137,14 +137,14 @@ type Provider interface {
 	AttachArgv(v vm.VM) []string
 	// AttachArgvControl is AttachArgv's control-mode twin: the same guest tmux
 	// session, joined by a `tmux -CC` client so a terminal that speaks the
-	// protocol (iTerm2 is the reference implementation; see lima.AttachControl)
+	// protocol (iTerm2 is the reference implementation; see guestsh.AttachControl)
 	// renders each guest window as a native tab. It backs `sand shell --cc`
 	// and nothing else.
 	//
 	// It is deliberately NOT reachable from the TUI. The board owns its
 	// terminal, so a control-mode attach it launched would either suspend the
 	// board (defeating the point) or run inside a host tmux pane, which strips
-	// the handshake outright — see lima.AttachControl for the measurement.
+	// the handshake outright — see guestsh.AttachControl for the measurement.
 	// The board instead points the user at this flag; see internal/ui's
 	// controlModeHint.
 	AttachArgvControl(v vm.VM) []string

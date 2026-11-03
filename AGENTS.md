@@ -106,6 +106,11 @@ it is not where prose belongs.
   (`ExecRunner` for local, `SSHHost` for remote-Lima-over-SSH), so code is
   testable without a real binary. When provisioning, the provisioner itself
   depends on `*lima.Client` and the `Host` seam, never on `Provider`.
+- `guestsh` — the commands that run inside a guest regardless of transport:
+  the tmux attach expression, its `AttachMode`, the COLORTERM handshake and
+  the agent-environment marker. It is the only place in sand that knows tmux
+  exists. Lima wraps its argv in `limactl shell` (`lima.AttachArgv`); Proxmox
+  wraps the same argv in `ssh -t`. Never retype the expression in a backend.
 - `provision` — orchestrates create/reset (base build, `limactl clone`,
   finalize) and the Ansible run; `staging.go` moves data across a reset.
   Depends on `*lima.Client` and the `Host` seam (for base-image file access),
@@ -837,7 +842,7 @@ the network.
 **This invariant is about the HOST → GUEST direction only.** Copying text the
 other way — guest → host, a selection the user makes inside the VM's tmux
 reaching their own clipboard over OSC 52 — is a separate, deliberate feature
-(`internal/lima.terminalSetupCmds` plus `set -s set-clipboard on` in
+(`internal/guestsh.terminalSetupCmds` plus `set -s set-clipboard on` in
 `roles/user/templates/tmux.conf.j2`), and enabling it does not weaken anything
 above. The password-leak surface is a host clipboard the guest can read at
 will; a copy the user performs inside the guest is neither.

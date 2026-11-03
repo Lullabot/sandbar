@@ -45,7 +45,7 @@ var hostHasTmux = func() bool {
 // It stays silent when $TMUX is already set: that user is on the fast path
 // ALREADY, so the first half of the advice is redundant, and the second half is
 // something `sand shell --cc` would refuse from inside tmux anyway (a tmux pane
-// strips the control-mode handshake — see lima.AttachControl).
+// strips the control-mode handshake — see guestsh.AttachControl).
 //
 // The caller logs its own "attaching…" line first, so the two arrive in reading
 // order in the strip the board restores on detach.
