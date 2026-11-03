@@ -276,7 +276,7 @@
           
   
   
-  Using sand
+  Using sandbar
 
         </a>
       </li>
@@ -479,7 +479,7 @@
   <span class="md-ellipsis">
     
   
-    About sand
+    About sandbar
   
 
     
@@ -673,7 +673,7 @@
   <span class="md-ellipsis">
     
   
-    Using sand
+    Using sandbar
   
 
     
@@ -689,7 +689,7 @@
             <span class="md-nav__icon md-icon"></span>
             
   
-    Using sand
+    Using sandbar
   
 
           </label>
@@ -940,10 +940,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#step-6-point-sand-at-the-host" class="md-nav__link">
+  <a href="#step-6-point-sandbar-at-the-host" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 6 — Point sand at the host
+        Step 6 — Point sandbar at the host
       
     </span>
   </a>
@@ -973,10 +973,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#how-sand-configures-a-vms-disk" class="md-nav__link">
+  <a href="#how-sandbar-configures-a-vms-disk" class="md-nav__link">
     <span class="md-ellipsis">
       
-        How sand configures a VM's disk
+        How sandbar configures a VM's disk
       
     </span>
   </a>
@@ -1591,10 +1591,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#step-6-point-sand-at-the-host" class="md-nav__link">
+  <a href="#step-6-point-sandbar-at-the-host" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Step 6 — Point sand at the host
+        Step 6 — Point sandbar at the host
       
     </span>
   </a>
@@ -1624,10 +1624,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#how-sand-configures-a-vms-disk" class="md-nav__link">
+  <a href="#how-sandbar-configures-a-vms-disk" class="md-nav__link">
     <span class="md-ellipsis">
       
-        How sand configures a VM's disk
+        How sandbar configures a VM's disk
       
     </span>
   </a>
@@ -1677,21 +1677,21 @@
 
 
 <h1 id="proxmox-ve-setup">Proxmox VE Setup</h1>
-<p><code>sand</code> can run VMs on a <a href="https://www.proxmox.com/">Proxmox VE</a> host through its
+<p><code>sandbar</code> can run VMs on a <a href="https://www.proxmox.com/">Proxmox VE</a> host through its
 REST API. Once it's set up, a Proxmox host is just another place VMs can run —
 same board, same commands, same keybindings as a VM on your own machine (see
 <a href="../connection-profiles/">Where VMs Run</a>). What it needs first is some one-time
 setup on the Proxmox side, and that setup is what this page is about.</p>
-<p>The design goal is a <strong>least-privilege, pool-scoped</strong> token: <code>sand</code> gets exactly
+<p>The design goal is a <strong>least-privilege, pool-scoped</strong> token: <code>sandbar</code> gets exactly
 the permissions it needs to run its create/clone/delete workflow, confined to a
 dedicated <a href="https://pve.proxmox.com/wiki/User_Management#pveum_pools">resource pool</a>,
 so it <strong>cannot see or touch any VM outside that pool</strong> — not by accident, not by
 a bug, not at all. That isolation is structural (Proxmox enforces it), not a
-matter of <code>sand</code> behaving well.</p>
+matter of <code>sandbar</code> behaving well.</p>
 <div class="admonition info">
 <p class="admonition-title">What you'll set up</p>
 <ol>
-<li>A dedicated <strong>pool</strong> for <code>sand</code>'s VMs.</li>
+<li>A dedicated <strong>pool</strong> for <code>sandbar</code>'s VMs.</li>
 <li>A custom <strong>role</strong> holding the minimum privileges.</li>
 <li>A dedicated <strong>user</strong> and an <strong>API token</strong> that inherits the user's rights.</li>
 <li><strong>ACLs</strong> binding the role to the <strong>user</strong> at the pool — plus three
@@ -1704,18 +1704,18 @@ matter of <code>sand</code> behaving well.</p>
 cluster access) as a full admin — usually <code>root@pam</code>.</p>
 <h2 id="prerequisites">Prerequisites</h2>
 <ul>
-<li><strong>Proxmox VE 9.0 or newer.</strong> <code>sand</code> checks the version at preflight and
+<li><strong>Proxmox VE 9.0 or newer.</strong> <code>sandbar</code> checks the version at preflight and
   refuses an older host. The minimum-privilege role below is expressed in PVE 9's
   privilege vocabulary — it relies on the <code>VM.GuestAgent.*</code> privileges introduced
   in PVE 9, and PVE 9 removed the old <code>VM.Monitor</code> privilege — so it cannot be
   created on an 8.x host.</li>
 <li><strong>A storage that supports <code>images</code> content</strong> for VM disks (e.g. <code>local-lvm</code>, a
   ZFS pool, or a directory storage with <em>Disk image</em> enabled). The built-in
-  <code>local</code> storage does <strong>not</strong> hold disk images by default, so <code>sand</code> cannot put
+  <code>local</code> storage does <strong>not</strong> hold disk images by default, so <code>sandbar</code> cannot put
   a VM disk or a cloud-init drive there.</li>
 <li>
 <p><strong>A file-based storage that supports <code>import</code> content</strong> for the one-time
-  cloud-image download — a <strong>directory</strong>, <strong>NFS</strong>, or <strong>CIFS</strong> storage. <code>sand</code>
+  cloud-image download — a <strong>directory</strong>, <strong>NFS</strong>, or <strong>CIFS</strong> storage. <code>sandbar</code>
   downloads the base image with PVE's <code>download-url</code> (content type <code>import</code>),
   which <strong>block</strong> storages (<code>zfspool</code>, <code>lvm-thin</code>, RBD) reject with <em>"not a file
   based storage"</em>. This is a <strong>separate</strong> storage from the disk storage above and
@@ -1731,18 +1731,18 @@ already lists), or point <code>image_storage</code> at another file-based storag
 </div>
 <ul>
 <li><strong>A Linux bridge</strong> for VM networking (usually <code>vmbr0</code>).</li>
-<li><strong>Network reachability from the machine running <code>sand</code> to the VM subnet.</strong>
-  <code>sand</code> talks to guests over SSH once they boot (it discovers each VM's IP from
+<li><strong>Network reachability from the machine running <code>sandbar</code> to the VM subnet.</strong>
+  <code>sandbar</code> talks to guests over SSH once they boot (it discovers each VM's IP from
   the guest agent), so your workstation must be able to reach the addresses the
   VMs get on that bridge.</li>
-<li><strong>An SSH key pair.</strong> <code>sand</code> installs your public key into each guest via
+<li><strong>An SSH key pair.</strong> <code>sandbar</code> installs your public key into each guest via
   cloud-init and then connects with the private key, so the profile's
   <code>identity_path</code> must point to a private key whose <code>.pub</code> sits beside it
   (<code>ssh-keygen -t ed25519</code> if you need one). Unlike a <code>remote-ssh</code> profile, a
   Proxmox profile cannot fall back to the SSH agent — it needs the <code>.pub</code> file to
   hand to cloud-init.</li>
-<li><strong>The <code>qemu-guest-agent</code></strong> is installed by <code>sand</code>'s provisioning into the base
-  image, so you don't need to prepare an image yourself — <code>sand</code> builds its base
+<li><strong>The <code>qemu-guest-agent</code></strong> is installed by <code>sandbar</code>'s provisioning into the base
+  image, so you don't need to prepare an image yourself — <code>sandbar</code> builds its base
   template from a cloud image the first time you create a VM.</li>
 </ul>
 </li>
@@ -2143,12 +2143,12 @@ secret everywhere it is configured.</p>
 each privilege — read it if you want to know <em>why</em> the script does what it does,
 or if your host differs enough that you'd rather drive it yourself.</p>
 <h2 id="step-1-create-a-dedicated-pool">Step 1 — Create a dedicated pool</h2>
-<p>Every VM <code>sand</code> creates is placed in this pool automatically, and the token is
+<p>Every VM <code>sandbar</code> creates is placed in this pool automatically, and the token is
 scoped to it. That membership is the whole isolation boundary.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>pveum<span class="w"> </span>pool<span class="w"> </span>add<span class="w"> </span>sandbar<span class="w"> </span>--comment<span class="w"> </span><span class="s2">"sandbar-managed VMs"</span>
 </code></pre></div>
 <h2 id="step-2-create-the-minimum-privilege-role">Step 2 — Create the minimum-privilege role</h2>
-<p>This is the exact set of privileges <code>sand</code>'s workflow needs — create a base VM
+<p>This is the exact set of privileges <code>sandbar</code>'s workflow needs — create a base VM
 from a cloud image, clone it, resize, configure cloud-init, power on and off,
 snapshot, read node stats, and run a guest-agent command. Nothing more.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>pveum<span class="w"> </span>role<span class="w"> </span>add<span class="w"> </span>SandbarProv<span class="w"> </span>--privs<span class="w"> </span><span class="s2">"\</span>
@@ -2164,13 +2164,13 @@ failures — so, for the record, why each of the less-obvious ones is here:</p>
 <thead>
 <tr>
 <th>Privilege</th>
-<th>Why <code>sand</code> needs it</th>
+<th>Why <code>sandbar</code> needs it</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>VM.Config.HWType</code></td>
-<td>Setting <code>scsihw</code>, <code>vga</code>, and <code>machine</code> on the base VM. Cloud images need a virtio-scsi controller, not the PVE default of <code>lsi</code> — <code>sand</code> uses <code>virtio-scsi-single</code> (see <a href="#how-sand-configures-a-vms-disk">How <code>sand</code> configures a VM's disk</a>).</td>
+<td>Setting <code>scsihw</code>, <code>vga</code>, and <code>machine</code> on the base VM. Cloud images need a virtio-scsi controller, not the PVE default of <code>lsi</code> — <code>sandbar</code> uses <code>virtio-scsi-single</code> (see <a href="#how-sandbar-configures-a-vms-disk">How <code>sandbar</code> configures a VM's disk</a>).</td>
 </tr>
 <tr>
 <td><code>VM.Config.Options</code></td>
@@ -2190,11 +2190,11 @@ failures — so, for the record, why each of the less-obvious ones is here:</p>
 </tr>
 <tr>
 <td><code>Pool.Audit</code></td>
-<td>So the pool name appears in listings — without it <code>sand</code> can't tell which VMs are its own.</td>
+<td>So the pool name appears in listings — without it <code>sandbar</code> can't tell which VMs are its own.</td>
 </tr>
 <tr>
 <td><code>VM.GuestAgent.Unrestricted</code></td>
-<td>Only needed for guest-agent <code>exec</code>. It's the broadest privilege in the set; drop it if you never need <code>sand</code> to run a command via the agent (it uses SSH for shells regardless).</td>
+<td>Only needed for guest-agent <code>exec</code>. It's the broadest privilege in the set; drop it if you never need <code>sandbar</code> to run a command via the agent (it uses SSH for shells regardless).</td>
 </tr>
 </tbody>
 </table>
@@ -2202,7 +2202,7 @@ failures — so, for the record, why each of the less-obvious ones is here:</p>
 <p class="admonition-title">Do not add <code>VM.Monitor</code> or <code>VM.Console</code></p>
 <p><code>VM.Monitor</code> was <strong>removed in PVE 9</strong> — including it makes <code>pveum role add</code>
 reject the whole command. <code>VM.Console</code> is only for the VNC/SPICE console,
-which <code>sand</code> never uses. Leaving both out is deliberate.</p>
+which <code>sandbar</code> never uses. Leaving both out is deliberate.</p>
 </div>
 <h2 id="step-3-create-a-user-and-an-api-token">Step 3 — Create a user and an API token</h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>pveum<span class="w"> </span>user<span class="w"> </span>add<span class="w"> </span>sandbar@pve<span class="w"> </span>--comment<span class="w"> </span><span class="s2">"sandbar automation"</span>
@@ -2226,13 +2226,13 @@ grant the least-privilege ACLs below to the <strong>user</strong> <code>sandbar@
 the token carries exactly those. Because this user has no password and no other
 roles, its permissions <em>are</em> the confined set — there is nothing broader for the
 token to inherit. <strong>Save the value now</strong>; it cannot be retrieved again.</p>
-<p><code>sand</code> authenticates with the token's <strong>full identity</strong>, which is the two fields
+<p><code>sandbar</code> authenticates with the token's <strong>full identity</strong>, which is the two fields
 above joined by an <code>=</code>:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>&lt;full-tokenid&gt;=&lt;value&gt;
 <a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>sandbar@pve!prov=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 </code></pre></div>
-<p>Write exactly that one line into a file <code>sand</code> will read (referenced as
-<code>token_file</code> in <a href="#step-6-point-sand-at-the-host">Step 6</a>):</p>
+<p>Write exactly that one line into a file <code>sandbar</code> will read (referenced as
+<code>token_file</code> in <a href="#step-6-point-sandbar-at-the-host">Step 6</a>):</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>mkdir<span class="w"> </span>-p<span class="w"> </span>~/.config/sandbar
 <a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nb">umask</span><span class="w"> </span><span class="m">077</span>
 <a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="nb">printf</span><span class="w"> </span><span class="s1">'sandbar@pve!prov=%s\n'</span><span class="w"> </span><span class="s1">'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'</span><span class="w"> </span><span class="se">\</span>
@@ -2240,7 +2240,7 @@ above joined by an <code>=</code>:</p>
 <a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>chmod<span class="w"> </span><span class="m">600</span><span class="w"> </span>~/.config/sandbar/pve1.token
 </code></pre></div>
 <p>The file holds <strong>one line</strong> and nothing else — the identity, an <code>=</code>, and the
-value. <code>sand</code> refuses to read it unless it is mode <code>600</code> (owner-only).</p>
+value. <code>sandbar</code> refuses to read it unless it is mode <code>600</code> (owner-only).</p>
 <h2 id="step-4-bind-the-role-to-the-user-at-the-pool">Step 4 — Bind the role to the user at the pool</h2>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># Scope the user (and so its token) to the pool: this confines it to sandbar's own VMs.</span>
 <a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>pveum<span class="w"> </span>acl<span class="w"> </span>modify<span class="w"> </span>/pool/sandbar<span class="w"> </span>--roles<span class="w"> </span>SandbarProv<span class="w"> </span>--users<span class="w"> </span>sandbar@pve
@@ -2261,12 +2261,12 @@ or modify</strong> another VM's disk — and it never sees those VMs' configurat
 state — because reading, attaching, or reassigning a volume owned by another
 guest requires access to that guest or the <code>Datastore.Allocate</code> privilege,
 neither of which this token has. If you want the storage boundary as tight as
-the VM one, give <code>sand</code> a <strong>dedicated storage</strong> (its own LVM-thin pool or
+the VM one, give <code>sandbar</code> a <strong>dedicated storage</strong> (its own LVM-thin pool or
 dataset) rather than one shared with other VMs.</p>
 </div>
 <h2 id="step-5-grant-the-three-privileges-that-cant-be-pool-scoped">Step 5 — Grant the three privileges that can't be pool-scoped</h2>
 <p>Proxmox implements pool permissions by <em>projecting</em> a role onto the pool's
-members, and a pool can only contain <strong>VMs and storage</strong>. Three things <code>sand</code>
+members, and a pool can only contain <strong>VMs and storage</strong>. Three things <code>sandbar</code>
 needs are therefore not grantable at the pool, and have to be granted at the
 narrowest path that does work. None of them grants any access to another VM —
 that's exactly why they're named individually here instead of reaching for a
@@ -2282,7 +2282,7 @@ broader role.</p>
 <a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>pveum<span class="w"> </span>role<span class="w"> </span>add<span class="w"> </span>SandbarNode<span class="w"> </span>--privs<span class="w"> </span><span class="s2">"Sys.AccessNetwork Sys.Audit"</span>
 <a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>pveum<span class="w"> </span>acl<span class="w"> </span>modify<span class="w"> </span>/nodes/pve1<span class="w"> </span>--roles<span class="w"> </span>SandbarNode<span class="w"> </span>--users<span class="w"> </span>sandbar@pve
 <a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>
-<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a><span class="c1"># 3. Storage privileges on BOTH storages sand uses:</span>
+<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a><span class="c1"># 3. Storage privileges on BOTH storages sandbar uses:</span>
 <a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a><span class="c1">#    - the DISK storage, so it can allocate VM disks (Datastore.AllocateSpace);</span>
 <a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a><span class="c1">#    - the IMAGE storage, so it can download the cloud image with content=import</span>
 <a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a><span class="c1">#      (Datastore.AllocateTemplate). These are the same command when a single</span>
@@ -2342,7 +2342,7 @@ are the <em>intersection</em> of the user's and the token's, so a token whose us
 holds no ACLs gets nothing. Recreate it with <code>--privsep 0</code> (Step 3) and grant
 the ACLs to <code>--users sandbar@pve</code> (Steps 4–5).</p>
 </div>
-<h2 id="step-6-point-sand-at-the-host">Step 6 — Point <code>sand</code> at the host</h2>
+<h2 id="step-6-point-sandbar-at-the-host">Step 6 — Point <code>sandbar</code> at the host</h2>
 <div class="admonition info">
 <p class="admonition-title">Proxmox profiles can be created in the TUI or by editing <code>profiles.yaml</code></p>
 <p>A Proxmox profile can be created in the TUI by pressing <code>p</code> → <code>n</code>, choosing
@@ -2375,7 +2375,7 @@ here — the YAML form is the reference and automation path.</p>
 <a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a><span class="w">    </span><span class="c1">#                             # project golden image (see note below)</span>
 <a id="__codelineno-12-14" name="__codelineno-12-14" href="#__codelineno-12-14"></a><span class="w">    </span><span class="nt">bridge</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">vmbr0</span><span class="w">                 </span><span class="c1"># the Linux bridge</span>
 <a id="__codelineno-12-15" name="__codelineno-12-15" href="#__codelineno-12-15"></a><span class="w">    </span><span class="nt">token_file</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">~/.config/sandbar/pve1.token</span>
-<a id="__codelineno-12-16" name="__codelineno-12-16" href="#__codelineno-12-16"></a><span class="w">    </span><span class="nt">identity_path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">~/.ssh/id_ed25519</span><span class="w">   </span><span class="c1"># REQUIRED: the SSH key sand installs + connects with</span>
+<a id="__codelineno-12-16" name="__codelineno-12-16" href="#__codelineno-12-16"></a><span class="w">    </span><span class="nt">identity_path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">~/.ssh/id_ed25519</span><span class="w">   </span><span class="c1"># REQUIRED: the SSH key sandbar installs + connects with</span>
 <a id="__codelineno-12-17" name="__codelineno-12-17" href="#__codelineno-12-17"></a><span class="w">    </span><span class="c1"># user: dev                   # the guest login user; defaults to your host username</span>
 <a id="__codelineno-12-18" name="__codelineno-12-18" href="#__codelineno-12-18"></a><span class="w">    </span><span class="c1"># insecure: true              # only if the PVE cert is self-signed</span>
 <a id="__codelineno-12-19" name="__codelineno-12-19" href="#__codelineno-12-19"></a><span class="w">    </span><span class="c1"># ca_file: /etc/pve/pve-root-ca.pem   # or pin the CA instead</span>
@@ -2399,7 +2399,7 @@ here — the YAML form is the reference and automation path.</p>
 </tr>
 <tr>
 <td><code>pool</code></td>
-<td>The dedicated pool. Every VM <code>sand</code> creates lands here, and the token is scoped to it.</td>
+<td>The dedicated pool. Every VM <code>sandbar</code> creates lands here, and the token is scoped to it.</td>
 </tr>
 <tr>
 <td><code>storage</code></td>
@@ -2423,11 +2423,11 @@ here — the YAML form is the reference and automation path.</p>
 </tr>
 <tr>
 <td><code>identity_path</code></td>
-<td><strong>Required.</strong> Path to an SSH <strong>private</strong> key. <code>sand</code> installs the matching <code>&lt;identity_path&gt;.pub</code> into the guest via cloud-init and then connects over SSH with the private key — so the <code>.pub</code> must exist beside it. Generate one with <code>ssh-keygen -t ed25519</code> if you don't have it.</td>
+<td><strong>Required.</strong> Path to an SSH <strong>private</strong> key. <code>sandbar</code> installs the matching <code>&lt;identity_path&gt;.pub</code> into the guest via cloud-init and then connects over SSH with the private key — so the <code>.pub</code> must exist beside it. Generate one with <code>ssh-keygen -t ed25519</code> if you don't have it.</td>
 </tr>
 <tr>
 <td><code>user</code></td>
-<td>Optional. The guest login user <code>sand</code>'s cloud-init creates (and SSHes in as). Defaults to your host username.</td>
+<td>Optional. The guest login user <code>sandbar</code>'s cloud-init creates (and SSHes in as). Defaults to your host username.</td>
 </tr>
 <tr>
 <td><code>insecure</code></td>
@@ -2444,11 +2444,11 @@ here — the YAML form is the reference and automation path.</p>
 <p>Like <code>identity_path</code> for a remote profile, <code>token_file</code> is a <strong>path</strong>, never
 the credential itself — <code>profiles.yaml</code> stays
 <a href="../connection-profiles/#profilesyaml">secret-free</a> and safe to check into
-dotfiles. <code>sand</code> <strong>refuses to read</strong> a token file that is readable by group
+dotfiles. <code>sandbar</code> <strong>refuses to read</strong> a token file that is readable by group
 or other; a leaked API token is not a recoverable mistake. Create it with
 <code>umask 077</code> (as in Step 3) or run <code>chmod 600</code> on it.</p>
 </div>
-<p>That's it. <code>sand</code> builds its base template from a cloud image the first time you
+<p>That's it. <code>sandbar</code> builds its base template from a cloud image the first time you
 create a VM (this takes a few minutes — it downloads the image, runs the same
 Ansible provisioning the other backends use, and converts the result to a PVE
 template), then clones each new VM from it. The board header shows the node's
@@ -2456,13 +2456,13 @@ real CPU, memory, and storage usage, sampled from the API.</p>
 <p>Each running VM tile also uses Proxmox's host-side memory reading for its main
 memory number. A patterned portion of the gauge identifies Linux filesystem
 cache measured inside the guest. If that cache has grown large, focus the tile
-and press <code>m</code> (<strong>Reclaim memory</strong>). Sand syncs pending writes, asks the guest
+and press <code>m</code> (<strong>Reclaim memory</strong>). Sandbar syncs pending writes, asks the guest
 kernel to release its filesystem caches over the existing SSH connection, and
 then refreshes both readings. This needs no additional Proxmox API permission
 and does not change the VM's configured memory or balloon settings.</p>
 <div class="admonition note">
 <p class="admonition-title">Why the default image is a project-built one, not stock Debian</p>
-<p><code>sand</code> learns a VM's IP address only from the QEMU guest agent (it is the
+<p><code>sandbar</code> learns a VM's IP address only from the QEMU guest agent (it is the
 only IP a pure-API client can read from PVE), and it needs that IP to SSH in
 and provision the base. So the base image must boot with <code>qemu-guest-agent</code>
 <strong>already running</strong> — but stock cloud images (including Debian genericcloud)
@@ -2484,8 +2484,8 @@ first-boot behaviour is untouched) and strips machine-specific state so clones
 stay independent.</p>
 </div>
 <h2 id="mac-addresses-survive-a-rebuild">MAC addresses survive a rebuild</h2>
-<p>A reset (<code>sand reset NAME</code>, <code>sand create --recreate</code>, or <code>R</code> in the TUI)
-tries to keep the VM's network interface MAC addresses. <code>sand</code> reads them
+<p>A reset (<code>sandbar reset NAME</code>, <code>sandbar create --recreate</code>, or <code>R</code> in the TUI)
+tries to keep the VM's network interface MAC addresses. <code>sandbar</code> reads them
 before deleting the VM and restores them to the new clone before its first
 boot. This preserves the addresses used by DHCP reservations, firewall
 rules, and other network settings.</p>
@@ -2502,17 +2502,17 @@ continues and prints a warning. The VM may then receive a different IP
 address.</p>
 <p>To get a new MAC address, delete the VM and create another one.</p>
 <h2 id="vm-names-in-dns">VM names in DNS</h2>
-<p>If your router creates DNS records from DHCP hostnames, a <code>sand</code> VM can
+<p>If your router creates DNS records from DHCP hostnames, a <code>sandbar</code> VM can
 appear as <code>&lt;name&gt;.&lt;your domain&gt;</code>.</p>
 <p>The base template has no hostname, so a clone's first DHCP request does not
 announce the base image's name. <code>cloud-init</code> then sets the VM's Proxmox name,
-the playbook applies its configured hostname, and <code>sand</code> requests a DHCP
+the playbook applies its configured hostname, and <code>sandbar</code> requests a DHCP
 renewal to send that name to the server.</p>
 <p>Stale DNS entries can remain in your DHCP server's lease database until the
 lease expires. Clear them there if needed. Networks that do not create DNS
 records from DHCP hostnames need their own DNS configuration.</p>
-<h2 id="how-sand-configures-a-vms-disk">How <code>sand</code> configures a VM's disk</h2>
-<p><code>sand</code> configures the disk for development work that reads and writes many
+<h2 id="how-sandbar-configures-a-vms-disk">How <code>sandbar</code> configures a VM's disk</h2>
+<p><code>sandbar</code> configures the disk for development work that reads and writes many
 small files, including builds, tests, and reset backups:</p>
 <table>
 <thead>
@@ -2550,10 +2550,10 @@ committed and pushed to a remote repository.</p>
 <p>Inside the guest, <code>noatime</code> avoids updating file access times on reads.
 <code>fstrim.timer</code> periodically requests reclamation of unused disk space.</p>
 <p>Existing VMs keep the disk settings they were created with. To apply these
-settings, rebuild the base template with <code>sand create --rebuild</code>, then reset
+settings, rebuild the base template with <code>sandbar create --rebuild</code>, then reset
 or recreate the VM from it.</p>
 <h2 id="a-separate-pool-for-automated-tests">A separate pool for automated tests</h2>
-<p>If you run <code>sand</code>'s opt-in end-to-end test suite (or otherwise want a throwaway
+<p>If you run <code>sandbar</code>'s opt-in end-to-end test suite (or otherwise want a throwaway
 pool that can never touch your day-to-day VMs), set up a <strong>second</strong> pool and
 token exactly as above but with different names — <code>sandbar-test</code>, its own user,
 and its own token. The two pools are fully isolated from each other, so
@@ -2599,10 +2599,10 @@ other half by hand — that the foreign VM is <em>unchanged</em> afterward — c
 status as an admin before and after; the test deliberately can't, because its
 token can't see the VM at all, which is the point.</p>
 <h2 id="start-at-host-boot">Start at host boot</h2>
-<p>Proxmox VMs created or reset by sand start automatically when the Proxmox
+<p>Proxmox VMs created or reset by sandbar start automatically when the Proxmox
 host boots. Uncheck <strong>Start at boot</strong> in the creation or reset form to disable
 this. A reset retains the VM's saved choice.</p>
-<p>From the CLI, pass <code>--no-start-at-boot</code> to <code>sand create</code> or <code>sand reset</code> to
+<p>From the CLI, pass <code>--no-start-at-boot</code> to <code>sandbar create</code> or <code>sandbar reset</code> to
 disable startup. Pass <code>--no-start-at-boot=false</code> to re-enable it on reset.
 This setting applies to Proxmox VMs only.</p>
 

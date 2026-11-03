@@ -272,7 +272,7 @@
           
   
   
-  Using sand
+  Using sandbar
 
         </a>
       </li>
@@ -477,7 +477,7 @@
   <span class="md-ellipsis">
     
   
-    About sand
+    About sandbar
   
 
     
@@ -666,7 +666,7 @@
   <span class="md-ellipsis">
     
   
-    Using sand
+    Using sandbar
   
 
     
@@ -682,7 +682,7 @@
             <span class="md-nav__icon md-icon"></span>
             
   
-    Using sand
+    Using sandbar
   
 
           </label>
@@ -1487,7 +1487,7 @@
 
 
 <h1 id="releases">Releases</h1>
-<p>How <code>sand</code> releases are cut and published.</p>
+<p>How <code>sandbar</code> releases are cut and published.</p>
 <h2 id="the-pipeline">The pipeline</h2>
 <p>Releases run through <code>.github/workflows/release-please.yml</code> in two chained
 jobs, <code>release-please</code> then <code>goreleaser</code>:</p>
@@ -1501,7 +1501,7 @@ jobs, <code>release-please</code> then <code>goreleaser</code>:</p>
    release PR creates the <code>vX.Y.Z</code> tag and a <strong>draft</strong> GitHub Release
    rather than a published one.</li>
 <li><strong>GoReleaser</strong> (<code>.goreleaser.yaml</code>) then adopts that draft
-   (<code>use_existing_draft: true</code>), cross-compiles <code>sand</code> for
+   (<code>use_existing_draft: true</code>), cross-compiles <code>sandbar</code> for
    darwin+linux × amd64+arm64 with <code>CGO_ENABLED=0</code>, uploads the archives
    into the draft, publishes it, and pushes an updated formula to the
    <code>lullabot/homebrew-sandbar</code> tap.</li>
@@ -1534,7 +1534,7 @@ are not cancelled by later runs.</p>
 <h2 id="the-homebrew-tap">The Homebrew tap</h2>
 <p>GoReleaser's <code>brews:</code> publisher (not <code>homebrew_casks:</code>) pushes to
 <code>lullabot/homebrew-sandbar</code>. A cask is deliberately not used: casks are
-macOS-only, and <code>sand</code> needs to <code>brew install</code> on both macOS and Linux, so
+macOS-only, and <code>sandbar</code> needs to <code>brew install</code> on both macOS and Linux, so
 a formula is the only cross-platform option.</p>
 <h2 id="docs-releases">Docs releases</h2>
 <p>A release tag also triggers the docs publishing workflow, which builds and

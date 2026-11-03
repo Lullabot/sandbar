@@ -276,7 +276,7 @@
           
   
   
-  Using sand
+  Using sandbar
 
         </a>
       </li>
@@ -479,7 +479,7 @@
   <span class="md-ellipsis">
     
   
-    About sand
+    About sandbar
   
 
     
@@ -673,7 +673,7 @@
   <span class="md-ellipsis">
     
   
-    Using sand
+    Using sandbar
   
 
     
@@ -689,7 +689,7 @@
             <span class="md-nav__icon md-icon"></span>
             
   
-    Using sand
+    Using sandbar
   
 
           </label>
@@ -1869,13 +1869,13 @@
 
 
 <h1 id="golden-templates">Golden Templates</h1>
-<p>Golden templates are named, reusable clone sources captured from an existing sand-managed VM. Snapshot an existing VM once you've provisioned it to your liking, then create new VMs from that template instead of rebuilding the shared base image. Sand still runs its finalize pass so the clone receives its selected identity and settings.</p>
+<p>Golden templates are named, reusable clone sources captured from an existing sand-managed VM. Snapshot an existing VM once you've provisioned it to your liking, then create new VMs from that template instead of rebuilding the shared base image. Sandbar still runs its finalize pass so the clone receives its selected identity and settings.</p>
 <h2 id="why-use-templates">Why use templates</h2>
-<p>The shared base image (<code>sandbar-base</code>) is built once and shared across all your VMs — changing it is expensive and rare. A template lets you bake in project-specific or team-specific setup <strong>above</strong> the base: extra toolchains, development dependencies, pre-cloned repos, or secrets — anything you'd otherwise script or type into every new VM. Once that setup is saved as a template, <code>sand create --template mytemplate</code> gives you a fresh, isolated clone with everything already in place.</p>
+<p>The shared base image (<code>sandbar-base</code>) is built once and shared across all your VMs — changing it is expensive and rare. A template lets you bake in project-specific or team-specific setup <strong>above</strong> the base: extra toolchains, development dependencies, pre-cloned repos, or secrets — anything you'd otherwise script or type into every new VM. Once that setup is saved as a template, <code>sandbar create --template mytemplate</code> gives you a fresh, isolated clone with everything already in place.</p>
 <p>A template is faster than re-running that setup by hand, and more flexible than rebuilding the base itself — the base stays stable while your templates evolve and branch.</p>
 <h2 id="concepts">Concepts</h2>
 <h3 id="what-gets-saved">What gets saved</h3>
-<p>When you snapshot a VM into a template, <code>sand</code> captures:</p>
+<p>When you snapshot a VM into a template, <code>sandbar</code> captures:</p>
 <ul>
 <li><strong>The guest disk:</strong> everything installed or changed inside the VM — toolchains, configs, cloned repos, and any credentials written to disk. Creation finalization overwrites settings such as hostname and git identity, but authors should otherwise assume the disk is copied verbatim. Secrets propagation is detailed below.</li>
 <li><strong>Sizing and settings:</strong> vCPUs, memory, disk size, locale, domain suffix, docker-proxy-host, and the clone URL (but not the token).</li>
@@ -1883,24 +1883,24 @@
 </ul>
 <p>Templates are <strong>per-connection-profile</strong> — a template saved under one profile never leaks into another. Lima providers store reserved stopped instances under their own <code>${LIMA_HOME}</code>; Proxmox stores native PVE templates in the configured pool.</p>
 <h3 id="power-state-behavior">Power-state behavior</h3>
-<p>When you snapshot a running VM, <code>sand</code> stops it, clones it (capturing the state at that moment), then restarts it. The source VM ends up exactly as it started — running or stopped. A template's own power state is always stopped (it is a clone source, not a working VM), but the source VM's state is preserved.</p>
+<p>When you snapshot a running VM, <code>sandbar</code> stops it, clones it (capturing the state at that moment), then restarts it. The source VM ends up exactly as it started — running or stopped. A template's own power state is always stopped (it is a clone source, not a working VM), but the source VM's state is preserved.</p>
 <h3 id="staleness">Staleness</h3>
-<p>A template's <code>status</code> in <code>sand template list</code> reflects whether its playbook predates the playbook embedded in the current <code>sand</code> binary:</p>
+<p>A template's <code>status</code> in <code>sandbar template list</code> reflects whether its playbook predates the playbook embedded in the current <code>sandbar</code> binary:</p>
 <ul>
 <li><strong><code>current</code>:</strong> built with the same playbook version as this binary.</li>
 <li><strong><code>stale</code>:</strong> built with an older playbook. A stale template still works, but new VMs cloned from it miss playbook updates (new base packages, role changes, etc.). Snapshot a fresh VM to get a current template.</li>
-<li><strong><code>unknown</code>:</strong> the template lacks comparable version metadata. It can still be cloned, but <code>sand</code> cannot promise it contains the current playbook.</li>
+<li><strong><code>unknown</code>:</strong> the template lacks comparable version metadata. It can still be cloned, but <code>sandbar</code> cannot promise it contains the current playbook.</li>
 </ul>
 <h2 id="snapshot-save-a-vm-as-a-template">Snapshot: save a VM as a template</h2>
 <h3 id="cli">CLI</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>sand<span class="w"> </span>template<span class="w"> </span>snapshot<span class="w"> </span>&lt;source-vm&gt;<span class="w"> </span>&lt;name&gt;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>sandbar<span class="w"> </span>template<span class="w"> </span>snapshot<span class="w"> </span>&lt;source-vm&gt;<span class="w"> </span>&lt;name&gt;
 </code></pre></div>
 <p>Capture <code>&lt;source-vm&gt;</code> (a running or stopped sand-managed VM) into a new golden template named <code>&lt;name&gt;</code>. The source VM's power state is preserved.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Snapshot a running VM named 'dev' into a template called 'golden'</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>sand<span class="w"> </span>template<span class="w"> </span>snapshot<span class="w"> </span>dev<span class="w"> </span>golden
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>sandbar<span class="w"> </span>template<span class="w"> </span>snapshot<span class="w"> </span>dev<span class="w"> </span>golden
 <a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
 <a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># Snapshot, specifying a connection profile</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>sand<span class="w"> </span>template<span class="w"> </span>snapshot<span class="w"> </span>dev<span class="w"> </span>golden<span class="w"> </span>--profile<span class="w"> </span>work
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>sandbar<span class="w"> </span>template<span class="w"> </span>snapshot<span class="w"> </span>dev<span class="w"> </span>golden<span class="w"> </span>--profile<span class="w"> </span>work
 </code></pre></div>
 <p>The name must be a slug — lowercase alphanumeric with hyphens (e.g., <code>golden</code>, <code>next-gen</code>, <code>ai-tools</code>). It cannot collide with an existing template or managed VM in the same scope.</p>
 <h3 id="tui">TUI</h3>
@@ -1911,17 +1911,17 @@
 <p>The snapshot runs in the background (just like a create or reset). Its progress streams into the progress pane; you can leave and reopen its retained log.</p>
 <h2 id="create-from-a-template">Create from a template</h2>
 <h3 id="cli_1">CLI</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>sand<span class="w"> </span>create<span class="w"> </span>--template<span class="w"> </span>&lt;name&gt;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>sandbar<span class="w"> </span>create<span class="w"> </span>--template<span class="w"> </span>&lt;name&gt;
 </code></pre></div>
-<p>Create a new VM cloned from the golden template <code>&lt;name&gt;</code> instead of the shared base image. All other <code>sand create</code> flags work normally:</p>
+<p>Create a new VM cloned from the golden template <code>&lt;name&gt;</code> instead of the shared base image. All other <code>sandbar create</code> flags work normally:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Create a fresh VM from a template, using defaults</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>sand<span class="w"> </span>create<span class="w"> </span>--template<span class="w"> </span>golden
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>sandbar<span class="w"> </span>create<span class="w"> </span>--template<span class="w"> </span>golden
 <a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
 <a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="c1"># Create with custom sizing</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>sand<span class="w"> </span>create<span class="w"> </span>--template<span class="w"> </span>golden<span class="w"> </span>--name<span class="w"> </span>myvm<span class="w"> </span>--cpus<span class="w"> </span><span class="m">8</span><span class="w"> </span>--memory<span class="w"> </span>16GiB
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>sandbar<span class="w"> </span>create<span class="w"> </span>--template<span class="w"> </span>golden<span class="w"> </span>--name<span class="w"> </span>myvm<span class="w"> </span>--cpus<span class="w"> </span><span class="m">8</span><span class="w"> </span>--memory<span class="w"> </span>16GiB
 <a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
 <a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="c1"># Create on a specific connection profile</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>sand<span class="w"> </span>create<span class="w"> </span>--template<span class="w"> </span>golden<span class="w"> </span>--profile<span class="w"> </span>work
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>sandbar<span class="w"> </span>create<span class="w"> </span>--template<span class="w"> </span>golden<span class="w"> </span>--profile<span class="w"> </span>work
 </code></pre></div>
 <p>The <code>--template</code> flag is mutually exclusive with <code>--rebuild</code> (templates are already cloned, not rebuilt from base), <code>--base-name</code> (the template instance is the clone source), and <code>--recreate</code> (a recreate always uses the VM's recorded source).</p>
 <h3 id="tui_1">TUI</h3>
@@ -1933,7 +1933,7 @@
 </ol>
 <h2 id="list-templates">List templates</h2>
 <h3 id="cli_2">CLI</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>sand<span class="w"> </span>template<span class="w"> </span>list
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>sandbar<span class="w"> </span>template<span class="w"> </span>list
 </code></pre></div>
 <p>List all golden templates in the current scope (or use <code>--profile &lt;name&gt;</code> to list on a specific connection profile):</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>NAME             SIZE     CREATED     SOURCE  STATUS
@@ -1950,11 +1950,11 @@
 </ul>
 <h2 id="delete-templates">Delete templates</h2>
 <h3 id="cli_3">CLI</h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>sand<span class="w"> </span>template<span class="w"> </span>delete<span class="w"> </span>&lt;name&gt;
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>sandbar<span class="w"> </span>template<span class="w"> </span>delete<span class="w"> </span>&lt;name&gt;
 </code></pre></div>
 <p>Delete a golden template. If any managed VMs were cloned from it, a warning lists them — they keep working, but can no longer be recreated from this template afterward (if you <code>--recreate</code> a VM cloned from a deleted template, it re-clones from whatever source its creation recorded, which is now missing). The delete proceeds anyway; there is no <code>--force</code> gate.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>sand<span class="w"> </span>template<span class="w"> </span>delete<span class="w"> </span>golden
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>sand<span class="w"> </span>template<span class="w"> </span>delete<span class="w"> </span>golden<span class="w"> </span>--profile<span class="w"> </span>work
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>sandbar<span class="w"> </span>template<span class="w"> </span>delete<span class="w"> </span>golden
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>sandbar<span class="w"> </span>template<span class="w"> </span>delete<span class="w"> </span>golden<span class="w"> </span>--profile<span class="w"> </span>work
 </code></pre></div>
 <h3 id="tui_2">TUI</h3>
 <ol>
@@ -1974,12 +1974,12 @@ post-clone updates rather than exclusions from the snapshot.</p>
 <p>Instead:</p>
 <ol>
 <li>Snapshot the template <strong>before</strong> storing secrets in the VM's guest (or clean them out first).</li>
-<li>Use the host-side secrets store (<code>sand secrets</code>, key <code>e</code> on a tile) to manage per-VM credentials, or put them in a cloned project's <code>.env</code> at create time (the <code>--clone-token</code> flag).</li>
+<li>Use the host-side secrets store (<code>sandbar secrets</code>, key <code>e</code> on a tile) to manage per-VM credentials, or put them in a cloned project's <code>.env</code> at create time (the <code>--clone-token</code> flag).</li>
 </ol>
 <p>See <a href="../secrets/">Secrets</a> for how the host secrets store works and how to manage them per-VM and per-directory.</p>
 <h2 id="when-to-rebuild-the-base-vs-snapshot-a-template">When to rebuild the base vs. snapshot a template</h2>
 <ul>
-<li><strong>Rebuild the base</strong> (<code>sand create --rebuild</code>) when the playbook itself needs to change and every future VM should pick it up — a new Go version, a new Ansible role, a critical security update.</li>
+<li><strong>Rebuild the base</strong> (<code>sandbar create --rebuild</code>) when the playbook itself needs to change and every future VM should pick it up — a new Go version, a new Ansible role, a critical security update.</li>
 <li><strong>Snapshot a template</strong> when you want to preserve a specific VM's state — extra setup, team conventions, a pre-cloned project — without affecting the base or other templates.</li>
 </ul>
 <p>The two are independent: you can have a current base and a stale template (the template's playbook is older but its extra setup is still valuable), or vice versa.</p>

@@ -276,7 +276,7 @@
           
   
   
-  Using sand
+  Using sandbar
 
         </a>
       </li>
@@ -484,7 +484,7 @@
   <span class="md-ellipsis">
     
   
-    About sand
+    About sandbar
   
 
     
@@ -677,10 +677,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#whats-true-about-a-sand-vm" class="md-nav__link">
+  <a href="#whats-true-about-a-sandbar-vm" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What's true about a sand VM
+        What's true about a sandbar VM
       
     </span>
   </a>
@@ -803,7 +803,7 @@
   <span class="md-ellipsis">
     
   
-    Using sand
+    Using sandbar
   
 
     
@@ -819,7 +819,7 @@
             <span class="md-nav__icon md-icon"></span>
             
   
-    Using sand
+    Using sandbar
   
 
           </label>
@@ -1420,10 +1420,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#whats-true-about-a-sand-vm" class="md-nav__link">
+  <a href="#whats-true-about-a-sandbar-vm" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What's true about a sand VM
+        What's true about a sandbar VM
       
     </span>
   </a>
@@ -1523,19 +1523,19 @@
 
 
 <h1 id="security-model">Security Model</h1>
-<p>What isolation a <code>sand</code> VM provides, and what it doesn't.</p>
-<p>A <code>sand</code> VM is a <strong>disposable, single-purpose development environment</strong>. It
+<p>What isolation a <code>sandbar</code> VM provides, and what it doesn't.</p>
+<p>A <code>sandbar</code> VM is a <strong>disposable, single-purpose development environment</strong>. It
 is convenient to throw away and rebuild, not hardened against a hostile
 tenant or a determined attacker.</p>
 <div class="admonition warning">
 <p class="admonition-title">Warning</p>
-<p>Do not use <code>sand</code> to provision a machine that holds sensitive data, or
+<p>Do not use <code>sandbar</code> to provision a machine that holds sensitive data, or
 one exposed to the public internet. It is designed for an isolated LAN
 or virtual network where the VM is treated as disposable — assume
 anything a coding agent does inside it could be adversarial, and plan to
 delete and rebuild the VM rather than trust it after the fact.</p>
 </div>
-<h2 id="whats-true-about-a-sand-vm">What's true about a <code>sand</code> VM</h2>
+<h2 id="whats-true-about-a-sandbar-vm">What's true about a <code>sandbar</code> VM</h2>
 <ul>
 <li><strong>Passwordless sudo</strong> is enabled for the configured user (default:
   <code>claude</code>). It is not intended to host multiple users or untrusted
@@ -1555,12 +1555,12 @@ delete and rebuild the VM rather than trust it after the fact.</p>
 <li><strong>A Proxmox VM is different: it has a real network address.</strong> Its ports
   are not forwarded, so anything listening in the guest is reachable by
   anything that can route to the bridge network. Run Proxmox VMs on a
-  network you trust — the same one you must already trust for <code>sand</code> to
+  network you trust — the same one you must already trust for <code>sandbar</code> to
   reach the guests at all. See
   <a href="../../using-sand/web-servers/">Web Servers and Ports</a> for both cases.</li>
 <li><strong>Samba is forced off</strong> for Lima-provisioned VMs: there is no host-home
   mount to share, so there is nothing for it to serve.</li>
-<li><strong><code>sand</code> does not provision a Claude Code credential.</strong> You log in inside
+<li><strong><code>sandbar</code> does not provision a Claude Code credential.</strong> You log in inside
   the VM yourself; no host-side Claude Code token is copied in. See
   <a href="../../getting-started/first-vm/#logging-into-claude-code">Logging into Claude Code</a>.</li>
 <li><strong>Claude Code runs with permission prompts skipped.</strong> The provisioned
@@ -1571,7 +1571,7 @@ delete and rebuild the VM rather than trust it after the fact.</p>
   isolated, and can be torn down and reprovisioned at any time.</li>
 <li><strong>Claude Code Remote Control is off until you opt in.</strong> The provisioned
   settings explicitly set <code>remoteControlAtStartup: false</code>. On the first bare
-  interactive launch, <code>sand</code> explains Remote Control and asks whether to turn
+  interactive launch, <code>sandbar</code> explains Remote Control and asks whether to turn
   it on for future interactive sessions. If enabled, the session remains in
   the VM but its transcript and tool activity are synchronized through
   Anthropic so you can drive it from <code>claude.ai/code</code> or the Claude app. See
@@ -1611,19 +1611,19 @@ delete and rebuild the VM rather than trust it after the fact.</p>
   <code>.env</code>, selected directories inside the guest home, or the whole home with
   <code>--preserve-home</code>. The data passes through a private (<code>0700</code>) host
   directory and is restored into the rebuilt VM. After a successful reset,
-  <code>sand</code> removes the temporary copy. If a reset fails after attempting to
+  <code>sandbar</code> removes the temporary copy. If a reset fails after attempting to
   delete the VM, it keeps the archives and reports their path for recovery.
   <strong>Do not preserve data from a VM you suspect is compromised.</strong> Preserving
   the whole home copies credentials and any files an agent wrote there onto
-  your workstation. See <a href="../../using-sand/cli-reference/#sand-reset-name"><code>sand reset</code></a>.</li>
+  your workstation. See <a href="../../using-sand/cli-reference/#sandbar-reset-name"><code>sandbar reset</code></a>.</li>
 </ul>
-<p>Together these mean: assume a <code>sand</code> VM can be fully compromised by whatever
+<p>Together these mean: assume a <code>sandbar</code> VM can be fully compromised by whatever
 you run inside it, and rely on deletion — not defense — to recover. Nothing
 you do inside the VM is expected to reach your host filesystem except
 through the two deliberate exceptions above.</p>
 <h2 id="landing-the-audited-counterpart-to-the-no-host-mount-boundary">Landing: the audited counterpart to the no-host-mount boundary</h2>
-<p>The no-host-mount boundary above means code inside a <code>sand</code> VM cannot write
-to your host filesystem. <strong>Landing</strong> (<code>l</code> on a tile, or <code>sand land</code>) is the
+<p>The no-host-mount boundary above means code inside a <code>sandbar</code> VM cannot write
+to your host filesystem. <strong>Landing</strong> (<code>l</code> on a tile, or <code>sandbar land</code>) is the
 one deliberate path code takes to <em>leave</em> the VM at all, and it is built to
 match that boundary rather than undercut it: Landing moves <strong>PR metadata —
 a branch name, a compare URL, a PR number and state — never a file, a diff,
@@ -1705,7 +1705,7 @@ agent cannot directly reach, and stops there:</p>
   above.</li>
 </ul>
 <h2 id="a-least-privilege-token-reasonable-agent-access">A least-privilege token: reasonable agent access</h2>
-<p><code>sand</code> can hand an agent a GitHub or GitLab token at create time so it can
+<p><code>sandbar</code> can hand an agent a GitHub or GitLab token at create time so it can
 clone, pull, and push from inside the VM (see
 <a href="../../using-sand/secrets/#github-and-gitlab-tokens">GitHub and GitLab tokens</a>).
 GitHub Landing actions can also open pull requests. An autonomous agent uses
@@ -1773,16 +1773,16 @@ Without it, nothing prevents an agent from pushing straight to <code>main</code>
 </div>
 <h2 id="proxmox-a-pool-scoped-api-token">Proxmox: a pool-scoped API token</h2>
 <p>The <a href="../../using-sand/proxmox/">Proxmox</a> backend applies the same
-least-privilege idea to a different boundary: the API token <code>sand</code> uses to
+least-privilege idea to a different boundary: the API token <code>sandbar</code> uses to
 drive a Proxmox host. The concern there is not an agent inside a VM — it's
-<code>sand</code> itself, on a host that may run VMs you care about and never want <code>sand</code>
+<code>sandbar</code> itself, on a host that may run VMs you care about and never want <code>sandbar</code>
 to touch.</p>
-<p>The guarantee is <strong>structural, not behavioural</strong>. <code>sand</code> places every VM it
+<p>The guarantee is <strong>structural, not behavioural</strong>. <code>sandbar</code> places every VM it
 creates into a dedicated resource pool, and the token is granted a custom role
 scoped to <code>/pool/&lt;pool&gt;</code>. Proxmox enforces pool permissions by <em>projecting</em> the
 role onto the pool's member VMs and storage only — a VM outside the pool has no
 projection, so the token is denied on it, with no wildcard or path that escapes.
-This is not <code>sand</code> choosing to leave other VMs alone; it is Proxmox refusing the
+This is not <code>sandbar</code> choosing to leave other VMs alone; it is Proxmox refusing the
 token if it tried. The setup guide's
 <a href="../../using-sand/proxmox/#verify-the-scope">verification step</a> is how you confirm
 the token really did end up confined — if any grant lands at <code>/</code>, it hasn't.</p>
@@ -1791,13 +1791,13 @@ download, <code>Sys.Audit</code> for node stats) cannot be pool-scoped, because 
 holds only VMs and storage. The guide grants each at the narrowest path that
 works and names them explicitly rather than papering over the gap with a broad
 role — none of the three grants any access to another VM.</p>
-<p>The token is a secret, and <code>sand</code> handles it the way it handles every secret:
+<p>The token is a secret, and <code>sandbar</code> handles it the way it handles every secret:
 the <a href="../files-and-state/#host-paths"><code>profiles.yaml</code></a> file records only a <strong>path</strong>
-to the token file (<code>token_file</code>), never the value, and <code>sand</code> refuses to read a
+to the token file (<code>token_file</code>), never the value, and <code>sandbar</code> refuses to read a
 token file that is readable by group or other. The credential stays outside the
 config that's safe to share.</p>
 <h3 id="guest-ssh-host-keys-are-not-pinned">Guest SSH host keys are not pinned</h3>
-<p><code>sand</code> reaches a Proxmox guest by SSH to the IP the guest's DHCP lease handed
+<p><code>sandbar</code> reaches a Proxmox guest by SSH to the IP the guest's DHCP lease handed
 out — an address a prior, now-deleted VM very likely used before it. Those VMs
 are cattle: each is freshly created and presents a brand-new host key on an IP
 the last one already put a different key on. So the guest transport
@@ -1805,7 +1805,7 @@ deliberately runs with <code>StrictHostKeyChecking=no</code> and
 <code>UserKnownHostsFile=/dev/null</code> — trust-on-first-use pinning would fail on the
 first reused IP, and the interactive prompt it falls back to cannot be answered
 from the TUI (it would just hang). The tradeoff is bounded to this backend: it
-means <code>sand</code>'s provisioning traffic to a guest is not protected against an
+means <code>sandbar</code>'s provisioning traffic to a guest is not protected against an
 on-path attacker <em>on the VM subnet</em> who can impersonate the guest's IP. The
 remote-Lima hop — SSH to a persistent host you configured — keeps host-key
 pinning on, because there the key is stable and a change is worth stopping for.
@@ -1813,7 +1813,7 @@ Keep the VM subnet one you trust; it is the same network you must already trust
 to reach the guests at all.</p>
 <h3 id="guests-are-offered-only-the-identity_path-key">Guests are offered only the <code>identity_path</code> key</h3>
 <p>The other half of the guest transport's SSH stance is which key it presents. A
-guest trusts exactly one: the public half of <code>identity_path</code>, which <code>sand</code> has
+guest trusts exactly one: the public half of <code>identity_path</code>, which <code>sandbar</code> has
 cloud-init install for the login user. So the guest transport runs with
 <code>IdentitiesOnly=yes</code> and offers that key alone — your SSH agent's other keys are
 never presented to a guest, and never leave your machine's agent for it.</p>
@@ -1826,7 +1826,7 @@ connect — and a single locked agent key turns a clean <code>Permission denied<
 much more confusing <code>Too many authentication failures</code>.</p>
 <p>The remote-Lima hop again keeps the opposite default: that host is a machine you
 configured and authenticate to on your own terms, so an agent key or an
-<code>ssh_config</code> <code>IdentityFile</code> is a legitimate way in, and <code>sand</code> does not restrict
+<code>ssh_config</code> <code>IdentityFile</code> is a legitimate way in, and <code>sandbar</code> does not restrict
 it.</p>
 
 

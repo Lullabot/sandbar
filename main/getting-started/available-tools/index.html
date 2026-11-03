@@ -276,7 +276,7 @@
           
   
   
-  Using sand
+  Using sandbar
 
         </a>
       </li>
@@ -484,7 +484,7 @@
   <span class="md-ellipsis">
     
   
-    About sand
+    About sandbar
   
 
     
@@ -825,7 +825,7 @@
   <span class="md-ellipsis">
     
   
-    Using sand
+    Using sandbar
   
 
     
@@ -841,7 +841,7 @@
             <span class="md-nav__icon md-icon"></span>
             
   
-    Using sand
+    Using sandbar
   
 
           </label>
@@ -1567,7 +1567,7 @@
 
 
 <h1 id="available-tools">Available Tools</h1>
-<p>Every sand VM clones a shared base containing development tools and runtimes.
+<p>Every sandbar VM clones a shared base containing development tools and runtimes.
 The selected coding agents are then installed at their current releases
 inside that individual VM, including on reset.</p>
 <h2 id="container-local-dev">Container &amp; local dev</h2>
@@ -1590,7 +1590,7 @@ covers how to reach it from your browser — locally and on a remote profile.</p
 <h2 id="coding-agents">Coding agents</h2>
 <p>The create form offers four independent checkboxes: <strong>Install Claude Code</strong>,
 <strong>Install OpenAI Codex</strong>, <strong>Install OpenCode</strong>, and <strong>Install Pi</strong>. Select any combination, including none.
-All four start unselected; after creating a VM, sand remembers your choices
+All four start unselected; after creating a VM, sandbar remembers your choices
 across connection profiles. See <a href="../../reference/files-and-state/#coding-agent-preferences-and-migration">Files and State</a>
 for persistence and migration details.</p>
 <p>Headless creation offers <code>--with-claude</code>, <code>--with-codex</code>, <code>--with-opencode</code>,
@@ -1599,13 +1599,13 @@ flags use the remembered selection. Changing agents does not rebuild the
 shared base. Reset retains that VM's recorded selections, independently of
 the defaults for new VMs.</p>
 <h3 id="claude-code-terminal-notifications">Claude Code terminal notifications</h3>
-<p>When creating or resetting a VM with Claude Code selected, sand detects the
+<p>When creating or resetting a VM with Claude Code selected, sandbar detects the
 workstation terminal and sets Claude's native notification channel for iTerm2,
 Kitty, or Ghostty. Detection also checks terminal identifiers retained inside
-host tmux and its saved <code>TERM_PROGRAM</code>. If sand cannot identify a supported
+host tmux and its saved <code>TERM_PROGRAM</code>. If sandbar cannot identify a supported
 terminal, it leaves your existing notification preference unchanged.</p>
 <p>The guest tmux configuration enables notification passthrough. If you also run
-sand inside <strong>host tmux</strong>, enable <code>set -g allow-passthrough on</code> in the host's
+sandbar inside <strong>host tmux</strong>, enable <code>set -g allow-passthrough on</code> in the host's
 <code>~/.tmux.conf</code> and reload it with <code>tmux source-file ~/.tmux.conf</code>.
 iTerm2 additionally needs <strong>Notification Center Alerts</strong> and <strong>Send escape
 sequence-generated alerts</strong> enabled under its profile's Terminal settings.
@@ -1618,7 +1618,7 @@ connect from a different terminal, change <code>preferredNotifChannel</code> in 
 Claude Code policy hooks treat a machine with this file as an approved agent
 environment, so sessions there do not need per-command approval. New VMs get
 it during provisioning. Older VMs get it the next time you open a shell with
-<code>S</code> or <code>sand shell</code>, with no rebuild or reset.</p>
+<code>S</code> or <code>sandbar shell</code>, with no rebuild or reset.</p>
 <h3 id="global-sandbar-environment-context">Global Sandbar environment context</h3>
 <p>During provisioning of a new VM, each selected agent receives a short global
 instruction block identifying the Sandbar guest. It tells the agent that
@@ -1626,8 +1626,8 @@ passwordless <code>sudo</code> is available for guest system changes within work
 authorized, without asking again solely because a command uses <code>sudo</code>. It does
 not replace the agent's system prompt or grant access to your workstation.</p>
 <p>The block points to the shared <code>sandbar-environment</code> skill. Its references
-cover the VM's name and connection profile type, the <code>sand</code> commands you run
-on your workstation (including what <code>sand reset</code> deletes), reaching guest
+cover the VM's name and connection profile type, the <code>sandbar</code> commands you run
+on your workstation (including what <code>sandbar reset</code> deletes), reaching guest
 ports from your workstation, where secrets and tokens come from, browser
 review with <code>self-review-serve</code>, tmux keys, the clipboard, and installed
 tools. Each reference links the documentation page it summarizes. The
@@ -1673,11 +1673,11 @@ load the global context.</p>
 <li>The <a href="https://gitlab.com/gitlab-org/cli">GitLab CLI (<code>glab</code>)</a></li>
 </ul>
 <p>The <code>--with-*</code> flags configure the <strong>shared base image</strong>. Changing a tool
-selection makes the next <code>sand create</code> update the base before cloning a VM.
-See the <a href="../../using-sand/cli-reference/#sand-create">CLI reference</a>.</p>
+selection makes the next <code>sandbar create</code> update the base before cloning a VM.
+See the <a href="../../using-sand/cli-reference/#sandbar-create">CLI reference</a>.</p>
 <h2 id="browser-reviews">Browser reviews</h2>
 <p>Every base image includes <a href="https://www.npmjs.com/package/@self-review/serve"><code>@self-review/serve</code></a>.
-Run <code>sand land NAME PATH --review</code> to review a checkout's diff in your browser
+Run <code>sandbar land NAME PATH --review</code> to review a checkout's diff in your browser
 and save comments where the agent can read them. The server runs inside the
 VM and starts only when you open a review. See
 <a href="../../using-sand/review/">Reviewing changes in a browser</a>.</p>

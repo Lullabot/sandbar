@@ -27,7 +27,7 @@
     
     
       
-        <title>About sand - sandbar</title>
+        <title>About sandbar - sandbar</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#about-sand" class="md-skip">
+        <a href="#about-sandbar" class="md-skip">
           Skip to content
         </a>
       
@@ -121,7 +121,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              About sand
+              About sandbar
             
           </span>
         </div>
@@ -276,7 +276,7 @@
           
   
   
-  Using sand
+  Using sandbar
 
         </a>
       </li>
@@ -493,7 +493,7 @@
   <span class="md-ellipsis">
     
   
-    About sand
+    About sandbar
   
 
     
@@ -511,7 +511,7 @@
   <span class="md-ellipsis">
     
   
-    About sand
+    About sandbar
   
 
     
@@ -753,7 +753,7 @@
   <span class="md-ellipsis">
     
   
-    Using sand
+    Using sandbar
   
 
     
@@ -769,7 +769,7 @@
             <span class="md-nav__icon md-icon"></span>
             
   
-    Using sand
+    Using sandbar
   
 
           </label>
@@ -1422,11 +1422,11 @@
   
 
 
-<h1 id="about-sand">About sand</h1>
-<p><code>sand</code> is a small Go CLI and terminal UI that manages disposable development
+<h1 id="about-sandbar">About sandbar</h1>
+<p><code>sandbar</code> is a small Go CLI and terminal UI that manages disposable development
 VMs for coding agents. Run it with no
 arguments for an interactive board of your VMs, or drive it headlessly
-(<code>sand create</code>, <code>sand shell</code>) from scripts and CI.</p>
+(<code>sandbar create</code>, <code>sandbar shell</code>) from scripts and CI.</p>
 <p>Each VM is a fresh, isolated Debian environment with a specific, opinionated
 stack: common dev tools, your git identity, and your choice of Claude Code,
 Codex, OpenCode, and Pi, installed fresh for each VM. You
@@ -1434,7 +1434,7 @@ get a disposable place to point an agent at a repository without touching
 your host machine, and you throw the VM away — or recreate it — when you're
 done.</p>
 <h2 id="locally-or-remotely">Locally or remotely</h2>
-<p>A VM doesn't have to run on the machine in front of you. <code>sand</code> runs VMs in
+<p>A VM doesn't have to run on the machine in front of you. <code>sandbar</code> runs VMs in
 three places, and the commands and keybindings are the same in all three:</p>
 <table>
 <thead>
@@ -1448,7 +1448,7 @@ three places, and the commands and keybindings are the same in all three:</p>
 <tr>
 <td>Your own machine</td>
 <td><a href="https://lima-vm.io">Lima</a></td>
-<td>Nothing beyond installing <code>sand</code></td>
+<td>Nothing beyond installing <code>sandbar</code></td>
 </tr>
 <tr>
 <td>Another machine, over SSH</td>
@@ -1466,15 +1466,15 @@ three places, and the commands and keybindings are the same in all three:</p>
 profile is live at once — the board shows a laptop's VMs and a server's VMs
 side by side. See <a href="../using-sand/connection-profiles/">Where VMs Run</a>.</p>
 <h2 id="what-it-is-not">What it is not</h2>
-<p><code>sand</code> is not a general-purpose VM manager. It doesn't manage arbitrary
+<p><code>sandbar</code> is not a general-purpose VM manager. It doesn't manage arbitrary
 guest OSes, arbitrary provisioning recipes, or long-lived infrastructure. It
 manages one kind of thing — a development VM for coding agents — well, and leaves
 everything else to the tools underneath it.</p>
-<p><code>sand</code> is the Go successor to what used to be a shell script plus a
+<p><code>sandbar</code> is the Go successor to what used to be a shell script plus a
 standalone Ansible playbook.</p>
 <h2 id="where-to-go-next">Where to go next</h2>
 <ul>
-<li><a href="installation/">Installation</a> — install <code>sand</code> and its one prerequisite.</li>
+<li><a href="installation/">Installation</a> — install <code>sandbar</code> and its one prerequisite.</li>
 <li><a href="first-vm/">Your First VM</a> — the 30-second path to a running VM.</li>
 <li><a href="how-it-works/">How Provisioning Works</a> — the base-image/clone/finalize
   model that makes each VM fast to create.</li>

@@ -274,7 +274,7 @@
           
   
   
-  Using sand
+  Using sandbar
 
         </a>
       </li>
@@ -479,7 +479,7 @@
   <span class="md-ellipsis">
     
   
-    About sand
+    About sandbar
   
 
     
@@ -668,7 +668,7 @@
   <span class="md-ellipsis">
     
   
-    Using sand
+    Using sandbar
   
 
     
@@ -684,7 +684,7 @@
             <span class="md-nav__icon md-icon"></span>
             
   
-    Using sand
+    Using sandbar
   
 
           </label>
@@ -1545,11 +1545,11 @@
 
 
 <h1 id="development">Development</h1>
-<p>How to build, test, and iterate on <code>sand</code> locally.</p>
+<p>How to build, test, and iterate on <code>sandbar</code> locally.</p>
 <h2 id="repository-layout">Repository layout</h2>
-<p><code>sand</code> has two halves that share one repo:</p>
+<p><code>sandbar</code> has two halves that share one repo:</p>
 <ul>
-<li><strong>A Go TUI/CLI</strong> (<code>cmd/sand</code>, <code>internal/…</code>) that creates, clones, resets,
+<li><strong>A Go TUI/CLI</strong> (<code>cmd/sandbar</code>, <code>internal/…</code>) that creates, clones, resets,
   and manages VMs — on this machine or another one with
   <a href="https://lima-vm.io">Lima</a>, or on a Proxmox host through its API — plus a
   host-side secrets store.</li>
@@ -1592,13 +1592,13 @@
 </tr>
 </tbody>
 </table>
-<p>Entrypoint: <code>cmd/sand/main.go</code>. There are three paths: a headless <code>sand create</code>
-(<code>internal/manage</code>), the TUI, and a standalone <code>sand shell</code>
-(<code>cmd/sand/shell.go</code>).</p>
+<p>Entrypoint: <code>cmd/sandbar/main.go</code>. There are three paths: a headless <code>sandbar create</code>
+(<code>internal/manage</code>), the TUI, and a standalone <code>sandbar shell</code>
+(<code>cmd/sandbar/shell.go</code>).</p>
 <h3 id="why-the-limactl-cli-not-a-go-api">Why the <code>limactl</code> CLI, not a Go API</h3>
 <p>Lima is written in Go, but it doesn't publish a stable public Go API — its
 <code>pkg/…</code> packages are internal and change between releases, and importing
-them would pull Lima's whole dependency tree into <code>sand</code> and pin it to a
+them would pull Lima's whole dependency tree into <code>sandbar</code> and pin it to a
 single Lima version. <code>internal/lima</code> instead wraps the <code>limactl</code> CLI itself,
 using its structured output (<code>--format json</code> for <code>list</code>, <code>--format
 '{{ .Field }}'</code> templates for single values) as the supported, documented
@@ -1609,8 +1609,8 @@ parsed, stderr is surfaced as diagnostics on failure — and the list parser
 skips any stdout line that isn't a JSON object, so a stray notice degrades
 to "ignored" rather than failing the listing.</p>
 <h2 id="build-run-format-vet">Build, run, format, vet</h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>go build ./cmd/sand      # build the binary
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>go run ./cmd/sand        # run the TUI
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>go build ./cmd/sandbar      # build the binary
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>go run ./cmd/sandbar        # run the TUI
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>gofmt -l .               # must print nothing; format before committing
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>go vet ./...
 </code></pre></div>
@@ -1692,7 +1692,7 @@ the freeze module, so no font install is needed):</p>
 keeps the image reproducible instead of hand-captured. If you would rather shoot
 a <em>live</em> board with your own VMs and real host stats, the
 <a href="https://github.com/charmbracelet/vhs">VHS</a> tape next to the image still works
-(<code>cd docs/images &amp;&amp; vhs board.tape</code>); it drives a real <code>sand</code> session, so keep a
+(<code>cd docs/images &amp;&amp; vhs board.tape</code>); it drives a real <code>sandbar</code> session, so keep a
 VM or two around first.</p>
 
 

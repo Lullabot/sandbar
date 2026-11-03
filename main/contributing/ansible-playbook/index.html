@@ -274,7 +274,7 @@
           
   
   
-  Using sand
+  Using sandbar
 
         </a>
       </li>
@@ -479,7 +479,7 @@
   <span class="md-ellipsis">
     
   
-    About sand
+    About sandbar
   
 
     
@@ -668,7 +668,7 @@
   <span class="md-ellipsis">
     
   
-    Using sand
+    Using sandbar
   
 
     
@@ -684,7 +684,7 @@
             <span class="md-nav__icon md-icon"></span>
             
   
-    Using sand
+    Using sandbar
   
 
           </label>
@@ -1511,20 +1511,20 @@
 
 
 <h1 id="the-embedded-playbook">The Embedded Playbook</h1>
-<p><code>sand</code> provisions each VM's software with an Ansible playbook — the same
+<p><code>sandbar</code> provisions each VM's software with an Ansible playbook — the same
 <code>site.yml</code>, <code>roles/</code>, <code>ansible.cfg</code>, and <code>group_vars/</code> this repository has
 carried since before its conversion to a Go CLI. That playbook is not a
-separate tool you run: it is baked into the <code>sand</code> binary and driven
-entirely by <code>sand</code> itself. This page documents the mechanism for
+separate tool you run: it is baked into the <code>sandbar</code> binary and driven
+entirely by <code>sandbar</code> itself. This page documents the mechanism for
 contributors who need to touch <code>roles/</code> or <code>site.yml</code>. <strong>It is not a guide
 to running Ansible by hand</strong> — nothing here should be read as an
-instruction to install Ansible or invoke <code>ansible-playbook</code>; <code>sand</code> does
+instruction to install Ansible or invoke <code>ansible-playbook</code>; <code>sandbar</code> does
 both, inside the guest, on your behalf.</p>
 <h2 id="the-fileset-is-embedded-in-the-binary">The fileset is embedded in the binary</h2>
 <p><code>playbook_embed.go</code> at the repository root <code>go:embed</code>s the whole fileset —
 <code>site.yml</code>, <code>ansible.cfg</code>, <code>inventory</code>, <code>roles/</code>, and <code>group_vars/</code> — into
 the <code>sandbar</code> module as <code>PlaybookFS</code>. This is what lets a Homebrew-installed
-<code>sand</code> provision without a repository checkout anywhere on disk: the
+<code>sandbar</code> provision without a repository checkout anywhere on disk: the
 playbook travels inside the compiled binary.</p>
 <h2 id="how-the-playbook-directory-is-resolved">How the playbook directory is resolved</h2>
 <p>At run time, <code>provision.LocatePlaybook()</code> (<code>internal/provision/playbook.go</code>)
@@ -1538,7 +1538,7 @@ picks the directory to mount into the VM in two tiers:</p>
    <code>PlaybookFS</code> to a fresh private temp directory and uses that.</li>
 </ol>
 <p>This is the single most useful fact on this page for a contributor: <strong>if
-you run <code>go run ./cmd/sand</code> from inside this checkout, your uncommitted
+you run <code>go run ./cmd/sandbar</code> from inside this checkout, your uncommitted
 edits to <code>roles/</code> or <code>site.yml</code> take effect on the very next provision.</strong>
 There is no rebuild-and-reinstall step to remember.</p>
 <h2 id="how-it-reaches-the-guest-and-what-runs-where">How it reaches the guest, and what runs where</h2>
@@ -1550,7 +1550,7 @@ the backend:</p>
 <li><strong>On Lima</strong> (local or remote), the resolved directory is mounted into the
   guest as its <strong>only</strong> mount, and that mount is <strong>read-only</strong>.</li>
 <li><strong>On Proxmox</strong>, there is no mount at all — there's no shared filesystem to
-  make one from. <code>sand</code> packages the fileset into a gzipped tar
+  make one from. <code>sandbar</code> packages the fileset into a gzipped tar
   (<code>buildPlaybookTar</code>) and streams it to the guest over the SSH connection's
   stdin, where it's unpacked. Same fileset, no mount.</li>
 </ul>
@@ -1595,7 +1595,7 @@ values:</p>
 </tr>
 </tbody>
 </table>
-<p>This split is what lets <code>sand</code> build one expensive base image and clone it
+<p>This split is what lets <code>sandbar</code> build one expensive base image and clone it
 cheaply for every subsequent VM, installing current agent releases alongside
 identity-specific work against each clone.</p>
 <h2 id="roles">Roles</h2>
@@ -1604,10 +1604,10 @@ identity-specific work against each clone.</p>
 <code>self-review</code>, and <code>project</code>.
 <code>site.yml</code> runs them in that order, gated by
 <code>provision_phase</code> as above. <code>samba</code> is worth calling out specifically:
-<code>internal/provision/vars.go</code> sets <code>samba_enabled: false</code> on every <code>sand</code>
+<code>internal/provision/vars.go</code> sets <code>samba_enabled: false</code> on every <code>sandbar</code>
 run (files move with <code>limactl copy</code> or <code>scp</code> instead of a Samba share),
 so the role exists in the tree and is exercised by CI's syntax check, but it
-does not execute on the <code>sand</code> path.</p>
+does not execute on the <code>sandbar</code> path.</p>
 <p>The four agent roles write configuration only. <code>agent-install</code> runs after
 them, when at least one agent is selected, and starts every selected
 installer at once as an Ansible async job, then waits on each under its own
@@ -1629,7 +1629,7 @@ file and installs one shared <code>sandbar-environment</code> skill at
 <code>~/.config/opencode/AGENTS.md</code>. One skill reference, <code>this-vm.md</code>, is a
 template filled from <code>sandbar_vm_name</code> and <code>sandbar_profile_type</code>, which
 <code>BuildExtraVars</code> emits for <code>full</code> and <code>finalize</code>: an agent cannot discover the
-name host-side <code>sand</code> commands take, or which profile type decides how a guest
+name host-side <code>sandbar</code> commands take, or which profile type decides how a guest
 port is reached, from inside the guest. The role preserves other text, file modes, and
 unrelated skills; it fails on a user-owned skill at either destination instead
 of replacing it. It does not run for the base phase or a VM with no selected
@@ -1642,15 +1642,15 @@ or a replacement for an agent's system prompt. The shared files under
 on every push and pull request, so a syntax error anywhere in the playbook
 fails CI fast — this is the one place in the pipeline where
 <code>ansible-playbook</code> runs directly, and it exists purely to validate the
-fileset that <code>sand</code> embeds.</p>
+fileset that <code>sandbar</code> embeds.</p>
 <h2 id="inventory-is-vestigial"><code>inventory</code> is vestigial</h2>
 <p><code>inventory</code> still contains a single placeholder host
 (<code>ansible_host=CHANGE_ME</code>), and it is part of the embedded fileset. It is a
 holdover from before the Go conversion, when the playbook was run directly
-against a real inventory. On the <code>sand</code> path it is unused: <code>sand</code> invokes
+against a real inventory. On the <code>sandbar</code> path it is unused: <code>sandbar</code> invokes
 Ansible with <code>-i localhost,</code> inside the guest and never reads this file.
 It stays in the tree because it is embedded and harmless, not because
-anything on the <code>sand</code> path consults it.</p>
+anything on the <code>sandbar</code> path consults it.</p>
 
 
 

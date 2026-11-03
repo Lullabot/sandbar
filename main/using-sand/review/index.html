@@ -276,7 +276,7 @@
           
   
   
-  Using sand
+  Using sandbar
 
         </a>
       </li>
@@ -479,7 +479,7 @@
   <span class="md-ellipsis">
     
   
-    About sand
+    About sandbar
   
 
     
@@ -673,7 +673,7 @@
   <span class="md-ellipsis">
     
   
-    Using sand
+    Using sandbar
   
 
     
@@ -689,7 +689,7 @@
             <span class="md-nav__icon md-icon"></span>
             
   
-    Using sand
+    Using sandbar
   
 
           </label>
@@ -1679,12 +1679,12 @@
 
 
 <h1 id="reviewing-changes-in-a-browser">Reviewing changes in a browser</h1>
-<p>Use <code>sand land NAME PATH --review</code> to review a checkout's diff in your
+<p>Use <code>sandbar land NAME PATH --review</code> to review a checkout's diff in your
 browser, including uncommitted and unpushed changes. The review server runs
 inside the VM. Your browser displays the diff, and your comments are saved
 back into the checkout for the agent to read.</p>
 <p>The browser interface comes from <a href="https://www.npmjs.com/package/@self-review/serve"><code>@self-review/serve</code></a>, part of the
-<a href="https://github.com/e0ipso/self-review">self-review</a> project. <code>sand</code> starts the server, forwards its port,
+<a href="https://github.com/e0ipso/self-review">self-review</a> project. <code>sandbar</code> starts the server, forwards its port,
 opens your browser, and stops the session when you finish.</p>
 <h2 id="getting-a-vm-that-has-it">Getting a VM that has it</h2>
 <p>The review tool is included in every base image and runs only when you open
@@ -1694,9 +1694,9 @@ when a new base image is published; changing the source pin alone does not
 update that image. Existing VMs need to be reset from an updated base or
 replaced to get the newer tool.</p>
 <h2 id="opening-a-review">Opening a review</h2>
-<p>The VM must be running. Run <code>sand land NAME</code> to list its known checkouts,
+<p>The VM must be running. Run <code>sandbar land NAME</code> to list its known checkouts,
 then use a path from that list:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>sand<span class="w"> </span>land<span class="w"> </span>NAME<span class="w"> </span>PATH<span class="w"> </span>--review
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>sandbar<span class="w"> </span>land<span class="w"> </span>NAME<span class="w"> </span>PATH<span class="w"> </span>--review
 </code></pre></div>
 <p>In the TUI, press <code>l</code> on the VM's tile to open the
 <a href="../files-and-shells/#landing">Landing pane</a>, select a checkout, and press <code>v</code>.
@@ -1705,19 +1705,19 @@ row <code>reviewing…</code> and adds the URL when the server is ready.</p>
 <p>A review does not require a pushed branch, a configured remote, or <code>gh</code>.</p>
 <ol>
 <li>
-<p><code>sand</code> chooses the diff's base commit. It uses the parent of the oldest
+<p><code>sandbar</code> chooses the diff's base commit. It uses the parent of the oldest
    commit absent from all remote-tracking branches in the guest. If it
    cannot use that parent, it tries the nearest common ancestor with <code>main</code>,
    <code>master</code>, or the checkout's recorded default branch. If neither method
    finds a base, the review server uses its default range. The diff also
    includes uncommitted and untracked files.</p>
-<p>Before starting the server, <code>sand</code> prints the base commit, its date,
+<p>Before starting the server, <code>sandbar</code> prints the base commit, its date,
 and the number of commits and files to review. For example:
 <code>everything since 6ac1f20b1e77 (2026-09-18, 5 commits, 12 files)</code>.
-If the range is too large for the review tool, <code>sand</code> stops and names
+If the range is too large for the review tool, <code>sandbar</code> stops and names
 the base commit so you can check it.
-2. <code>sand</code> starts the server in the checkout. The server chooses a free port
-   inside the VM. <code>sand</code> makes that port reachable from your workstation
+2. <code>sandbar</code> starts the server in the checkout. The server chooses a free port
+   inside the VM. <code>sandbar</code> makes that port reachable from your workstation
    (see <a href="#reachability">Reachability</a>), waits for a response, and opens your
    default browser.
 3. The browser displays the checkout's file tree and diff.</p>
@@ -1727,19 +1727,19 @@ the base commit so you can check it.
 <p>With self-review 2.x, use the complete URL, including <code>/#cap=…</code>. That fragment
 contains the session key the browser needs to load the review. The page removes
 it from the address bar after loading; to reopen the review, use the original
-URL shown by <code>sand</code>. Existing VMs with self-review 1.x also work.</p>
+URL shown by <code>sandbar</code>. Existing VMs with self-review 1.x also work.</p>
 <p>You can run multiple CLI reviews at once, on the same VM or different VMs.
 The <strong>TUI runs one review at a time</strong>. Trying to review another checkout
 while a session is running or still shutting down leaves a message in the
 session log.</p>
 <h2 id="reviewing-only-part-of-a-branch">Reviewing only part of a branch</h2>
-<p>By default, <code>sand</code> chooses a base commit for the review and includes all
+<p>By default, <code>sandbar</code> chooses a base commit for the review and includes all
 changes since that commit plus any uncommitted work. You can instead review
 just the commits or staged changes you specify, with precise control over the
 reviewed range.</p>
 <h3 id="from-the-cli">From the CLI</h3>
 <p>Add <code>--</code> followed by <code>git diff</code> arguments after the <code>--review</code> flag:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>sand<span class="w"> </span>land<span class="w"> </span>NAME<span class="w"> </span>PATH<span class="w"> </span>--review<span class="w"> </span>--<span class="w"> </span>HEAD~2
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>sandbar<span class="w"> </span>land<span class="w"> </span>NAME<span class="w"> </span>PATH<span class="w"> </span>--review<span class="w"> </span>--<span class="w"> </span>HEAD~2
 </code></pre></div>
 <p>This reviews the working tree against the last two commits (equivalent to
 <code>git diff HEAD~2</code>). Other examples:</p>
@@ -1752,20 +1752,20 @@ reviewed range.</p>
 </thead>
 <tbody>
 <tr>
-<td><code>sand land NAME PATH --review -- HEAD~2...HEAD</code></td>
+<td><code>sandbar land NAME PATH --review -- HEAD~2...HEAD</code></td>
 <td>Only the last two commits, no uncommitted changes</td>
 </tr>
 <tr>
-<td><code>sand land NAME PATH --review -- --staged</code></td>
+<td><code>sandbar land NAME PATH --review -- --staged</code></td>
 <td>Only the changes you have staged for commit</td>
 </tr>
 <tr>
-<td><code>sand land NAME PATH --review -- HEAD~10</code></td>
+<td><code>sandbar land NAME PATH --review -- HEAD~10</code></td>
 <td>The last ten commits plus uncommitted work</td>
 </tr>
 </tbody>
 </table>
-<p>When you provide a range, <code>sand</code> skips its automatic base selection and the
+<p>When you provide a range, <code>sandbar</code> skips its automatic base selection and the
 file-count guard. A saved review is still carried in, so comments you wrote
 earlier are there to keep, edit, or drop, and <code>--clean</code> still discards it
 first.</p>
@@ -1795,11 +1795,11 @@ stops the session without saving them.</p>
 <p>In the TUI, <strong>leaving the Landing pane does not end the review</strong>. You can
 press <code>esc</code>, open a shell with <code>S</code>, or visit another VM while the browser
 review stays open. To cancel, return to the checkout's row and press <code>v</code>;
-the footer reads <code>v cancel review</code>. Quitting <code>sand</code> also stops the review,
+the footer reads <code>v cancel review</code>. Quitting <code>sandbar</code> also stops the review,
 with a confirmation naming the checkout.</p>
 <h2 id="picking-up-where-you-left-off">Picking up where you left off</h2>
 <p>A finished review leaves <code>review.xml</code> in the checkout. When you open another
-review there, <code>sand</code> loads the saved comments and viewed-file markers:</p>
+review there, <code>sandbar</code> loads the saved comments and viewed-file markers:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>carrying in the comments already in review.xml
 <a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>[serve] Resumed 7 comments and 4 viewed files from /home/claude/…/review.xml
 </code></pre></div>
@@ -1820,7 +1820,7 @@ same file with the result.</p>
 </tr>
 <tr>
 <td>CLI</td>
-<td>Run <code>sand land NAME PATH --review --clean</code>.</td>
+<td>Run <code>sandbar land NAME PATH --review --clean</code>.</td>
 </tr>
 </tbody>
 </table>
@@ -1828,7 +1828,7 @@ same file with the result.</p>
 starting the server. The TUI asks for confirmation, even if neither file
 exists. The CLI deletes them without a prompt.</p>
 <h2 id="the-assistant-skills">The assistant skills</h2>
-<p>When provisioning includes an initial project clone, <code>sand</code> installs three
+<p>When provisioning includes an initial project clone, <code>sandbar</code> installs three
 self-review skills into that checkout before you start an agent session:</p>
 <table>
 <thead>
@@ -1873,7 +1873,7 @@ copy.</p>
 <div class="admonition note">
 <p class="admonition-title">Skills tracked by your project are kept</p>
 <p>If the repository already tracks its own <code>.agents/skills/self-review-*</code> or
-<code>.claude/skills/self-review-*</code> files in Git, <code>sand</code> leaves those paths
+<code>.claude/skills/self-review-*</code> files in Git, <code>sandbar</code> leaves those paths
 unchanged.</p>
 </div>
 <p><a id="none-of-it-shows-up-in-git-status"></a></p>
@@ -1889,7 +1889,7 @@ path selected by <code>core.excludesFile</code>. It does not change your project
 <code>/self-review-apply review.xml</code>. The saved feedback is already inside the VM,
 where the agent is working. You do not need to download or copy it.</p>
 <h2 id="reachability">Reachability</h2>
-<p>The server listens on the VM's loopback address, <code>127.0.0.1</code>. <code>sand</code> makes
+<p>The server listens on the VM's loopback address, <code>127.0.0.1</code>. <code>sandbar</code> makes
 it reachable at a loopback address on your workstation:</p>
 <ul>
 <li><strong>Local Lima</strong> automatically forwards the guest port to the same port
@@ -1901,7 +1901,7 @@ it reachable at a loopback address on your workstation:</p>
 </ul>
 <p>The guest server and any SSH tunnel stop when you finish or cancel the
 review. The diff and your comments travel between the VM and your browser.
-<code>sand</code> does not copy a checkout onto your workstation or push it to a forge.</p>
+<code>sandbar</code> does not copy a checkout onto your workstation or push it to a forge.</p>
 <div class="admonition warning">
 <p class="admonition-title">Other users of a shared remote Lima host can read the review</p>
 <p>Lima forwards the review port to <code>127.0.0.1</code> on the host running the VM.
@@ -1916,13 +1916,13 @@ not share.</p>
 <h3 id="if-the-review-never-becomes-reachable">If the review never becomes reachable</h3>
 <p>Local Lima must use the same port number on the guest and workstation. If
 another application on your workstation already uses the port the guest
-selected, forwarding fails and the review times out. <code>sand</code> reports the
+selected, forwarding fails and the review times out. <code>sandbar</code> reports the
 port. Run the review again to select another port; the review server has no
 option to request a specific one.</p>
 <h2 id="limits">Limits</h2>
 <p>Automatic resumption uses only the default <code>review.xml</code> path. If you set
 <code>output-file</code> in <code>.self-review.yaml</code> or
-<code>~/.config/self-review/config.yaml</code>, <code>sand</code> does not load the saved review
+<code>~/.config/self-review/config.yaml</code>, <code>sandbar</code> does not load the saved review
 automatically. A clean review also deletes only the default <code>review.xml</code>
 and <code>review.guide.xml</code> files.</p>
 <p>Self-review 2.x requires a project's <code>.self-review.yaml</code> <code>output-file</code> to stay

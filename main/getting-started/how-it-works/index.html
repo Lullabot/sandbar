@@ -276,7 +276,7 @@
           
   
   
-  Using sand
+  Using sandbar
 
         </a>
       </li>
@@ -484,7 +484,7 @@
   <span class="md-ellipsis">
     
   
-    About sand
+    About sandbar
   
 
     
@@ -775,7 +775,7 @@
   <span class="md-ellipsis">
     
   
-    Using sand
+    Using sandbar
   
 
     
@@ -791,7 +791,7 @@
             <span class="md-nav__icon md-icon"></span>
             
   
-    Using sand
+    Using sandbar
   
 
           </label>
@@ -1467,11 +1467,11 @@
 
 
 <h1 id="how-provisioning-works">How Provisioning Works</h1>
-<p><code>sand</code> splits provisioning into two passes so the expensive work happens
+<p><code>sandbar</code> splits provisioning into two passes so the expensive work happens
 once, not on every VM. This is the same everywhere a VM can run — on your
 own machine, on a remote host, or on Proxmox.</p>
 <pre class="mermaid"><code>graph TD
-    A[sand create] --&gt; B{Base image exists?}
+    A[sandbar create] --&gt; B{Base image exists?}
     B -- no --&gt; C[Build the base image: heavy install]
     C --&gt; D[Stop the base image]
     B -- yes --&gt; D
@@ -1479,14 +1479,14 @@ own machine, on a remote host, or on Proxmox.</p>
     E --&gt; F[Finalize: selected agents, hostname, git identity, optional repo clone]
     F --&gt; G[Ready: restart only if required]</code></pre>
 <h2 id="the-base-image">The base image</h2>
-<p>The first time you create a VM, <code>sand</code> runs a heavy install into a stopped
+<p>The first time you create a VM, <code>sandbar</code> runs a heavy install into a stopped
 VM named <code>sandbar-base</code>. This installs development tools and shared
 runtimes. Coding agents are excluded from the base. See <a href="../available-tools/">Available
 Tools</a> for the full toolchain.</p>
 <p>Because the base image carries no identity or secrets, it's safe to keep
-around and reuse indefinitely — <code>sand</code> rebuilds it automatically if the
+around and reuse indefinitely — <code>sandbar</code> rebuilds it automatically if the
 underlying provisioning logic has changed since it was built, or you can
-force a rebuild yourself with <code>sand create --rebuild</code> (or by deleting
+force a rebuild yourself with <code>sandbar create --rebuild</code> (or by deleting
 <code>sandbar-base</code> and creating a new VM).</p>
 <p>Each place you run VMs gets its own base image, built the first time you
 create a VM there. A base image on your laptop and one on a server are
@@ -1504,7 +1504,7 @@ only when the guest reports a reboot is required.</p>
 <p>Reset repeats the per-VM installs using that VM's recorded selections.
 The optional <a href="../../using-sand/tui/#resetting-a-vm">agent preservation checkbox</a>
 keeps settings and files across reset; executable releases are installed fresh.
-When upgrading from an older sand, base maintenance removes legacy agent
+When upgrading from an older sandbar, base maintenance removes legacy agent
 installs before cloning. Changing agent choices alone does not invalidate
 the base's dependency stamp.</p>
 <h2 id="why-the-split">Why the split</h2>
@@ -1539,13 +1539,13 @@ git configuration.</p>
 <td>a PVE clone of that template</td>
 </tr>
 <tr>
-<td><code>sand</code> reaches the guest over</td>
+<td><code>sandbar</code> reaches the guest over</td>
 <td><code>limactl shell</code>, or SSH for a remote host</td>
 <td>SSH, to the address the guest agent reports</td>
 </tr>
 </tbody>
 </table>
-<p>For a remote host, <code>sand</code> runs the same <code>limactl</code> commands it would run
+<p>For a remote host, <code>sandbar</code> runs the same <code>limactl</code> commands it would run
 locally — it only changes <em>where</em> they run. See <a href="../../using-sand/connection-profiles/">Where VMs
 Run</a>.</p>
 

@@ -276,7 +276,7 @@
           
   
   
-  Using sand
+  Using sandbar
 
         </a>
       </li>
@@ -484,7 +484,7 @@
   <span class="md-ellipsis">
     
   
-    About sand
+    About sandbar
   
 
     
@@ -576,10 +576,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#install-sand" class="md-nav__link">
+  <a href="#install-sandbar" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Install sand
+        Install sandbar
       
     </span>
   </a>
@@ -764,7 +764,7 @@
   <span class="md-ellipsis">
     
   
-    Using sand
+    Using sandbar
   
 
     
@@ -780,7 +780,7 @@
             <span class="md-nav__icon md-icon"></span>
             
   
-    Using sand
+    Using sandbar
   
 
           </label>
@@ -1392,10 +1392,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#install-sand" class="md-nav__link">
+  <a href="#install-sandbar" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Install sand
+        Install sandbar
       
     </span>
   </a>
@@ -1446,39 +1446,49 @@
 
 <h1 id="installation">Installation</h1>
 <h2 id="prerequisites">Prerequisites</h2>
-<p><code>sand</code> itself runs on macOS or Linux. What else you need depends on where
+<p><code>sandbar</code> itself runs on macOS or Linux. What else you need depends on where
 you want the VMs to run.</p>
 <p><strong>To run VMs on this machine</strong> (the default), you need
 <a href="https://lima-vm.io">Lima</a> and a working hypervisor. macOS has a hypervisor
 built in; on Linux, Lima needs QEMU/KVM — see the <a href="https://lima-vm.io/docs/installation/">Lima installation
 docs</a> if <code>limactl</code> doesn't already
 work on your machine. You don't need to install Lima separately: Homebrew
-pulls it in as a dependency of the <code>sand</code> formula below.</p>
-<p><strong>To run VMs somewhere else</strong>, this machine needs nothing but <code>sand</code>:</p>
+pulls it in as a dependency of the <code>sandbar</code> formula below.</p>
+<p><strong>To run VMs somewhere else</strong>, this machine needs nothing but <code>sandbar</code>:</p>
 <ul>
 <li>On <strong>another machine over SSH</strong>, Lima and the hypervisor live on that
   machine instead, and you need passwordless SSH to it.</li>
-<li>On a <strong>Proxmox VE host</strong>, no Lima is involved at all — <code>sand</code> talks to the
+<li>On a <strong>Proxmox VE host</strong>, no Lima is involved at all — <code>sandbar</code> talks to the
   Proxmox API over HTTPS. The host needs a one-time
   <a href="../../using-sand/proxmox/">token and pool setup</a>.</li>
 </ul>
 <p>Either way, add the machine as a <a href="../../using-sand/connection-profiles/">Connection
-Profile</a> once and <code>sand</code> uses it from
+Profile</a> once and <code>sandbar</code> uses it from
 then on.</p>
-<h2 id="install-sand">Install <code>sand</code></h2>
-<p><code>sand</code> ships as a prebuilt Homebrew <strong>formula</strong> (not a cask — deliberately,
+<h2 id="install-sandbar">Install <code>sandbar</code></h2>
+<p><code>sandbar</code> ships as a prebuilt Homebrew <strong>formula</strong> (not a cask — deliberately,
 so the same install works on both macOS and Linux) from the
 <a href="https://github.com/Lullabot/homebrew-sandbar"><code>lullabot/homebrew-sandbar</code></a>
 tap:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>brew<span class="w"> </span>install<span class="w"> </span>lullabot/sandbar/sand
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>brew<span class="w"> </span>install<span class="w"> </span>lullabot/sandbar/sandbar
 </code></pre></div>
 <p>That taps the repository and installs the formula in one step.</p>
+<p>The command was previously named <code>sand</code>. For the next few releases, packages
+include a <code>sand → sandbar</code> compatibility symlink. Invoking <code>sand</code> prints a
+deprecation warning to stderr; existing scripts continue to work, but should
+switch to <code>sandbar</code>. Existing VMs, profiles, secrets, and state paths are retained.</p>
+<p>If you installed the old Homebrew formula, replace it with the new one:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>brew<span class="w"> </span>uninstall<span class="w"> </span>sand
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>brew<span class="w"> </span>install<span class="w"> </span>lullabot/sandbar/sandbar
+</code></pre></div>
+<p>For a release archive, extract both <code>sandbar</code> and its <code>sand</code> symlink into the
+same directory on your PATH.</p>
 <h2 id="verify-it-worked">Verify it worked</h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>sand<span class="w"> </span>version
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>sandbar<span class="w"> </span>version
 </code></pre></div>
 <h2 id="upgrading-and-removing">Upgrading and removing</h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>brew<span class="w"> </span>upgrade<span class="w"> </span>sand
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>brew<span class="w"> </span>uninstall<span class="w"> </span>sand<span class="w">   </span><span class="c1"># does not delete your VMs</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>brew<span class="w"> </span>upgrade<span class="w"> </span>sandbar
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>brew<span class="w"> </span>uninstall<span class="w"> </span>sandbar<span class="w">   </span><span class="c1"># does not delete your VMs</span>
 </code></pre></div>
 <p>Uninstalling leaves every VM where it is. Delete the ones you don't want
 first — press <code>d</code> on a tile in the board, or, for a local VM, run

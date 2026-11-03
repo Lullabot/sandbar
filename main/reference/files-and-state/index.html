@@ -274,7 +274,7 @@
           
   
   
-  Using sand
+  Using sandbar
 
         </a>
       </li>
@@ -479,7 +479,7 @@
   <span class="md-ellipsis">
     
   
-    About sand
+    About sandbar
   
 
     
@@ -668,7 +668,7 @@
   <span class="md-ellipsis">
     
   
-    Using sand
+    Using sandbar
   
 
     
@@ -684,7 +684,7 @@
             <span class="md-nav__icon md-icon"></span>
             
   
-    Using sand
+    Using sandbar
   
 
           </label>
@@ -1523,7 +1523,7 @@
 
 
 <h1 id="files-and-state">Files and State</h1>
-<p>Where <code>sand</code> keeps its config, state, and per-VM files — on the host and in
+<p>Where <code>sandbar</code> keeps its config, state, and per-VM files — on the host and in
 the guest. This is the <strong>only</strong> page in these docs that spells these paths
 out; every other page links here instead of restating them.</p>
 <h2 id="host-paths">Host paths</h2>
@@ -1538,13 +1538,13 @@ out; every other page links here instead of restating them.</p>
 <tbody>
 <tr>
 <td><code>${XDG_CONFIG_HOME:-~/.config}/sandbar/profiles.yaml</code></td>
-<td>The <a href="../../using-sand/connection-profiles/">Connection Profiles</a> config: every location <code>sand</code> can run VMs on (the permanent Local profile, plus any <code>remote-ssh</code> or <code>proxmox</code> profiles you've added), each profile's connection settings, and which profile was last used. <strong>Secret-free</strong> — no password or key material, only a path to a key file — and hand-editable YAML.</td>
-<td>Yes, but you lose every remote profile's connection settings (host/user/port/etc.) — <code>sand</code> reseeds a fresh Local-only file on next start. The VMs and their disks on any remote host are untouched; you'd need to re-add a profile pointing at that host to manage them again.</td>
+<td>The <a href="../../using-sand/connection-profiles/">Connection Profiles</a> config: every location <code>sandbar</code> can run VMs on (the permanent Local profile, plus any <code>remote-ssh</code> or <code>proxmox</code> profiles you've added), each profile's connection settings, and which profile was last used. <strong>Secret-free</strong> — no password or key material, only a path to a key file — and hand-editable YAML.</td>
+<td>Yes, but you lose every remote profile's connection settings (host/user/port/etc.) — <code>sandbar</code> reseeds a fresh Local-only file on next start. The VMs and their disks on any remote host are untouched; you'd need to re-add a profile pointing at that host to manage them again.</td>
 </tr>
 <tr>
 <td><code>${XDG_DATA_HOME:-~/.local/share}/sandbar/managed-vms.json</code></td>
-<td>The secret-free index of every <code>sand</code>-managed VM and golden template. Schema version 4 adds scoped template records and each VM's optional <code>templateSource</code> provenance to the schema-v3 <code>(connection scope, name)</code> model.</td>
-<td>Yes, but you lose reset defaults, template metadata, and <code>sand</code>'s record of which VMs it manages. VM and template disks on their providers are untouched.</td>
+<td>The secret-free index of every <code>sandbar</code>-managed VM and golden template. Schema version 4 adds scoped template records and each VM's optional <code>templateSource</code> provenance to the schema-v3 <code>(connection scope, name)</code> model.</td>
+<td>Yes, but you lose reset defaults, template metadata, and <code>sandbar</code>'s record of which VMs it manages. VM and template disks on their providers are untouched.</td>
 </tr>
 <tr>
 <td><code>${XDG_DATA_HOME:-~/.local/share}/sandbar/secrets.json</code></td>
@@ -1553,42 +1553,42 @@ out; every other page links here instead of restating them.</p>
 </tr>
 <tr>
 <td><code>${XDG_DATA_HOME:-~/.local/share}/sandbar/managed-vms.json.lock</code>, <code>…/secrets.json.lock</code></td>
-<td>Empty files used to coordinate writes to the managed index and secrets store. Before changing either store, <code>sand</code> locks it and re-reads its current contents so concurrent processes keep each other's updates. If the lock is unavailable or the wait times out, the write proceeds without it.</td>
-<td>Delete only when no <code>sand</code> process is running. They contain no data and are re-created when needed, but deleting an active lock can allow conflicting writes.</td>
+<td>Empty files used to coordinate writes to the managed index and secrets store. Before changing either store, <code>sandbar</code> locks it and re-reads its current contents so concurrent processes keep each other's updates. If the lock is unavailable or the wait times out, the write proceeds without it.</td>
+<td>Delete only when no <code>sandbar</code> process is running. They contain no data and are re-created when needed, but deleting an active lock can allow conflicting writes.</td>
 </tr>
 <tr>
 <td><code>${XDG_STATE_HOME:-~/.local/state}/sandbar/onboarding.json</code></td>
-<td>Whether onboarding has been acknowledged (<code>{"acknowledged":true}</code>). Sand writes it with mode <code>0600</code> in a <code>0700</code> directory.</td>
-<td>Yes. The screen appears again the next time sand starts. VM, profile, and secret data are unaffected.</td>
+<td>Whether onboarding has been acknowledged (<code>{"acknowledged":true}</code>). Sandbar writes it with mode <code>0600</code> in a <code>0700</code> directory.</td>
+<td>Yes. The screen appears again the next time sandbar starts. VM, profile, and secret data are unaffected.</td>
 </tr>
 <tr>
 <td><code>${XDG_CACHE_HOME:-~/.cache}/sandbar/release-check.json</code></td>
 <td>Disposable release-check metadata: the last attempt time and last validated stable release/tag URL. Created with mode <code>0600</code> in a <code>0700</code> directory.</td>
-<td>Yes. Sand can check GitHub again on its next startup; no VM or configuration data is affected.</td>
+<td>Yes. Sandbar can check GitHub again on its next startup; no VM or configuration data is affected.</td>
 </tr>
 <tr>
 <td><code>${XDG_CACHE_HOME:-~/.cache}/sandbar/release-check.json.lock</code></td>
-<td>Advisory lock used to reserve a due release-check attempt before networking and update the shared cache safely when multiple sand processes run. It prevents duplicate daily requests and stale writes.</td>
-<td>Delete only when no <code>sand</code> process is running. It contains no user data and is re-created as needed; removing an active lock can allow duplicate checks or conflicting cache updates.</td>
+<td>Advisory lock used to reserve a due release-check attempt before networking and update the shared cache safely when multiple sandbar processes run. It prevents duplicate daily requests and stale writes.</td>
+<td>Delete only when no <code>sandbar</code> process is running. It contains no user data and is re-created as needed; removing an active lock can allow duplicate checks or conflicting cache updates.</td>
 </tr>
 <tr>
 <td><code>${LIMA_HOME:-~/.lima}</code></td>
-<td>Lima's own instance store — disk images, <code>lima.yaml</code>, per-instance logs. <code>sand</code> does not own this directory; Lima does.</td>
-<td><code>sand</code> never deletes it directly; use <code>limactl delete</code> or Lima's own tooling.</td>
+<td>Lima's own instance store — disk images, <code>lima.yaml</code>, per-instance logs. <code>sandbar</code> does not own this directory; Lima does.</td>
+<td><code>sandbar</code> never deletes it directly; use <code>limactl delete</code> or Lima's own tooling.</td>
 </tr>
 <tr>
 <td><code>${XDG_STATE_HOME:-~/.local/state}/sandbar/proxmox/&lt;host&gt;-&lt;node&gt;-&lt;pool&gt;/</code></td>
-<td>For a <a href="../../using-sand/proxmox/">Proxmox</a> profile only: <code>sand</code>'s local state <em>about</em> that endpoint's VMs (the base-version stamp and its lock). Proxmox itself owns the VMs — this holds only what has no home on the Proxmox host. One directory per host/node/pool.</td>
-<td>Yes — <code>sand</code> re-stamps the base on the next build. The VMs on the Proxmox host are untouched.</td>
+<td>For a <a href="../../using-sand/proxmox/">Proxmox</a> profile only: <code>sandbar</code>'s local state <em>about</em> that endpoint's VMs (the base-version stamp and its lock). Proxmox itself owns the VMs — this holds only what has no home on the Proxmox host. One directory per host/node/pool.</td>
+<td>Yes — <code>sandbar</code> re-stamps the base on the next build. The VMs on the Proxmox host are untouched.</td>
 </tr>
 <tr>
 <td>Proxmox API <strong>token file</strong> (path you chose, e.g. <code>~/.config/sandbar/pve1.token</code>)</td>
-<td>The <code>user@realm!tokenid=value</code> credential a Proxmox profile's <code>token_file</code> points at. <strong>Not</strong> managed by <code>sand</code> and never written by it — you create it (see <a href="../../using-sand/proxmox/">Proxmox VE</a>). Must be mode <code>0600</code>; <code>sand</code> refuses to read a looser one.</td>
+<td>The <code>user@realm!tokenid=value</code> credential a Proxmox profile's <code>token_file</code> points at. <strong>Not</strong> managed by <code>sandbar</code> and never written by it — you create it (see <a href="../../using-sand/proxmox/">Proxmox VE</a>). Must be mode <code>0600</code>; <code>sandbar</code> refuses to read a looser one.</td>
 <td>Only if you're prepared to re-issue the token — it's the sole secret that grants access to the pool.</td>
 </tr>
 <tr>
 <td><code>${XDG_CONFIG_HOME:-~/.config}/sandbar/drupalorg.token</code></td>
-<td>Your drupal.org account <strong>personal access token</strong>, read only on the host for <a href="../../using-sand/drupalorg-publishing/">publishing a guest checkout's commits to drupal.org</a>. <strong>Not</strong> managed by <code>sand</code> and never written by it — you create it, with the token as its only content. Must be mode <code>0600</code>; <code>sand</code> refuses to read a looser one, and refuses to publish at all if the file is absent. The path is a fixed <strong>convention, not a configured value</strong>: there is deliberately no <code>profiles.yaml</code> key and no form field for it, because the credential is workstation-global rather than per-location. It is deliberately <strong>not</strong> in the <a href="../../using-sand/secrets/">secrets store</a> either — that store exists to deliver secrets <em>into</em> a guest, and no drupal.org credential ever enters a VM (see <a href="../security-model/#publishing-to-drupalorg-agent-decides-what-host-decides-where">Security Model</a>).</td>
+<td>Your drupal.org account <strong>personal access token</strong>, read only on the host for <a href="../../using-sand/drupalorg-publishing/">publishing a guest checkout's commits to drupal.org</a>. <strong>Not</strong> managed by <code>sandbar</code> and never written by it — you create it, with the token as its only content. Must be mode <code>0600</code>; <code>sandbar</code> refuses to read a looser one, and refuses to publish at all if the file is absent. The path is a fixed <strong>convention, not a configured value</strong>: there is deliberately no <code>profiles.yaml</code> key and no form field for it, because the credential is workstation-global rather than per-location. It is deliberately <strong>not</strong> in the <a href="../../using-sand/secrets/">secrets store</a> either — that store exists to deliver secrets <em>into</em> a guest, and no drupal.org credential ever enters a VM (see <a href="../security-model/#publishing-to-drupalorg-agent-decides-what-host-decides-where">Security Model</a>).</td>
 <td>Only if you're prepared to re-issue the token. Deleting it disables publishing until you recreate it; nothing else is affected.</td>
 </tr>
 </tbody>
@@ -1598,7 +1598,7 @@ out; every other page links here instead of restating them.</p>
 <p>Each template is stored by its provider under the reserved name
 <code>sandbar-tmpl-&lt;name&gt;</code>. For Lima that is an instance directly under
 <code>${LIMA_HOME}</code>; Proxmox stores a real PVE template. Do not delete the backing
-instance directly: use <code>sand template delete &lt;name&gt;</code> so the scoped registry is
+instance directly: use <code>sandbar template delete &lt;name&gt;</code> so the scoped registry is
 updated as well. Template playbook-version metadata is used to report
 <code>current</code>, <code>stale</code>, or <code>unknown</code> status.</p>
 <h3 id="two-different-scope-dimensions">Two different "scope" dimensions</h3>
@@ -1622,7 +1622,7 @@ VM name → directory scope → key.</p>
 <p>If you installed an older version of this tool under its previous name,
 <code>claude-code-ansible</code>, its VM index lived at
 <code>${XDG_DATA_HOME:-~/.local/share}/claude-code-ansible/managed-vms.json</code>. The
-first time <code>sand</code> starts and finds no <code>sandbar/managed-vms.json</code> yet, it
+first time <code>sandbar</code> starts and finds no <code>sandbar/managed-vms.json</code> yet, it
 copies that legacy file into the new location — copy-then-verify-then-remove,
 so a crash mid-migration cannot lose it — and removes the old directory if it
 ends up empty. <strong>Your VMs are not lost</strong>; they are simply indexed under the

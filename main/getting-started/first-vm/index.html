@@ -276,7 +276,7 @@
           
   
   
-  Using sand
+  Using sandbar
 
         </a>
       </li>
@@ -484,7 +484,7 @@
   <span class="md-ellipsis">
     
   
-    About sand
+    About sandbar
   
 
     
@@ -786,7 +786,7 @@
   <span class="md-ellipsis">
     
   
-    Using sand
+    Using sandbar
   
 
     
@@ -802,7 +802,7 @@
             <span class="md-nav__icon md-icon"></span>
             
   
-    Using sand
+    Using sandbar
   
 
           </label>
@@ -1490,24 +1490,24 @@
 
 <h1 id="your-first-vm">Your First VM</h1>
 <h2 id="the-interactive-way">The interactive way</h2>
-<p>Run <code>sand</code> with no arguments to open the TUI board:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>sand
+<p>Run <code>sandbar</code> with no arguments to open the TUI board:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>sandbar
 </code></pre></div>
 <p>Press <code>n</code> to create a new VM, fill in the form, and confirm. Once it's
 running, select its tile and press <code>S</code> to get a shell inside it.</p>
 <h2 id="the-headless-way">The headless way</h2>
 <p>To create a VM without the TUI:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>sand<span class="w"> </span>create
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>sandbar<span class="w"> </span>create
 </code></pre></div>
 <p>Then connect with:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>sand<span class="w"> </span>shell<span class="w"> </span>NAME
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>sandbar<span class="w"> </span>shell<span class="w"> </span>NAME
 </code></pre></div>
 <p>See the <a href="../../using-sand/cli-reference/">CLI Reference</a> for the full flag
 list.</p>
 <p>To clone a private GitHub or GitLab project while creating the VM, provide a
 clone token with the repository URL. GitHub and GitLab.com are detected
 automatically. For a self-hosted GitLab URL, select GitLab in the form or use
-<code>sand create --clone-forge gitlab</code>; token setup and reset behavior are in
+<code>sandbar create --clone-forge gitlab</code>; token setup and reset behavior are in
 <a href="../../using-sand/secrets/#github-and-gitlab-tokens">Secrets</a>.</p>
 <h2 id="what-to-expect-the-first-time">What to expect the first time</h2>
 <p>The very first VM you create builds a shared base image (<code>sandbar-base</code>),
@@ -1516,17 +1516,17 @@ create after that clones the shared development tools and installs current
 releases of your selected agents. See <a href="../how-it-works/">How Provisioning Works</a> for why it's
 built this way.</p>
 <h2 id="putting-the-vm-somewhere-else">Putting the VM somewhere else</h2>
-<p>Both paths above create the VM on the machine you ran <code>sand</code> from. To put it
+<p>Both paths above create the VM on the machine you ran <code>sandbar</code> from. To put it
 on another machine or on a Proxmox host, add that machine as a profile once
 (press <code>p</code> in the board, then <code>n</code>), then pick it from the create form's
-profile selector — or pass <code>sand create --profile NAME</code> headlessly. Nothing
+profile selector — or pass <code>sandbar create --profile NAME</code> headlessly. Nothing
 else about the VM changes. See <a href="../../using-sand/connection-profiles/">Where VMs
 Run</a>.</p>
 <h2 id="logging-into-claude-code">Logging into Claude Code</h2>
-<p>When selected, <code>sand</code> installs the Claude Code CLI but does <strong>not</strong> provision a credential
+<p>When selected, <code>sandbar</code> installs the Claude Code CLI but does <strong>not</strong> provision a credential
 for it — no host-side token is copied into the VM. Shell into the VM (<code>S</code>
-on its tile, or <code>sand shell NAME</code>) and run <code>claude</code> with no arguments. On
-the first bare interactive run, <code>sand</code> asks whether you want to enable
+on its tile, or <code>sandbar shell NAME</code>) and run <code>claude</code> with no arguments. On
+the first bare interactive run, <code>sandbar</code> asks whether you want to enable
 Claude Code Remote Control, then walks you through sign-in and starts the
 session. Later runs go straight to the prompt.</p>
 <p><a href="https://code.claude.com/docs/en/remote-control">Remote Control</a> keeps Claude
@@ -1536,7 +1536,7 @@ Claude mobile app. That makes it useful for checking a long-running task away
 from your desk, replying when Claude needs a decision, attaching a photo from
 your phone, or asking Claude to notify you when tests finish.</p>
 <p>If you opt in, every interactive session connects automatically. If you
-decline, <code>sand</code> remembers the choice and leaves cross-machine access off. You
+decline, <code>sandbar</code> remembers the choice and leaves cross-machine access off. You
 can still enable one session later with <code>/remote-control</code> (or <code>/rc</code>), or turn
 the default on from Claude Code's <code>/config</code> screen. Remote Control is available
 for eligible Claude subscriptions and full-scope Claude.ai logins; API keys and
@@ -1561,7 +1561,7 @@ deliberate.</p>
 <p>If you created the VM with <code>--with-codex</code> (or enabled Codex in the TUI create
 form), the Codex CLI is provisioned but no credential is included. Shell into
 the VM and run <code>codex</code> with no arguments. On the first bare interactive run,
-<code>sand</code> asks whether you want to enable Codex remote-control support.</p>
+<code>sandbar</code> asks whether you want to enable Codex remote-control support.</p>
 <p>If you answer yes, the wrapper guides you through Codex's device-code login,
 sets up its persistent app server with remote control enabled, and runs the
 initial <code>codex remote-control pair</code> flow so you can pair another device with
@@ -1572,7 +1572,7 @@ when the VM boots, even before you open a shell.</p>
 locally. To connect another device later, run:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>codex<span class="w"> </span>remote-control<span class="w"> </span>pair
 </code></pre></div>
-<p>If you decline remote control, <code>sand</code> remembers that choice and opens Codex
+<p>If you decline remote control, <code>sandbar</code> remembers that choice and opens Codex
 normally. Later bare runs, commands with arguments, and non-interactive uses
 continue directly to the ordinary Codex CLI without another onboarding prompt.</p>
 
