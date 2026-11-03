@@ -132,11 +132,13 @@ func (p *proxmoxProvider) recreateInstance(ctx context.Context, cfg vm.CreateCon
 // half-built VM occupying a VMID on the cluster — unless the host asked to keep
 // it for inspection (see keepFailedVM).
 func (p *proxmoxProvider) provisionClone(ctx context.Context, cfg vm.CreateConfig, opts provision.CreateOptions, out io.Writer) error {
+	var rev revisionCapture
+	rev.wrap(&opts.OnSourceRevision, &opts.OnSetupRevision)
 	cloneVMID, err := p.ensureBaseAndClone(ctx, cfg, opts, out)
 	if err != nil {
 		return err
 	}
-	if err := p.finalizeClone(ctx, cloneVMID, cfg, out); err != nil {
+	if err := p.finalizeClone(ctx, cloneVMID, cfg, out, finalizeCapture{OnSetupRevision: opts.OnSetupRevision}); err != nil {
 		if keepFailedVM() {
 			reportKeptVM(cloneVMID, cfg.Name, out)
 			return fmt.Errorf("proxmox: creating %s (kept the partial VM, VMID %d, for inspection): %w", cfg.Name, cloneVMID, err)
@@ -144,6 +146,7 @@ func (p *proxmoxProvider) provisionClone(ctx context.Context, cfg vm.CreateConfi
 		p.cleanupVM(ctx, cloneVMID, cfg.Name, out)
 		return fmt.Errorf("proxmox: creating %s (removed the partial VM): %w", cfg.Name, err)
 	}
+	p.markCompleted(ctx, cfg, rev.source, rev.setup)
 	progress(out, "%s is ready\n", cfg.Name)
 	return nil
 }
@@ -215,7 +218,18 @@ func (p *proxmoxProvider) ensureBaseAndClone(ctx context.Context, cfg vm.CreateC
 	if err != nil {
 		return 0, err
 	}
-	return p.cloneFromTemplate(ctx, templateVMID, cfg, out)
+	cloneVMID, err := p.cloneFromTemplate(ctx, templateVMID, cfg, out)
+	if err == nil && opts.OnSourceRevision != nil {
+		revision := provision.ReadBaseVersion(p.files, cloneSource)
+		if opts.TemplateSource != "" {
+			revision = ""
+			if marker, ok, e := p.ProvenanceOf(ctx, cloneSource); e == nil && ok {
+				revision = marker.BaseRevision
+			}
+		}
+		opts.OnSourceRevision(revision)
+	}
+	return cloneVMID, err
 }
 
 // resolveCloneSource makes the clone source template exist and be current, and
@@ -615,7 +629,11 @@ func (p *proxmoxProvider) cloneFromTemplate(ctx context.Context, templateVMID in
 // cloud-init identity (and regenerate the drive), grow its disk to the requested
 // size, boot it, and run the finalize playbook. It runs OUTSIDE the base lock, so
 // concurrent creates overlap here.
-func (p *proxmoxProvider) finalizeClone(ctx context.Context, vmid int, cfg vm.CreateConfig, out io.Writer) error {
+type finalizeCapture struct {
+	OnSetupRevision func(string)
+}
+
+func (p *proxmoxProvider) finalizeClone(ctx context.Context, vmid int, cfg vm.CreateConfig, out io.Writer, capture ...finalizeCapture) error {
 	if err := p.applyCloudInitIdentity(ctx, vmid, cfg, out); err != nil {
 		return err
 	}
@@ -625,7 +643,11 @@ func (p *proxmoxProvider) finalizeClone(ctx context.Context, vmid int, cfg vm.Cr
 	if err := p.start(ctx, cfg.Name, out); err != nil {
 		return err
 	}
-	return p.runPlaybookPhase(ctx, cfg.Name, cfg, "finalize", cfg.EffectiveHostname(), out)
+	vars := provision.PreservationVars{}
+	if len(capture) > 0 {
+		vars.OnSetupRevision = capture[0].OnSetupRevision
+	}
+	return p.runPlaybookPhase(ctx, cfg.Name, cfg, "finalize", cfg.EffectiveHostname(), out, vars)
 }
 
 // applyCloudInitIdentity (re)asserts the guest login user and DHCP networking on
@@ -695,10 +717,14 @@ ansible-playbook -i localhost, --connection=local site.yml --extra-vars @"$vars"
 // selection, git identity and any
 // project-clone token — come from provision.BuildExtraVars, reused unchanged so
 // the toolset flags are never reimplemented here.
-func (p *proxmoxProvider) runPlaybookPhase(ctx context.Context, name string, cfg vm.CreateConfig, phase, hostname string, out io.Writer) error {
+func (p *proxmoxProvider) runPlaybookPhase(ctx context.Context, name string, cfg vm.CreateConfig, phase, hostname string, out io.Writer, preservation ...provision.PreservationVars) error {
 	dir, err := locatePlaybookFn()
 	if err != nil {
 		return fmt.Errorf("proxmox: locating the playbook: %w", err)
+	}
+	setupRevision := ""
+	if phase == "finalize" && len(preservation) > 0 && preservation[0].OnSetupRevision != nil {
+		setupRevision, _ = provision.SetupVersion(os.DirFS(dir))
 	}
 	tarball, err := buildPlaybookTar(dir)
 	if err != nil {
@@ -719,6 +745,9 @@ func (p *proxmoxProvider) runPlaybookPhase(ctx context.Context, name string, cfg
 	progress(out, "Provisioning %s (%s phase)\n", name, phase)
 	if err := p.Shell(ctx, name, bytes.NewReader(vars), out, "sudo", "bash", "-c", runPlaybookScript); err != nil {
 		return fmt.Errorf("proxmox: provisioning %s (%s phase): %w", name, phase, err)
+	}
+	if phase == "finalize" && len(preservation) > 0 && preservation[0].OnSetupRevision != nil {
+		preservation[0].OnSetupRevision(setupRevision)
 	}
 	return nil
 }
@@ -823,7 +852,7 @@ func (p *proxmoxProvider) resetInstance(ctx context.Context, cfg vm.CreateConfig
 
 	// A reset never asks for a base rebuild. A template-provenanced reset routes
 	// back to that same golden template; ordinary resets retain the base path.
-	cloneOpts := provision.CreateOptions{}
+	cloneOpts := provision.CreateOptions{OnSourceRevision: opts.OnSourceRevision}
 	if opts.TemplateSource != "" {
 		cloneOpts.TemplateSource = cfg.BaseName
 	}
@@ -947,7 +976,7 @@ func (p *proxmoxProvider) resetInstance(ctx context.Context, cfg vm.CreateConfig
 	if plan.Project.RestoresCheckout {
 		finCfg.CloneURL = ""
 	}
-	if err := p.runPlaybookPhase(ctx, cfg.Name, finCfg, "finalize", cfg.EffectiveHostname(), out); err != nil {
+	if err := p.runPlaybookPhase(ctx, cfg.Name, finCfg, "finalize", cfg.EffectiveHostname(), out, provision.PreservationVars{OnSetupRevision: opts.OnSetupRevision}); err != nil {
 		return stage.Fail(err)
 	}
 

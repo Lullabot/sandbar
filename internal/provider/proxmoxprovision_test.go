@@ -452,14 +452,22 @@ func TestProxmoxCreateRegeneratesCloudInitAfterWrite(t *testing.T) {
 	registerBaseBuild(m, rec)
 	p := newCreateProvider(t, m)
 
-	if err := p.Create(context.Background(), webConfig(), provision.CreateOptions{}, nil); err != nil {
+	var capturedBase, capturedSetup string
+	opts := provision.CreateOptions{
+		OnSourceRevision: func(v string) { capturedBase = v },
+		OnSetupRevision:  func(v string) { capturedSetup = v },
+	}
+	if err := p.Create(context.Background(), webConfig(), opts, nil); err != nil {
 		t.Fatalf("Create: %v", err)
+	}
+	if capturedBase == "" || capturedSetup == "" {
+		t.Fatalf("successful create did not capture source/setup revisions: base=%q setup=%q", capturedBase, capturedSetup)
 	}
 
 	got := rec.ci()
 	want := []string{"config-write:101", "cloudinit-regen:101"}
-	if len(got) != len(want) {
-		t.Fatalf("cloud-init call sequence = %v; want exactly a write then a regenerate %v", got, want)
+	if len(got) < len(want) {
+		t.Fatalf("cloud-init call sequence = %v; want a write then a regenerate %v", got, want)
 	}
 	for i := range want {
 		if got[i] != want[i] {

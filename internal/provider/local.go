@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"sync"
 
 	"github.com/lullabot/sandbar/internal/guestsh"
 	"github.com/lullabot/sandbar/internal/lima"
@@ -26,8 +27,9 @@ import (
 // remote provider (remote.go) is this same shape configured with the SSH
 // host-access implementation.
 type limaProvider struct {
-	core *lima.Client
-	prov *provision.Provisioner
+	provenanceMu sync.Mutex
+	core         *lima.Client
+	prov         *provision.Provisioner
 	// hostFiles is this provider's host-access handle — lima.LocalFiles() here
 	// (local Lima IS the host limactl runs on); a remote provider embeds this
 	// struct and overrides it with its SSHHost at construction (see
@@ -74,6 +76,8 @@ func (p *limaProvider) StopStreaming(ctx context.Context, name string, out io.Wr
 // --- Provisioning lifecycle ---
 
 func (p *limaProvider) Create(ctx context.Context, cfg vm.CreateConfig, opts provision.CreateOptions, out io.Writer) error {
+	var rev revisionCapture
+	rev.wrap(&opts.OnSourceRevision, &opts.OnSetupRevision)
 	// Write a PROVISIONAL (in-flight) provenance marker the moment the clone
 	// exists, so another controller of this same host sees the VM as a managed,
 	// building tile while the (long) finalize step runs — not only after it
@@ -96,18 +100,44 @@ func (p *limaProvider) Create(ctx context.Context, cfg vm.CreateConfig, opts pro
 			// headless create has no progress republisher to refresh it afterwards
 			// (that lives in the TUI), so the stamp taken here is the only one it will
 			// ever get. See Provenance.BuildAbandoned.
-			return p.MarkManaged(ctx, name, NewProvenance(cfg, true))
+			pv := NewProvenance(cfg, true)
+			pv.BaseRevision = rev.source
+			return p.MarkManaged(ctx, name, pv)
 		}
 	}
-	return p.prov.CreateVMWithOptions(ctx, cfg, opts, out)
+	if err := p.prov.CreateVMWithOptions(ctx, cfg, opts, out); err != nil {
+		return err
+	}
+	p.markCompleted(ctx, cfg, rev.source, rev.setup)
+	return nil
 }
 
 func (p *limaProvider) Recreate(ctx context.Context, cfg vm.CreateConfig, opts provision.CreateOptions, out io.Writer) error {
-	return p.prov.RecreateWithOptions(ctx, cfg, opts, out)
+	var rev revisionCapture
+	rev.wrap(&opts.OnSourceRevision, &opts.OnSetupRevision)
+	if err := p.prov.RecreateWithOptions(ctx, cfg, opts, out); err != nil {
+		return err
+	}
+	p.markCompleted(ctx, cfg, rev.source, rev.setup)
+	return nil
 }
 
 func (p *limaProvider) Reset(ctx context.Context, cfg vm.CreateConfig, opts provision.ResetOptions, out io.Writer) error {
-	return p.prov.Reset(ctx, cfg, opts, out)
+	var rev revisionCapture
+	rev.wrap(&opts.OnSourceRevision, &opts.OnSetupRevision)
+	if err := p.prov.Reset(ctx, cfg, opts, out); err != nil {
+		return err
+	}
+	p.markCompleted(ctx, cfg, rev.source, rev.setup)
+	return nil
+}
+
+func (p *limaProvider) markCompleted(ctx context.Context, cfg vm.CreateConfig, sourceRevision, setupRevision string) {
+	pv := NewProvenance(cfg, false)
+	pv.BaseRevision = sourceRevision
+	pv.SetupRevision = setupRevision
+	// Provenance remains best effort, matching the existing in-flight write.
+	_ = p.MarkManaged(ctx, cfg.Name, pv)
 }
 
 // --- Golden VM templates ---
