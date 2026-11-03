@@ -226,7 +226,7 @@ func Load() (*Store, error) {
 // an empty store (not an error). A corrupt file is moved aside to
 // "<path>.corrupt" — so a later save cannot silently clobber recoverable data —
 // and the error is returned for the caller to surface. A file stamped with a
-// version newer than this build understands is refused with an "upgrade sand"
+// version newer than this build understands is refused with an "upgrade sandbar"
 // error. A v1 (or unversioned) file, or a v2 file, is transparently migrated:
 // no connection scope existed before version 3, so every VM either format
 // recorded is lifted under registry.LocalScope with its secrets (and, for v2,
@@ -271,7 +271,7 @@ func readStore(path string) (scopedVMs, error) {
 	}
 
 	if probe.Version > schemaVersion {
-		return out, fmt.Errorf("secrets store at %s is version %d but this build understands only version %d — upgrade sand", path, probe.Version, schemaVersion)
+		return out, fmt.Errorf("secrets store at %s is version %d but this build understands only version %d — upgrade sandbar", path, probe.Version, schemaVersion)
 	}
 
 	if probe.Version <= 1 {

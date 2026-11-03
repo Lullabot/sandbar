@@ -989,7 +989,7 @@ func (p *proxmoxProvider) guardSharedAddress(ctx context.Context, name, ip strin
 	if fresh != ip {
 		return nil
 	}
-	return fmt.Errorf("proxmox: %s and %s both report the guest address %s, so a connection to it could reach either VM and sand refuses to use it. "+
+	return fmt.Errorf("proxmox: %s and %s both report the guest address %s, so a connection to it could reach either VM and sandbar refuses to use it. "+
 		"Their DHCP server handed one lease to both because they share a DHCP client identity — an /etc/machine-id inherited from the template they were cloned from. "+
 		"Recreate them from a rebuilt base (which now resets that identity), or run `truncate -s 0 /etc/machine-id` in each guest and reboot it", name, other, ip)
 }
@@ -1414,7 +1414,7 @@ func (p *proxmoxProvider) attachArgvMode(v vm.VM, mode guestsh.AttachMode) []str
 
 	ip, err := p.guestIP(ctx, v.Name)
 	if err != nil {
-		return failArgv(fmt.Sprintf("sand: cannot attach to %q: %v", v.Name, err))
+		return failArgv(fmt.Sprintf("sandbar: cannot attach to %q: %v", v.Name, err))
 	}
 	return p.sshHost(ip).SSHArgv(true, guestsh.AttachArgvMode(os.Getenv("COLORTERM"), mode)...)
 }
@@ -1440,7 +1440,7 @@ func (p *proxmoxProvider) RunArgv(v vm.VM, workdir, expr string) []string {
 
 	ip, err := p.guestIP(ctx, v.Name)
 	if err != nil {
-		return failArgv(fmt.Sprintf("sand: cannot run in %q: %v", v.Name, err))
+		return failArgv(fmt.Sprintf("sandbar: cannot run in %q: %v", v.Name, err))
 	}
 	// $1 = workdir, $2 = COLORTERM (either may be empty); both are data, so a
 	// path or terminal value containing shell metacharacters cannot execute.
@@ -1472,7 +1472,7 @@ func (p *proxmoxProvider) ForwardArgv(v vm.VM, hostPort, guestPort int) []string
 
 	ip, err := p.guestIP(ctx, v.Name)
 	if err != nil {
-		return failArgv(fmt.Sprintf("sand: cannot forward to %q: %v", v.Name, err))
+		return failArgv(fmt.Sprintf("sandbar: cannot forward to %q: %v", v.Name, err))
 	}
 	return p.sshHost(ip).ForwardArgv(hostPort, guestPort)
 }
@@ -1612,7 +1612,7 @@ func (p *proxmoxProvider) Preflight() error {
 	// check whose failure mode (an opaque 403 later) the checks below mostly
 	// cover anyway.
 	if atLeast, parsed := pveVersionAtLeast(status.PVEVersion, minPVEMajor, minPVEMinor); parsed && !atLeast {
-		return fmt.Errorf("proxmox: node %s runs %s; sand requires Proxmox VE %d.%d or newer", p.node, status.PVEVersion, minPVEMajor, minPVEMinor)
+		return fmt.Errorf("proxmox: node %s runs %s; sandbar requires Proxmox VE %d.%d or newer", p.node, status.PVEVersion, minPVEMajor, minPVEMinor)
 	}
 
 	pools, err := p.client.Pools(ctx)

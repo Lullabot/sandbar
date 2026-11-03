@@ -126,7 +126,7 @@ Flags:
 	fs.BoolVar(&cfg.WithCodex, "with-codex", cfg.WithCodex, "Install OpenAI Codex when creating this VM (default: last submitted selection)")
 	fs.BoolVar(&cfg.WithOpenCode, "with-opencode", cfg.WithOpenCode, "Install OpenCode when creating this VM (default: last submitted selection)")
 	fs.BoolVar(&cfg.WithPi, "with-pi", cfg.WithPi, "Install Pi when creating this VM (default: last submitted selection)")
-	recreate := fs.Bool("recreate", false, "Delete and re-clone the named instance if it is sand-managed. The older spelling of 'sandbar reset NAME', which does the same thing and can also preserve agent settings, the project, selected paths, or the whole home directory")
+	recreate := fs.Bool("recreate", false, "Delete and re-clone the named instance if it is sandbar-managed. The older spelling of 'sandbar reset NAME', which does the same thing and can also preserve agent settings, the project, selected paths, or the whole home directory")
 	fs.BoolVar(&cfg.DisableStartAtBoot, "no-start-at-boot", false, "Disable automatic startup when the Proxmox host boots")
 	rebuild := fs.Bool("rebuild", false, "Destroy the base image and rebuild it from scratch before creating (a stale base is otherwise converged in place)")
 	templateFlag := fs.String("template", "", "Clone from a named golden template (see 'sandbar template list') instead of the shared base image; mutually exclusive with --rebuild/--base-name/--recreate")
@@ -523,7 +523,7 @@ func checkBackendName(p provider.Provider, name string, recreate bool) error {
 //
 // --rebuild force-rebuilds the base image regardless of staleness detection,
 // independent of --recreate (which targets the clone, not the base); both may
-// be combined. --recreate is gated on the target already being a sand-managed
+// be combined. --recreate is gated on the target already being a sandbar-managed
 // VM — recreate clones from the shared base image and would replace ANY
 // instance it is pointed at, so it must never be offered for a VM sandbar did
 // not create.
@@ -568,7 +568,7 @@ func doHeadlessCreate(ctx context.Context, reg *registry.Registry, prov headless
 	if recreate {
 		base, ok := manage.RecreateBase(reg, cfg.Name, scope, provenancer...)
 		if !ok {
-			return fmt.Errorf("%q is not a sand-managed VM — recreate refused (create it with 'sandbar create' first, or delete it manually and retry without --recreate)", cfg.Name)
+			return fmt.Errorf("%q is not a sandbar-managed VM — recreate refused (create it with 'sandbar create' first, or delete it manually and retry without --recreate)", cfg.Name)
 		}
 		cfg.BaseName = base
 		// If the VM being recreated was itself cloned from a golden template

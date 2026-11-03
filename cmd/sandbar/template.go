@@ -69,7 +69,7 @@ func printTemplateUsage(w io.Writer) {
 	fmt.Fprint(w, `Usage: sandbar template <command> [flags]
 
 Manage golden VM templates: named, reusable clone sources captured from an
-existing sand-managed VM, so 'sandbar create --template NAME' can skip the
+existing sandbar-managed VM, so 'sandbar create --template NAME' can skip the
 shared base image build while still running the clone's finalize pass.
 
 Commands:
@@ -94,7 +94,7 @@ func runTemplateSnapshot(args []string) int {
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), `Usage: sandbar template snapshot <source-vm> <name> [--profile P]
 
-Capture source-vm — an existing sand-managed VM, running or stopped — into a
+Capture source-vm — an existing sandbar-managed VM, running or stopped — into a
 new golden template named name. The source VM's power state is preserved
 exactly (a running source ends running; a stopped one stays stopped).
 
@@ -179,7 +179,7 @@ func doTemplateSnapshot(ctx context.Context, reg *registry.Registry, prov templa
 		}
 	}
 	if !ok {
-		return fmt.Errorf("%q is not a sand-managed VM in this scope", source)
+		return fmt.Errorf("%q is not a sandbar-managed VM in this scope", source)
 	}
 
 	inst := vm.TemplateInstanceName(name)

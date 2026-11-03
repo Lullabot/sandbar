@@ -178,7 +178,7 @@ func keepFailedVM() bool {
 // than being discovered later.
 func reportKeptVM(vmid int, name string, out io.Writer) {
 	progress(out, "Keeping the failed VM %s (VMID %d) because SAND_KEEP_FAILED is set.\n", name, vmid)
-	progress(out, "  It is NOT a usable VM, and sand will refuse to create %s again until it is gone.\n", name)
+	progress(out, "  It is NOT a usable VM, and sandbar will refuse to create %s again until it is gone.\n", name)
 	progress(out, "  Inspect it, then remove it with `qm destroy %d --purge` on the node.\n", vmid)
 	progress(out, "  Note it may hold a clone token in the guest's per-org .env — destroy it once you are done.\n")
 }

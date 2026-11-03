@@ -126,7 +126,7 @@ func PasteImage(ctx context.Context, gw guestWriter, v vm.VM) (Result, error) {
 	file := dir + clipFile
 
 	if err := gw.Shell(ctx, v.Name, bytes.NewReader(data), io.Discard,
-		"sh", "-c", writeScript, "sand", dir, file); err != nil {
+		"sh", "-c", writeScript, "sandbar", dir, file); err != nil {
 		return Result{}, fmt.Errorf("paste: write image to guest %q: %w", v.Name, err)
 	}
 

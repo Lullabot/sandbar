@@ -344,7 +344,7 @@ func LoadFrom(path string) (*Registry, error) {
 	}
 	if probe.Version > currentVersion {
 		return r, fmt.Errorf(
-			"checkout registry %s has schema version %d, but this sand only understands %d; upgrade sand",
+			"checkout registry %s has schema version %d, but this sandbar only understands %d; upgrade sandbar",
 			path, probe.Version, currentVersion)
 	}
 

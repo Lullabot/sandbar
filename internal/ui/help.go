@@ -43,7 +43,7 @@ func (m model) boardKeys() []struct {
 		{label(m.keys.New), "Create a VM. Opens the form from anywhere on the board."},
 		{label(m.keys.Search), "Filter the tiles by name as you type. esc clears it. It narrows what you SEE and nothing else — X still stops every managed VM."},
 		{label(m.keys.StopAll), "Stop every running sandbar VM, after a confirmation. Base images and VMs sandbar did not create are never touched."},
-		{label(m.keys.Profiles), "Manage connection profiles: create, edit, enable/disable, rename, and delete the Local, Remote SSH and Proxmox locations sandbar runs VMs on. Creating one asks for the type first. Mutations take effect live, without restarting sand."},
+		{label(m.keys.Profiles), "Manage connection profiles: create, edit, enable/disable, rename, and delete the Local, Remote SSH and Proxmox locations sandbar runs VMs on. Creating one asks for the type first. Mutations take effect live, without restarting sandbar."},
 		{label(m.keys.Quit), "Quit. If a build or a file transfer is still running, it confirms first rather than orphaning it."},
 		{label(m.keys.Help), "This screen."},
 		{label(m.keys.Onboarding), "Reopen the onboarding guide for tmux, release notes, and feature or bug requests."},

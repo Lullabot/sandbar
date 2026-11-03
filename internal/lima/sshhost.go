@@ -107,7 +107,7 @@ var (
 // Bytes travel over stdin, so even a large qcow2 is never buffered here.
 func (h *SSHHost) WriteStream(ctx context.Context, path string, src io.Reader) error {
 	script := `set -e; mkdir -p -- "$1"; ( set -C; umask 077; cat > "$2" )`
-	_, errb, err := h.runRemote(ctx, src, "sh", "-c", script, "sand", filepath.Dir(path), path)
+	_, errb, err := h.runRemote(ctx, src, "sh", "-c", script, "sandbar", filepath.Dir(path), path)
 	if err != nil {
 		return asNotExist("write image", path, errb, err)
 	}
@@ -118,7 +118,7 @@ func (h *SSHHost) WriteStream(ctx context.Context, path string, src io.Reader) e
 // every cache hit. GNU/Linux uses sha256sum; macOS uses shasum.
 func (h *SSHHost) SHA256(ctx context.Context, path string) (string, error) {
 	script := `if command -v sha256sum >/dev/null 2>&1; then sha256sum -- "$1"; else shasum -a 256 -- "$1"; fi`
-	out, errb, err := h.runRemote(ctx, nil, "sh", "-c", script, "sand", path)
+	out, errb, err := h.runRemote(ctx, nil, "sh", "-c", script, "sandbar", path)
 	if err != nil {
 		return "", asNotExist("hash image", path, errb, err)
 	}
@@ -372,7 +372,7 @@ func (h *SSHHost) Stat(path string) (fs.FileInfo, error) {
 // which is not guaranteed present on a minimal remote.
 func (h *SSHHost) WriteFile(path string, data []byte, dirPerm, filePerm fs.FileMode) error {
 	script := `set -e; mkdir -p -- "$1"; chmod "$4" -- "$1" 2>/dev/null || true; cat > "$2"; chmod "$3" -- "$2"`
-	remote := []string{"sh", "-c", script, "sand",
+	remote := []string{"sh", "-c", script, "sandbar",
 		filepath.Dir(path), path,
 		fmt.Sprintf("%o", filePerm.Perm()), fmt.Sprintf("%o", dirPerm.Perm())}
 	_, errb, err := h.runRemote(context.Background(), bytes.NewReader(data), remote...)
@@ -385,7 +385,7 @@ func (h *SSHHost) WriteFile(path string, data []byte, dirPerm, filePerm fs.FileM
 // MkdirAll creates path and any missing parents on the remote host.
 func (h *SSHHost) MkdirAll(path string, perm fs.FileMode) error {
 	script := `set -e; mkdir -p -- "$1"; chmod "$2" -- "$1"`
-	_, errb, err := h.runRemote(context.Background(), nil, "sh", "-c", script, "sand", path, fmt.Sprintf("%o", perm.Perm()))
+	_, errb, err := h.runRemote(context.Background(), nil, "sh", "-c", script, "sandbar", path, fmt.Sprintf("%o", perm.Perm()))
 	if err != nil {
 		return asNotExist("mkdir", path, errb, err)
 	}
@@ -439,7 +439,7 @@ func (h *SSHHost) LimaHome() string { return h.cfg.RemoteLimaHome }
 // per-instance file is simply skipped BY THE REMOTE SCRIPT, so one bad or
 // absent marker never aborts the batch — mirroring localFiles.
 func (h *SSHHost) ReadInstanceMarkers(ctx context.Context, limaHome, filename string) (map[string][]byte, error) {
-	remote := []string{"sh", "-c", markerScanScript, "sand", limaHome, filename}
+	remote := []string{"sh", "-c", markerScanScript, "sandbar", limaHome, filename}
 	out, errb, err := h.runRemote(ctx, nil, remote...)
 	if err != nil {
 		return nil, asNotExist("read markers", limaHome, errb, err)

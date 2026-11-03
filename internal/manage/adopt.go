@@ -101,6 +101,6 @@ func AdoptOnce(ctx context.Context, entries []registry.ManagedEntry, live []vm.V
 	// failure (see its doc comment); the returned error is a summary a
 	// caller cannot otherwise observe, so it is worth one more log line here.
 	if _, err := registry.Adopt(ctx, entries, liveNames, provenancerAdapter{prov}); err != nil {
-		log.Printf("sand: provenance adoption for %s had errors: %v", scope.Provider, err)
+		log.Printf("sandbar: provenance adoption for %s had errors: %v", scope.Provider, err)
 	}
 }

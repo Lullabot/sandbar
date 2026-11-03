@@ -174,7 +174,7 @@ func tailBytes(data []byte, max int) []byte {
 	if i := bytes.IndexByte(tail, '\n'); i >= 0 {
 		tail = tail[i+1:]
 	}
-	header := fmt.Sprintf("[sand: truncated — this is the last ~%d of %d bytes]\n", len(tail), len(data))
+	header := fmt.Sprintf("[sandbar: truncated — this is the last ~%d of %d bytes]\n", len(tail), len(data))
 	return append([]byte(header), tail...)
 }
 

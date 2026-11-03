@@ -26,7 +26,7 @@ type resetter interface {
 }
 
 // runReset implements `sandbar reset NAME`: the headless spelling of the TUI's `R`,
-// with the same gate (a sand-managed VM only), the same defaulting (every
+// with the same gate (a sandbar-managed VM only), the same defaulting (every
 // setting you do not restate comes from the VM's own recorded config), the same
 // preserve options, and the same follow-up bookkeeping.
 //
@@ -122,7 +122,7 @@ func newResetFlagSet(o *resetOptions) *flag.FlagSet {
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), `Usage: sandbar reset NAME [flags]
 
-Delete a sand-managed VM and clone it fresh from its base image, keeping its
+Delete a sandbar-managed VM and clone it fresh from its base image, keeping its
 name, its project, and every setting it was built with. This is the headless
 spelling of the TUI's R (Reset).
 
@@ -180,7 +180,7 @@ Flags:
 }
 
 // resetParsed is runReset past its flag parsing: it resolves the VM, gates on
-// it being sand-managed, builds the config, runs the reset and settles the
+// it being sandbar-managed, builds the config, runs the reset and settles the
 // bookkeeping. Split from runReset so the parse and the act read separately —
 // the parse is where the "no --clone-url" decision lives, and the act is where
 // everything talks to a real backend.
@@ -257,7 +257,7 @@ func resetParsed(fs *flag.FlagSet, o *resetOptions) error {
 	} else {
 		base, ok := manage.RecreateBase(reg, name, scope, provenancer)
 		if !ok {
-			return fmt.Errorf("sandbar reset: %q is not a sand-managed VM — refused (a reset clones from a sandbar base image and would replace whatever instance it was pointed at)", name)
+			return fmt.Errorf("sandbar reset: %q is not a sandbar-managed VM — refused (a reset clones from a sandbar base image and would replace whatever instance it was pointed at)", name)
 		}
 		cfg, err = resetConfigFor(reg, name, scope, base, explicit, o.values, p.HostUser())
 		if err != nil {

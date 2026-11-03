@@ -138,11 +138,11 @@ func Adopt(ctx context.Context, entries []ManagedEntry, live map[string]bool, pr
 			CreatedAt:      time.Now().UTC().Format(time.RFC3339),
 		}
 		if err := prov.MarkManaged(ctx, e.Name, pv); err != nil {
-			log.Printf("sand: provenance adoption failed to mark %s managed: %v", e.Name, err)
+			log.Printf("sandbar: provenance adoption failed to mark %s managed: %v", e.Name, err)
 			lastErr = err
 			continue
 		}
-		log.Printf("sand: adopted %s (base=%s) into provenance", e.Name, e.Base)
+		log.Printf("sandbar: adopted %s (base=%s) into provenance", e.Name, e.Base)
 		adopted = append(adopted, e.Name)
 	}
 	return adopted, lastErr
