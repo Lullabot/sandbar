@@ -7,7 +7,7 @@ import "errors"
 //
 // It lives here, in the domain-model package, rather than in whichever backend
 // happened to define it first, because "this VM does not exist" is a fact about
-// the fleet and not about a transport: `sand create`'s exists-guard, `sand
+// the fleet and not about a transport: `sandbar create`'s exists-guard, `sandbar
 // shell`, the Landing pane, and the TUI all branch on it without knowing (or
 // wanting to know) whether the name was missing from `limactl list`, from a
 // Proxmox pool, or from anything added later. A backend that invented its own

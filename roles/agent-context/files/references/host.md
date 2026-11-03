@@ -1,27 +1,27 @@
-# Host-side `sand` actions
+# Host-side `sandbar` actions
 
-`sand` runs on the user's workstation, not in this guest; there is no `sand`
+`sandbar` runs on the user's workstation, not in this guest; there is no `sandbar`
 command here. When a task needs one, tell the user what to do on their
 workstation instead of trying it yourself. Fill in `NAME` from
 [this-vm.md](this-vm.md); it can differ from `hostname`.
 
-Most users drive `sand` from its interactive TUI (`sand` with no arguments),
+Most users drive `sandbar` from its interactive TUI (`sandbar` with no arguments),
 where each action is a key on the VM's tile. Give the TUI steps by default.
 Give the CLI command instead when the user is scripting, asks for a command,
 or the action has no TUI equivalent.
 
 | Goal | In the TUI | CLI command on the workstation |
 | --- | --- | --- |
-| Open a shell in the VM's tmux session | `S` on the tile | `sand shell NAME` |
-| List the VM's checkouts and branch/PR state | `l` on the tile opens the Landing pane | `sand land NAME` |
-| Review a checkout's changes in a browser | `l`, select the checkout, `v` (`V` discards a saved review) | `sand land NAME PATH --review` |
-| Review only part of the history | `l`, select the checkout, `R`, type the range | `sand land NAME PATH --review -- HEAD~2` (any `git diff` arguments) |
-| Open a draft PR for a pushed branch | `l`, select the checkout, `enter` ("open draft PR") | `sand land NAME PATH --pr` |
-| Send a clipboard image into the guest | `v` on the tile | `sand paste-image NAME` |
-| Change CPUs or memory | `R` on the tile, edit CPUs/memory in the reset form (see below) | `sand reset NAME --cpus 8 --memory 16GiB` (see below) |
-| Upgrade `sand` itself | none | `brew upgrade sand` |
+| Open a shell in the VM's tmux session | `S` on the tile | `sandbar shell NAME` |
+| List the VM's checkouts and branch/PR state | `l` on the tile opens the Landing pane | `sandbar land NAME` |
+| Review a checkout's changes in a browser | `l`, select the checkout, `v` (`V` discards a saved review) | `sandbar land NAME PATH --review` |
+| Review only part of the history | `l`, select the checkout, `R`, type the range | `sandbar land NAME PATH --review -- HEAD~2` (any `git diff` arguments) |
+| Open a draft PR for a pushed branch | `l`, select the checkout, `enter` ("open draft PR") | `sandbar land NAME PATH --pr` |
+| Send a clipboard image into the guest | `v` on the tile | `sandbar paste-image NAME` |
+| Change CPUs or memory | `R` on the tile, edit CPUs/memory in the reset form (see below) | `sandbar reset NAME --cpus 8 --memory 16GiB` (see below) |
+| Upgrade `sandbar` itself | none | `brew upgrade sandbar` |
 
-For the CLI only: `PATH` is the checkout's guest path, as `sand land NAME`
+For the CLI only: `PATH` is the checkout's guest path, as `sandbar land NAME`
 lists it. If the user has the same VM name on more than one connection
 profile, add `--profile PROFILE`. The TUI shows every profile's VMs on one
 board, so it needs neither.

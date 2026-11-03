@@ -33,7 +33,7 @@ type varItem struct {
 //
 // backend is the connection-profile type the VM runs on. It reaches the guest
 // (with the VM's name) only so the agent-context role can tell an agent facts
-// it cannot discover from inside: the name host-side `sand` commands take
+// it cannot discover from inside: the name host-side `sandbar` commands take
 // (the hostname may be customised away from it) and which answer applies to
 // reaching a guest port from the workstation.
 func BuildExtraVars(cfg vm.CreateConfig, phase, hostname string, backend profiles.Type, aptUpgrade bool) ([]byte, error) {

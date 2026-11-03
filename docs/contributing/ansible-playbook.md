@@ -111,7 +111,7 @@ file and installs one shared `sandbar-environment` skill at
 `~/.config/opencode/AGENTS.md`. One skill reference, `this-vm.md`, is a
 template filled from `sandbar_vm_name` and `sandbar_profile_type`, which
 `BuildExtraVars` emits for `full` and `finalize`: an agent cannot discover the
-name host-side `sand` commands take, or which profile type decides how a guest
+name host-side `sandbar` commands take, or which profile type decides how a guest
 port is reached, from inside the guest. The role preserves other text, file modes, and
 unrelated skills; it fails on a user-owned skill at either destination instead
 of replacing it. It does not run for the base phase or a VM with no selected

@@ -11,6 +11,6 @@ before first use does not by itself indicate a failure; try `docker info`.
 The guest is disposable and separate from the workstation. Use guest `sudo`
 when an authorized task requires packages or system configuration. Do not
 assume a guest path is mounted from the host or that guest commands can access
-workstation files. Sandbar's host-side `sand paste-image` command can send an
+workstation files. Sandbar's host-side `sandbar paste-image` command can send an
 image into the guest's image-only clipboard slot. Text and credentials are
 not copied from the workstation clipboard into that slot.

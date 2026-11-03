@@ -402,7 +402,7 @@ func TestAttachArgvControlModeFlagsBothNewSessionsOnly(t *testing.T) {
 }
 
 // TestAttachArgvDefaultModeIsUnchanged is the regression guard on the mode-less
-// entrypoints: AttachArgv and guestsh.AttachArgv are what every caller but `sand
+// entrypoints: AttachArgv and guestsh.AttachArgv are what every caller but `sandbar
 // shell --cc` uses, and adding control mode must not have leaked a `-CC` into
 // any of them.
 func TestAttachArgvDefaultModeIsUnchanged(t *testing.T) {

@@ -61,7 +61,7 @@ Every VM carries an empty `/etc/lullabot/agent-environment` file. Lullabot's
 Claude Code policy hooks treat a machine with this file as an approved agent
 environment, so sessions there do not need per-command approval. New VMs get
 it during provisioning. Older VMs get it the next time you open a shell with
-`S` or `sand shell`, with no rebuild or reset.
+`S` or `sandbar shell`, with no rebuild or reset.
 
 ### Global Sandbar environment context
 
@@ -72,8 +72,8 @@ authorized, without asking again solely because a command uses `sudo`. It does
 not replace the agent's system prompt or grant access to your workstation.
 
 The block points to the shared `sandbar-environment` skill. Its references
-cover the VM's name and connection profile type, the `sand` commands you run
-on your workstation (including what `sand reset` deletes), reaching guest
+cover the VM's name and connection profile type, the `sandbar` commands you run
+on your workstation (including what `sandbar reset` deletes), reaching guest
 ports from your workstation, where secrets and tokens come from, browser
 review with `self-review-serve`, tmux keys, the clipboard, and installed
 tools. Each reference links the documentation page it summarizes. The
