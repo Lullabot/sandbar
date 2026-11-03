@@ -51,7 +51,9 @@ var ErrNoInstance = errors.New("instance does not exist")
 // and not merely that it is running. Additive in the same way: an older marker
 // has no `progress` key and decodes with the zero BuildProgress, which renders
 // as an empty bar — exactly what an observer showed for a v2 marker anyway.
-const MarkerSchemaVersion = 3
+// v4 added independent base/setup revisions. Older markers leave both empty,
+// which update checks report as unknown rather than inventing history.
+const MarkerSchemaVersion = 4
 
 // Provenance is the marker payload a provider attaches to an instance it
 // created, mirroring the provenance-relevant subset of registry.Entry (Base,
@@ -96,6 +98,11 @@ type Provenance struct {
 	// VALUE, not a pointer, so Provenance stays comparable with == , which its
 	// tests and callers rely on.
 	Progress BuildProgress `json:"progress,omitzero"`
+	// BaseRevision is the version of the source actually cloned. SetupRevision
+	// is recorded only after the clone's finalize pass succeeds. Empty values
+	// mean unknown, including all markers written before schema v4.
+	BaseRevision  string `json:"base_revision,omitempty"`
+	SetupRevision string `json:"setup_revision,omitempty"`
 }
 
 // BuildProgress is a coarse position within an in-flight build: which role is
@@ -242,4 +249,12 @@ type Provenancer interface {
 	MarkManaged(ctx context.Context, name string, p Provenance) error
 	// Unmark clears any marker for name.
 	Unmark(ctx context.Context, name string) error
+}
+
+// ProgressProvenancer is the optional write path for asynchronous build
+// progress. Unlike a new clone's MarkManaged call, MarkProgress may arrive
+// after completion; implementations preserve the clone source revision while
+// building and ignore a late update once the marker is ready.
+type ProgressProvenancer interface {
+	MarkProgress(ctx context.Context, name string, progress Provenance) error
 }

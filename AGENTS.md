@@ -779,19 +779,33 @@ no sync protocol.
 **Marker contract** (for future Proxmox/cloud implementers):
 - **Location:** `<LimaHome>/<name>/sandbar.json` on the host (Lima home directory).
 - **JSON schema** — `internal/provider/provenance.go`'s `Provenance` struct
-  (`provider.MarkerSchemaVersion`, currently **2**):
+  (`provider.MarkerSchemaVersion`, currently **4**):
   ```json
   {
-    "schema": 2,
+    "schema": 4,
     "base": "sandbar-base",
     "config": { /* vm.CreateConfig: name, BaseName, CPUs, Memory, Disk, etc. */ },
     "sandbar_version": "0.6.0",
     "created_at": "2026-07-17T12:34:56Z",
-    "provisioning": true
+    "provisioning": true,
+    "progress": { "role": "user", "index": 3, "total": 9 },
+    "base_revision": "…",
+    "setup_revision": "…"
   }
   ```
-  `provisioning` (v2, `omitempty`) marks an IN-FLIGHT build; a v1 marker has no such key and
-  decodes as ready (`false`). Build a marker with `provider.NewProvenance(cfg, provisioning)`
+  Every version so far is additive, so an older marker decodes with the newer
+  fields at their zero values. `provisioning` (v2, `omitempty`) marks an
+  IN-FLIGHT build; a v1 marker has no such key and decodes as ready (`false`).
+  `progress` (v3, `omitzero`) is how far along that build is; it is written
+  through the serialized `ProgressProvenancer.MarkProgress`, which ignores a
+  late update once the marker is ready. `base_revision` and `setup_revision`
+  (v4, `omitempty`) are the source revision the VM was actually cloned from,
+  captured inside the clone lock, and the setup revision its finalize pass
+  applied, recorded only after finalize succeeds. Empty means unknown —
+  including every marker written before v4 — never "current". Bump
+  `registry.adoptSchemaVersion` with `MarkerSchemaVersion`; it is a mirror kept
+  in step for an import-cycle reason. Build a marker with
+  `provider.NewProvenance(cfg, provisioning)`
   — it stamps the current schema version and strips secrets (CloneToken never touches disk).
 - **Lifecycle:**
   - **Written in-flight on clone (v2):** the provider writes a `provisioning:true` marker the
