@@ -1934,17 +1934,31 @@ editable because cloning a private repository again requires a token. GitHub
 and GitLab.com are detected from their hostnames; a self-hosted GitLab choice
 is recorded when the VM is created.</p>
 <p>The CLI equivalent is <a href="../cli-reference/#sandbar-reset-name"><code>sandbar reset NAME</code></a>.</p>
+<p>Each settled VM tile can show <strong>base update available</strong>, <strong>setup update
+available</strong>, or <strong>version unknown</strong>. Base and setup are checked separately, so
+both notices can appear together. Missing history on an older VM remains
+unknown. These are notices only: sandbar keeps the VM running as it is and never
+reruns provisioning automatically. Press <code>R</code> for an explicit reset, and choose
+what to preserve. <a href="../cli-reference/#sandbar-updates-name"><code>sandbar updates NAME</code></a>
+reports the same states from the CLI. A VM cloned from a golden template keeps
+using that template on reset; refresh the template first if its base is old.
+“Current” compares recorded revisions with this build, not user edits or
+upstream package versions.</p>
 <h3 id="choosing-what-survives">Choosing what survives</h3>
 <p>Preserve options follow the settings. <strong>All default off.</strong> Press space or
 enter to toggle the focused option; its help text describes what it copies.</p>
 <ul>
 <li><strong>Preserve the entire home directory</strong> keeps your files while updating the
-  VM. The home is restored before the playbook runs, so Ansible can update
-  its configuration files. It includes the options below, which appear
+  VM. The home is restored before the playbook runs. Provisioned home files
+  are replaced only when they still match sandbar's recorded baseline. Edited,
+  untracked, deleted, or symlinked destination files are kept; new defaults are
+  <a href="../../reference/files-and-state/#guest-paths">saved separately</a>. It includes the
+  options below, which appear
   checked and locked while this option is on. It copies the most data and
   excludes <code>~/.ssh/authorized_keys</code>, so the rebuilt VM keeps its new access
   key. Directories named <code>.cache</code> are also left behind and rebuilt in the new
-  VM.</li>
+  VM. A symlink in a parent directory stops the reset and retains the recovery
+  archives.</li>
 <li><strong>Preserve agent settings and files</strong> keeps settings, credentials, sessions,
   and history for Claude Code, Codex, OpenCode, and Pi together, including
   state from manual installs. Selected agents are installed fresh; restored

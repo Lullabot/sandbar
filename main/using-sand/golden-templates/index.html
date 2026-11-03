@@ -1879,18 +1879,21 @@
 <ul>
 <li><strong>The guest disk:</strong> everything installed or changed inside the VM — toolchains, configs, cloned repos, and any credentials written to disk. Creation finalization overwrites settings such as hostname and git identity, but authors should otherwise assume the disk is copied verbatim. Secrets propagation is detailed below.</li>
 <li><strong>Sizing and settings:</strong> vCPUs, memory, disk size, locale, domain suffix, docker-proxy-host, and the clone URL (but not the token).</li>
-<li><strong>Provisioning metadata:</strong> which playbook version the template was built from, and which toolsets (Claude Code, DDEV, Go, Java) were installed in its base.</li>
+<li><strong>Provisioning metadata:</strong> the actual source base revision recorded on the source VM, and its selected toolsets.</li>
 </ul>
 <p>Templates are <strong>per-connection-profile</strong> — a template saved under one profile never leaks into another. Lima providers store reserved stopped instances under their own <code>${LIMA_HOME}</code>; Proxmox stores native PVE templates in the configured pool.</p>
 <h3 id="power-state-behavior">Power-state behavior</h3>
 <p>When you snapshot a running VM, <code>sandbar</code> stops it, clones it (capturing the state at that moment), then restarts it. The source VM ends up exactly as it started — running or stopped. A template's own power state is always stopped (it is a clone source, not a working VM), but the source VM's state is preserved.</p>
 <h3 id="staleness">Staleness</h3>
-<p>A template's <code>status</code> in <code>sandbar template list</code> reflects whether its playbook predates the playbook embedded in the current <code>sandbar</code> binary:</p>
+<p>A template's <code>status</code> in <code>sandbar template list</code> compares its recorded source base
+revision with the revision the selected provider would use now:</p>
 <ul>
-<li><strong><code>current</code>:</strong> built with the same playbook version as this binary.</li>
-<li><strong><code>stale</code>:</strong> built with an older playbook. A stale template still works, but new VMs cloned from it miss playbook updates (new base packages, role changes, etc.). Snapshot a fresh VM to get a current template.</li>
-<li><strong><code>unknown</code>:</strong> the template lacks comparable version metadata. It can still be cloned, but <code>sandbar</code> cannot promise it contains the current playbook.</li>
+<li><strong><code>current</code>:</strong> its recorded base revision matches the provider's desired revision.</li>
+<li><strong><code>stale</code>:</strong> its recorded base revision differs. The template still works. Snapshot a fresh VM after updating its base to capture a current one.</li>
+<li><strong><code>unknown</code>:</strong> source or desired revision metadata is missing. It can still be cloned, but sandbar cannot claim it is current.</li>
 </ul>
+<p>Resetting a VM created from a template reuses that template. Updating the
+shared base alone does not update an existing template.</p>
 <h2 id="snapshot-save-a-vm-as-a-template">Snapshot: save a VM as a template</h2>
 <h3 id="cli">CLI</h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>sandbar<span class="w"> </span>template<span class="w"> </span>snapshot<span class="w"> </span>&lt;source-vm&gt;<span class="w"> </span>&lt;name&gt;

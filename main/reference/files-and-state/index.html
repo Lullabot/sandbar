@@ -1599,7 +1599,7 @@ out; every other page links here instead of restating them.</p>
 <code>sandbar-tmpl-&lt;name&gt;</code>. For Lima that is an instance directly under
 <code>${LIMA_HOME}</code>; Proxmox stores a real PVE template. Do not delete the backing
 instance directly: use <code>sandbar template delete &lt;name&gt;</code> so the scoped registry is
-updated as well. Template playbook-version metadata is used to report
+updated as well. Template source-base-revision metadata is used to report
 <code>current</code>, <code>stale</code>, or <code>unknown</code> status.</p>
 <h3 id="two-different-scope-dimensions">Two different "scope" dimensions</h3>
 <p>Two unrelated things are both called a "scope" in this file store, and it's
@@ -1699,6 +1699,14 @@ preserved Codex daemon settings.</p>
 <tr>
 <td><code>~/&lt;scope&gt;/.env</code></td>
 <td>A <strong>scoped</strong> secret set for directory <code>&lt;scope&gt;</code>, auto-loaded by direnv when you <code>cd</code> into it and unloaded when you leave.</td>
+</tr>
+<tr>
+<td><code>~/.config/sandbar/home-baselines/</code></td>
+<td>Copies of home files sandbar actually installed. A preserved-home reset compares their bytes to recognize unchanged provisioned files; missing baselines mean unknown ownership.</td>
+</tr>
+<tr>
+<td><code>~/.config/sandbar/proposed-defaults/</code></td>
+<td>New defaults that could not safely replace an edited, untracked, deleted, or symlinked home path during a preserved-home reset. Review them manually.</td>
 </tr>
 </tbody>
 </table>
