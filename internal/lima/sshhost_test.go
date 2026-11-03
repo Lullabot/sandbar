@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/lullabot/sandbar/internal/guestsh"
+	"github.com/lullabot/sandbar/internal/sshx"
 )
 
 // These tests are the executable specification of the SSH host-access
@@ -614,8 +615,8 @@ func TestSSHStreamReapsOrphan(t *testing.T) {
 
 			select {
 			case <-done:
-			case <-time.After(waitDelay + 5*time.Second):
-				t.Fatalf("%s did not return within %v of cancel: WaitDelay is not reaping the orphaned ssh chain", tc.name, waitDelay)
+			case <-time.After(sshx.WaitDelay + 5*time.Second):
+				t.Fatalf("%s did not return within %v of cancel: WaitDelay is not reaping the orphaned ssh chain", tc.name, sshx.WaitDelay)
 			}
 		})
 	}
@@ -1375,7 +1376,7 @@ func TestWithoutMuxOptsOneCommandOutOfTheSharedMaster(t *testing.T) {
 		t.Fatalf("an ordinary command must still multiplex, got %v", shared)
 	}
 
-	alone := h.SSHArgvCtx(WithoutMux(context.Background()), false, "true")
+	alone := h.SSHArgvCtx(sshx.WithoutMux(context.Background()), false, "true")
 	for _, val := range []string{"ControlMaster=no", "ControlPath=none"} {
 		idx := slices.Index(alone, val)
 		if idx <= 0 || alone[idx-1] != "-o" {
@@ -1413,7 +1414,7 @@ func TestWithoutMuxHonouredByTheStreamingRunners(t *testing.T) {
 		return exec.CommandContext(ctx, "true")
 	}
 
-	_ = h.Stream(WithoutMux(context.Background()), nil, io.Discard, "list")
+	_ = h.Stream(sshx.WithoutMux(context.Background()), nil, io.Discard, "list")
 	if !slices.Contains(got, "ControlMaster=no") {
 		t.Fatalf("Stream ignored the context's opt-out: %v", got)
 	}

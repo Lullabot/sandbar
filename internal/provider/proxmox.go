@@ -50,6 +50,7 @@ import (
 	"github.com/lullabot/sandbar/internal/profiles"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/pve"
+	"github.com/lullabot/sandbar/internal/sshx"
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
@@ -105,10 +106,6 @@ var (
 	// the board (the remote provider's AttachArgv makes an ssh round trip on the
 	// same goroutine, so a bounded API call here is no new hazard).
 	attachResolveTimeout = 10 * time.Second
-
-	// sshWaitDelay reaps the orphaned ssh child of a cancelled guest command, the
-	// same hazard and the same treatment as internal/lima's runner.
-	sshWaitDelay = 2 * time.Second
 )
 
 // proxmoxProvider drives one POOL on one PVE node. The pool is the isolation
@@ -1364,20 +1361,20 @@ func foldStderr(err error, stderr []byte) error {
 
 // execSSH is the production ssh/scp executor. cmd.WaitDelay reaps the orphaned
 // ssh child of a cancelled guest command — the same multi-generation orphan
-// hazard internal/lima's runner documents, one process shallower here because
+// hazard sshx.WaitDelay documents, one process shallower here because
 // there is no limactl in between.
 func execSSH(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr io.Writer) error {
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Stdin = stdin
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
-	cmd.WaitDelay = sshWaitDelay
+	cmd.WaitDelay = sshx.WaitDelay
 	// A held-pipe success is a SUCCESS: the first mux ssh to a guest forks the
 	// ControlPersist master, which on some OpenSSH builds inherits (and keeps)
 	// the stderr pipe — and without this mapping, the base build's first, and
 	// longest, guest command succeeded and was then reported "Failed: … exec:
-	// WaitDelay expired before I/O complete". See lima.SuccessDespiteHeldPipes.
-	return lima.SuccessDespiteHeldPipes(cmd.Run())
+	// WaitDelay expired before I/O complete". See sshx.SuccessDespiteHeldPipes.
+	return sshx.SuccessDespiteHeldPipes(cmd.Run())
 }
 
 // --- interactive attach & guest identity ----------------------------------------

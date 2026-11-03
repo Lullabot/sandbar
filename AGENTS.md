@@ -111,6 +111,10 @@ it is not where prose belongs.
   the agent-environment marker. It is the only place in sand that knows tmux
   exists. Lima wraps its argv in `limactl shell` (`lima.AttachArgv`); Proxmox
   wraps the same argv in `ssh -t`. Never retype the expression in a backend.
+- `sshx` — ssh transport pieces shared by every backend that runs ssh:
+  `WithoutMux`/`MuxSuppressed` (keep long-lived probes off the shared
+  ControlMaster) and `WaitDelay`/`SuccessDespiteHeldPipes`, which every
+  executor of ssh or limactl must use together.
 - `provision` — orchestrates create/reset (base build, `limactl clone`,
   finalize) and the Ansible run; `staging.go` moves data across a reset.
   Depends on `*lima.Client` and the `Host` seam (for base-image file access),
