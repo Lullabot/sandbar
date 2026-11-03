@@ -1689,9 +1689,10 @@ opens your browser, and stops the session when you finish.</p>
 <h2 id="getting-a-vm-that-has-it">Getting a VM that has it</h2>
 <p>The review tool is included in every base image and runs only when you open
 a review. There is no installation flag to enable.</p>
-<p>If your base image predates the tool, the next <code>sand create</code> updates the base
-before cloning a new VM. Existing VMs need to be reset from an updated base
-or replaced to get it.</p>
+<p>New VMs inherit the tool version in the published base image. Upgrades arrive
+when a new base image is published; changing the source pin alone does not
+update that image. Existing VMs need to be reset from an updated base or
+replaced to get the newer tool.</p>
 <h2 id="opening-a-review">Opening a review</h2>
 <p>The VM must be running. Run <code>sand land NAME</code> to list its known checkouts,
 then use a path from that list:</p>
@@ -1723,6 +1724,10 @@ the base commit so you can check it.
 </li>
 </ol>
 <p>If no browser opens, open the printed URL yourself. The review stays running.</p>
+<p>With self-review 2.x, use the complete URL, including <code>/#cap=…</code>. That fragment
+contains the session key the browser needs to load the review. The page removes
+it from the address bar after loading; to reopen the review, use the original
+URL shown by <code>sand</code>. Existing VMs with self-review 1.x also work.</p>
 <p>You can run multiple CLI reviews at once, on the same VM or different VMs.
 The <strong>TUI runs one review at a time</strong>. Trying to review another checkout
 while a session is running or still shutting down leaves a message in the
@@ -1920,6 +1925,11 @@ option to request a specific one.</p>
 <code>~/.config/self-review/config.yaml</code>, <code>sand</code> does not load the saved review
 automatically. A clean review also deletes only the default <code>review.xml</code>
 and <code>review.guide.xml</code> files.</p>
+<p>Self-review 2.x requires a project's <code>.self-review.yaml</code> <code>output-file</code> to stay
+inside the checkout directory where the review starts. An output path in your
+user-level <code>~/.config/self-review/config.yaml</code> can still point elsewhere.
+Project-configured <code>default-diff-args</code> cannot use <code>--output</code>, <code>--ext-diff</code>, or
+<code>--textconv</code>.</p>
 <p>The browser uses self-review's interface, including extra context around
 changes, image and attachment previews, suggestions, and walkthroughs from
 <code>review.guide.xml</code> beside the output file.</p>
