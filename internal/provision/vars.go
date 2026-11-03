@@ -14,8 +14,11 @@ type varItem struct {
 	value any
 }
 
-// PreservationVars carries per-run finalize options.
+// PreservationVars tells finalize which existing home files came from the VM
+// being reset. A fresh create passes the zero value and has no ownership claim.
 type PreservationVars struct {
+	Home, Agents bool
+	FreshClone   bool
 	// OnSetupRevision is called after a successful finalize with the revision
 	// computed before the guest run began.
 	OnSetupRevision func(string)
@@ -43,7 +46,7 @@ type PreservationVars struct {
 // it cannot discover from inside: the name host-side `sandbar` commands take
 // (the hostname may be customised away from it) and which answer applies to
 // reaching a guest port from the workstation.
-func BuildExtraVars(cfg vm.CreateConfig, phase, hostname string, backend profiles.Type, aptUpgrade bool) ([]byte, error) {
+func BuildExtraVars(cfg vm.CreateConfig, phase, hostname string, backend profiles.Type, aptUpgrade bool, preservation ...PreservationVars) ([]byte, error) {
 	items := []varItem{
 		{"user_name", cfg.User},
 		{"base_hostname", hostname},
@@ -52,6 +55,17 @@ func BuildExtraVars(cfg vm.CreateConfig, phase, hostname string, backend profile
 		{"provision_phase", phase},
 		// Lima VMs have no host-home mount to share, so skip Samba.
 		{"samba_enabled", false},
+	}
+	if phase == "finalize" && len(preservation) > 0 {
+		if preservation[0].FreshClone {
+			items = append(items, varItem{"sand_fresh_clone", true})
+		}
+		if preservation[0].Home {
+			items = append(items, varItem{"sand_preserved_home", true})
+		}
+		if preservation[0].Agents {
+			items = append(items, varItem{"sand_preserved_agents", true})
+		}
 	}
 
 	// The timezone is emitted for EVERY phase, including finalize — unlike the

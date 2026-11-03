@@ -12,6 +12,17 @@
   # Tasks gate on this with `when:`; fact-gathering stays ungated so both phases
   # see it. Runtimes and browser review stay in the base; coding agents and the
   # project are per-clone.
+  # Flags for /usr/local/libexec/sandbar-safe-home-file, defined once so every
+  # home file the playbook writes is judged by the same rule. Play vars are
+  # evaluated when used, so sand_new_user (set by roles/user) is seen.
+  #   --preserved-home  the home came back from the VM being reset, so an
+  #                     existing file is the user's until its baseline proves
+  #                     otherwise.
+  #   --fresh-clone     this guest's files are sandbar's own defaults: a base
+  #                     build, a fresh clone, or a full run creating its user.
+  vars:
+    sand_file_fresh_flag: "{{ ['--fresh-clone'] if provision_phase | default('full') == 'base' or sand_fresh_clone | default(false) | bool or sand_new_user | default(false) | bool else [] }}"
+    sand_home_file_flags: "{{ (['--preserved-home'] if sand_preserved_home | default(false) | bool else []) + sand_file_fresh_flag }}"
   roles:
     - base
     - user
@@ -72,3 +83,21 @@
         - provision_phase | default('full') != 'finalize'
     - role: project
       when: provision_phase | default('full') != 'base'
+
+  # These files receive deliberate sandbar block/line edits after the user role
+  # installs its defaults. Capture the final bytes on fresh guests only, so a
+  # later preserve-home reset can distinguish those defaults from user edits.
+  post_tasks:
+    - name: Record final sandbar home defaults
+      ansible.builtin.command:
+        argv: [python3, /usr/local/libexec/sandbar-safe-home-file, "{{ user_home }}", "{{ item.path }}", "{{ user_name }}", "0644", --record-current]
+      register: sand_recorded_home_default
+      changed_when: sand_recorded_home_default.stdout is search('^changed:')
+      loop:
+        - path: .bashrc
+          safe: "{{ provision_phase | default('full') == 'base' or sand_bashrc_writable | default(false) | bool }}"
+        - path: .profile
+          safe: "{{ provision_phase | default('full') == 'base' or sand_profile_writable | default(false) | bool }}"
+        - path: .gitconfig
+          safe: "{{ (sand_gitconfig_install.stdout | default('')) is search('installed default') }}"
+      when: item.safe | bool

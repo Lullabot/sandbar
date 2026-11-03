@@ -39,6 +39,9 @@ class AgentRolesTest(unittest.TestCase):
             play = yaml.safe_load((ROOT / "site.yml").read_text())
             play[0]["become"] = False
             play[0]["gather_facts"] = False
+            # This fixture substitutes every role body, so it does not create
+            # the user_home fact consumed by the real final baseline task.
+            play[0].pop("post_tasks", None)
             # Only role bodies are replaced; production role selection and its
             # phase conditions are evaluated by Ansible itself.
             for entry in play[0]["roles"]:

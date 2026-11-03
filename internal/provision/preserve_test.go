@@ -176,8 +176,14 @@ func TestReset_PreserveHome(t *testing.T) {
 
 	// The restore must land before the playbook, not after it.
 	restore := findCall(t, f.calls, 0, "the home restore", isTarIn)
+	clearBaselines := findCall(t, f.calls, 0, "clear fresh baseline history", func(c []string) bool {
+		return hasTok(c, clearFreshBaselinesScript) && hasTok(c, "/home/andrew")
+	})
+	if clearBaselines > restore {
+		t.Error("fresh base baselines were not cleared before the old home was restored")
+	}
 	finalize := findCall(t, f.calls, 0, "the finalize playbook", func(c []string) bool {
-		return hasTok(c, "shell") && hasTok(c, "bash")
+		return hasTok(c, "shell") && strings.Contains(strings.Join(c, " "), "ansible-playbook")
 	})
 	if restore > finalize {
 		t.Errorf("the home was restored at call %d, after finalize at %d: the playbook can no longer re-apply the files it owns", restore, finalize)
@@ -239,7 +245,7 @@ func TestReset_PreservePathsStagesAndRestores(t *testing.T) {
 	}
 	restore := findCall(t, f.calls, 0, "the extras restore", isTarIn)
 	finalize := findCall(t, f.calls, 0, "the finalize playbook", func(c []string) bool {
-		return hasTok(c, "shell") && hasTok(c, "bash")
+		return hasTok(c, "shell") && strings.Contains(strings.Join(c, " "), "ansible-playbook")
 	})
 	if restore < finalize {
 		t.Errorf("the checkout was restored at call %d, before finalize at %d: the playbook could write over the user's work", restore, finalize)

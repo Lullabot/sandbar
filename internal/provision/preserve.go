@@ -70,6 +70,19 @@ var AgentStatePaths = []string{
 // disposable dev VM's authorized_keys is machinery, not user data.
 var homeExcludes = []string{"./.ssh/authorized_keys"}
 
+// The new clone's baseline history must be removed before an old home lands.
+// Check every parent before rm: golden templates can contain user symlinks,
+// and rm -rf on a path beneath one would walk outside the guest home.
+const clearFreshBaselinesScript = `set -eu
+sand_home_path=$1
+for part in "$sand_home_path" "$sand_home_path/.config" "$sand_home_path/.config/sandbar" "$sand_home_path/.config/sandbar/home-baselines"; do
+  if [ -L "$part" ]; then
+    printf 'refusing to clear home baselines through symlink: %s\n' "$part" >&2
+    exit 1
+  fi
+done
+rm -rf -- "$sand_home_path/.config/sandbar/home-baselines"`
+
 // PreservePlan is everything ONE reset decided to carry across the rebuild, and
 // the archives it staged for them. StagePreserve builds it while the source VM
 // is still alive; RestoreBeforeFinalize and RestoreAfterFinalize put it back.
@@ -293,6 +306,13 @@ func pruneCovered(rels, covered []string) []string {
 func RestoreBeforeFinalize(ctx context.Context, cli guestRunner, name, home, user string, plan PreservePlan, stage *StageGuard, out io.Writer) error {
 	switch {
 	case plan.WholeHome:
+		// The clone may have baselines from its freshly built base. They are not
+		// evidence about the SOURCE home: a legacy VM has no history, while a
+		// newer VM's baselines are carried in its archive. Clear before extract
+		// so an absent source baseline remains absent after restore.
+		if err := cli.Shell(ctx, name, nil, io.Discard, "sudo", "bash", "-c", clearFreshBaselinesScript, "sand-home", home); err != nil {
+			return fmt.Errorf("clear fresh home baselines in %q: %w", name, err)
+		}
 		if err := StageIn(ctx, cli, name, home, user, []string{"."}, stage.Path(homeArchive), homeLabel, out); err != nil {
 			return fmt.Errorf("restore the home directory into %q: %w", name, err)
 		}
