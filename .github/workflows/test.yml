@@ -719,7 +719,12 @@ jobs:
 
       - name: Create the loopback "remote" user with passwordless ssh
         run: |
-          sudo useradd -m -s /bin/bash sand-remote-e2e
+          # Create the home from an empty skeleton. The runner image installs
+          # toolchains into /etc/skel (.rustup, .cargo, .nvm, .dotnet: 814 MB),
+          # and copying that into a new home made `useradd -m` take 6-110s. This user
+          # needs none of it: limactl is on the default non-interactive PATH,
+          # which the ssh check below proves.
+          sudo useradd -m -k "$(mktemp -d)" -s /bin/bash sand-remote-e2e
           # QEMU under the second user needs /dev/kvm; lima-actions grants it
           # via the kvm group.
           sudo usermod -aG kvm sand-remote-e2e
