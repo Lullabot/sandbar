@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/pve"
+	"github.com/lullabot/sandbar/internal/vm"
 )
 
 func TestNicMACsFromConfig(t *testing.T) {
@@ -179,10 +179,10 @@ func TestProxmoxNicMACsMissingVMIsNotAnError(t *testing.T) {
 	if len(macs) != 0 {
 		t.Errorf("a missing VM yielded MACs: %v", macs)
 	}
-	// The reset's own guard is errors.Is(err, lima.ErrNoSuchInstance); prove that
+	// The reset's own guard is errors.Is(err, vm.ErrNotFound); prove that
 	// is the error a missing VM actually produces, or the guard silently turns
 	// into "warn on every recreate".
-	if !errors.Is(err, lima.ErrNoSuchInstance) {
+	if !errors.Is(err, vm.ErrNotFound) {
 		t.Errorf("a missing VM reported %v, which the reset will not recognise as 'no VM to read'", err)
 	}
 }

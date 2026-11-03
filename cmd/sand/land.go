@@ -15,7 +15,6 @@ import (
 	"github.com/lullabot/sandbar/internal/checkouts"
 	"github.com/lullabot/sandbar/internal/landgh"
 	"github.com/lullabot/sandbar/internal/landreview"
-	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 )
@@ -56,7 +55,7 @@ type vmRunningChecker interface {
 func requireRunningVM(g vmRunningChecker, name string) (vm.VM, error) {
 	found, err := g.Get(name)
 	if err != nil {
-		if errors.Is(err, lima.ErrNoSuchInstance) {
+		if errors.Is(err, vm.ErrNotFound) {
 			return vm.VM{}, fmt.Errorf("sand land: no VM named %q (run 'sand' to list instances)", name)
 		}
 		return vm.VM{}, fmt.Errorf("sand land: %w", err)

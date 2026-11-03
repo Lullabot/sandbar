@@ -461,7 +461,7 @@ func (p *proxmoxProvider) Status(name string) (string, error) {
 }
 
 // resolve maps a name to its VMID and that VM's current status, returning
-// lima.ErrNoSuchInstance when the pool holds no such VM — the sentinel every
+// vm.ErrNotFound when the pool holds no such VM — the sentinel every
 // consumer already branches on, reused here on purpose: it is the interface's
 // shared vocabulary, not a Lima implementation detail.
 //
@@ -494,14 +494,14 @@ func (p *proxmoxProvider) resolve(ctx context.Context, name string) (int, pve.VM
 	st, err := p.client.GetStatus(ctx, vmid)
 	if err != nil {
 		if pve.IsNotFound(err) {
-			return 0, pve.VMStatus{}, fmt.Errorf("%w: %s", lima.ErrNoSuchInstance, name)
+			return 0, pve.VMStatus{}, fmt.Errorf("%w: %s", vm.ErrNotFound, name)
 		}
 		return 0, pve.VMStatus{}, fmt.Errorf("proxmox: reading %s (VMID %d): %w", name, vmid, err)
 	}
 	if st.Name != name {
 		// The listing raced a rename or a delete-and-recreate. Report absence
 		// rather than acting on a VM the caller did not ask for.
-		return 0, pve.VMStatus{}, fmt.Errorf("%w: %s", lima.ErrNoSuchInstance, name)
+		return 0, pve.VMStatus{}, fmt.Errorf("%w: %s", vm.ErrNotFound, name)
 	}
 	p.setVMID(name, vmid)
 	return vmid, st, nil
@@ -532,7 +532,7 @@ func (p *proxmoxProvider) lookupVMID(ctx context.Context, name string) (int, err
 	p.setIndex(index)
 	vmid, ok := index[name]
 	if !ok {
-		return 0, fmt.Errorf("%w: %s", lima.ErrNoSuchInstance, name)
+		return 0, fmt.Errorf("%w: %s", vm.ErrNotFound, name)
 	}
 	return vmid, nil
 }
