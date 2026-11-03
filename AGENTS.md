@@ -163,8 +163,12 @@ it is not where prose belongs.
 - `landreview` — runs a browser review for one guest checkout using
   `self-review-serve` (`ServeBinary`). Start the server before choosing the
   forward: it selects a free port and has no flag for a fixed one. Parse its
-  `[serve] Review ready at http://127.0.0.1:<port>/` message with
-  `serveReadyRe`, then reserve a workstation port and run `ForwardArgv`'s
+  `[serve] Review ready at http://127.0.0.1:<port>/#cap=<key>` message with
+  `serveReadyRe`, waiting for the complete line so a split transport write
+  cannot discard the session key. Keep the fragment when changing the port,
+  opening the browser, or reporting the URL in the TUI. Authenticate the
+  readiness probe with `Authorization: Bearer <key>`; accept a bare startup
+  URL for older 1.x guests. Then reserve a workstation port and run `ForwardArgv`'s
   command. Local Lima instead uses the guest port directly. Probe
   `/api/config` and check its JSON to identify the server; probing `/` could
   accept an unrelated application on a colliding port. The server writes
@@ -342,6 +346,11 @@ the wall-clock time rather than their sum):
   QEMU+KVM on the hosted runner. (It does not run the fast Go suite — that's the `unit` job.) It checks all
   four agent executables in a clone, their absence from the base, and
   remembered choices in the next create.
+  Published images may contain an older self-review release: before the
+  review round-trip, run the checkout's self-review role and assert the
+  installed version and staged skills stamp match the checkout's pin. The
+  round-trip opens sand's complete launch URL in Chromium, authenticates API
+  requests, and validates the written XML with the installed skill's schema.
 - `cmd-e2e` — the `cmd/sand` `limae2e` tests (headless create + `--recreate`
   gate) on their own minimal base, in their own job beside `lima-e2e`.
 - `remote-lima-e2e` — the `internal/provider` real-ssh E2E suite against a

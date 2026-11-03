@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/lullabot/sandbar/internal/checkouts"
 	"github.com/lullabot/sandbar/internal/landreview"
 	"github.com/lullabot/sandbar/internal/vm"
@@ -696,6 +697,13 @@ func TestHandleLandReviewDoneIgnoresAnOlderReviewsCompletion(t *testing.T) {
 // session. It used to be written to io.Discard, leaving the row claiming
 // "browser open" and the randomly-chosen port unguessable.
 func TestReviewURLReachesThePaneWhenTheBrowserCannotOpen(t *testing.T) {
+	for _, url := range []string{"http://127.0.0.1:45231", "http://127.0.0.1:45231/#cap=" + strings.Repeat("a", 43)} {
+		t.Run(url, func(t *testing.T) { testReviewURLReachesThePane(t, url) })
+	}
+}
+
+func testReviewURLReachesThePane(t *testing.T, url string) {
+	t.Helper()
 	m, v := landingTestVM(t, "web")
 	seedOneCheckout(t, m, v, "/home/user/repo")
 	m.ghActions = &fakeGhActions{}
@@ -703,7 +711,7 @@ func TestReviewURLReachesThePaneWhenTheBrowserCannotOpen(t *testing.T) {
 	release := make(chan struct{})
 	m.reviewRun = func(ctx context.Context, sess *landreview.Session, w io.Writer) (string, error) {
 		// Exactly what Session.Run writes, in order, when the opener fails.
-		fmt.Fprintf(w, "review UI ready at http://127.0.0.1:45231\n")
+		fmt.Fprintf(w, "review UI ready at %s\n", url)
 		fmt.Fprintf(w, "could not open a browser automatically (exec: \"xdg-open\": executable file not found in $PATH) — open the URL above yourself\n")
 		<-release
 		return "/home/user/repo/review.xml", nil
@@ -728,15 +736,25 @@ func TestReviewURLReachesThePaneWhenTheBrowserCannotOpen(t *testing.T) {
 			t.Fatal("the review URL never reached the pane — a headless workstation could not reach the session")
 		}
 	}
-	if urlMsg.url != "http://127.0.0.1:45231" {
+	if urlMsg.url != url {
 		t.Fatalf("url = %q, want the URL Session.Run reported", urlMsg.url)
 	}
 
 	m2.handleLandReviewURL(urlMsg)
-	if !strings.Contains(m2.landingView(), "http://127.0.0.1:45231") {
+	if !strings.Contains(m2.landingView(), url) {
 		t.Fatalf("the row does not show the review URL:\n%s", m2.landingView())
 	}
-	if len(m2.messages) == 0 || !strings.Contains(m2.messages[len(m2.messages)-1].text, "http://127.0.0.1:45231") {
+	if len(m2.messages) == 0 || !strings.Contains(m2.messages[len(m2.messages)-1].text, url) {
 		t.Fatalf("messages = %+v, want the URL in the pane's session log", m2.messages)
+	}
+	if strings.Contains(url, "#cap=") {
+		narrow := resized(m2, 80, 24)
+		view := narrow.landingView()
+		if strings.Contains(ansi.Strip(view), url) {
+			t.Fatal("fixture should clip the visible URL on a narrow terminal")
+		}
+		if !strings.Contains(view, "\x1b]8;;"+url+"\x1b\\") {
+			t.Fatal("clipping the label lost the complete clickable session URL")
+		}
 	}
 }
