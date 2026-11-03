@@ -1527,8 +1527,19 @@ Run</a>.</p>
 for it — no host-side token is copied into the VM. Shell into the VM (<code>S</code>
 on its tile, or <code>sandbar shell NAME</code>) and run <code>claude</code> with no arguments. On
 the first bare interactive run, <code>sandbar</code> asks whether you want to enable
-Claude Code Remote Control, then walks you through sign-in and starts the
-session. Later runs go straight to the prompt.</p>
+Claude Code Remote Control and whether to start sessions in bypass
+permissions mode instead of auto mode, then walks you through sign-in and
+starts the session. Later runs go straight to the prompt.</p>
+<p>Sessions start in Claude Code's <a href="https://code.claude.com/docs/en/permission-modes">auto
+mode</a> unless you choose
+bypass: a classifier reviews each action and blocks risky ones without
+asking you about routine work. Bypass permissions mode skips every check.
+Whichever you choose, <code>Shift+Tab</code> switches a running session between them,
+<code>/config</code> changes the default later, and sessions dispatched from <code>claude
+agents</code> start in the same mode. Auto mode needs a supported account and
+model; where it is unavailable, Claude Code starts in manual mode instead.
+VMs provisioned by an older <code>sandbar</code>, which started every session in
+bypass, are moved to auto mode and asked once on their next launch.</p>
 <p><a href="https://code.claude.com/docs/en/remote-control">Remote Control</a> keeps Claude
 Code and all of its tools running inside the VM while letting you follow and
 steer the same live session from <code>claude.ai/code</code>, another browser, or the
@@ -1547,10 +1558,10 @@ message to another machine or a cloud session, even though ordinary permission
 prompts are skipped inside the VM. Messages between sessions in the same VM do
 not cross that boundary.</p>
 <p>Under the hood, provisioning pre-seeds Claude Code's first-run onboarding
-state so sessions start with bypass permissions active, and the provisioned
+state so sessions start in the permission mode you chose, and the provisioned
 <code>claude</code> command runs <code>claude auth login</code> for you whenever you're not signed
 in, so you're never dropped to an un-authed prompt.</p>
-<p><code>--dangerously-skip-permissions</code> and an opted-in Remote Control connection
+<p>The chosen permission mode and an opted-in Remote Control connection
 aren't always active in the session immediately after the first sign-in. Claude
 Code can also prompt once about its full-screen renderer. If the first session
 comes up in manual mode or without Remote Control, quit (<code>/exit</code>) and run

@@ -1563,12 +1563,20 @@ delete and rebuild the VM rather than trust it after the fact.</p>
 <li><strong><code>sandbar</code> does not provision a Claude Code credential.</strong> You log in inside
   the VM yourself; no host-side Claude Code token is copied in. See
   <a href="../../getting-started/first-vm/#logging-into-claude-code">Logging into Claude Code</a>.</li>
-<li><strong>Claude Code runs with permission prompts skipped.</strong> The provisioned
-  settings set <code>skipDangerousModePermissionPrompt: true</code> and alias <code>claude</code>
-  to <code>claude --dangerously-skip-permissions</code>, so Claude Code operates
-  without interactive approval prompts. This is deliberate, not an
+<li><strong>Claude Code runs without routine permission prompts.</strong> The provisioned
+  settings start sessions in <a href="https://code.claude.com/docs/en/permission-modes">auto mode</a>,
+  where a classifier reviews each action instead of asking you. On the first
+  bare interactive launch, <code>sandbar</code> asks whether to start in bypass
+  permissions mode instead, which skips every check; the answer is stored as
+  <code>permissions.defaultMode</code> and passed as <code>--dangerously-skip-permissions</code> to
+  both <code>claude</code> and <code>claude agents</code>. Otherwise the launcher passes
+  <code>--allow-dangerously-skip-permissions</code>, which keeps bypass one <code>Shift+Tab</code>
+  away without starting in it. <code>skipDangerousModePermissionPrompt: true</code>
+  pre-accepts bypass mode's warning. Either way this is deliberate, not an
   oversight: it's appropriate specifically because the VM is ephemeral and
-  isolated, and can be torn down and reprovisioned at any time.</li>
+  isolated, and can be torn down and reprovisioned at any time. Where auto
+  mode is unavailable to your account or model, Claude Code starts in manual
+  mode instead.</li>
 <li><strong>Claude Code Remote Control is off until you opt in.</strong> The provisioned
   settings explicitly set <code>remoteControlAtStartup: false</code>. On the first bare
   interactive launch, <code>sandbar</code> explains Remote Control and asks whether to turn
