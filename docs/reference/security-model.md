@@ -41,12 +41,20 @@ tenant or a determined attacker.
 - **`sandbar` does not provision a Claude Code credential.** You log in inside
   the VM yourself; no host-side Claude Code token is copied in. See
   [Logging into Claude Code](../getting-started/first-vm.md#logging-into-claude-code).
-- **Claude Code runs with permission prompts skipped.** The provisioned
-  settings set `skipDangerousModePermissionPrompt: true` and alias `claude`
-  to `claude --dangerously-skip-permissions`, so Claude Code operates
-  without interactive approval prompts. This is deliberate, not an
+- **Claude Code runs without routine permission prompts.** The provisioned
+  settings start sessions in [auto mode](https://code.claude.com/docs/en/permission-modes),
+  where a classifier reviews each action instead of asking you. On the first
+  bare interactive launch, `sandbar` asks whether to start in bypass
+  permissions mode instead, which skips every check; the answer is stored as
+  `permissions.defaultMode` and passed as `--dangerously-skip-permissions` to
+  both `claude` and `claude agents`. Otherwise the launcher passes
+  `--allow-dangerously-skip-permissions`, which keeps bypass one `Shift+Tab`
+  away without starting in it. `skipDangerousModePermissionPrompt: true`
+  pre-accepts bypass mode's warning. Either way this is deliberate, not an
   oversight: it's appropriate specifically because the VM is ephemeral and
-  isolated, and can be torn down and reprovisioned at any time.
+  isolated, and can be torn down and reprovisioned at any time. Where auto
+  mode is unavailable to your account or model, Claude Code starts in manual
+  mode instead.
 - **Claude Code Remote Control is off until you opt in.** The provisioned
   settings explicitly set `remoteControlAtStartup: false`. On the first bare
   interactive launch, `sandbar` explains Remote Control and asks whether to turn

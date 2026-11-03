@@ -84,6 +84,7 @@ class AgentRolesTest(unittest.TestCase):
         )
         self.assertIs(settings["remoteControlAtStartup"], False)
         self.assertIs(settings["isolatePeerMachines"], True)
+        self.assertEqual(settings["permissions"], {"defaultMode": "auto"})
 
     def test_claude_native_notification_channel(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -93,6 +94,7 @@ class AgentRolesTest(unittest.TestCase):
             settings.parent.mkdir(parents=True)
             all_tasks = yaml.safe_load((ROOT / "roles/claude-code/tasks/main.yml").read_text())
             names = {"Check for prior Claude remote-control onboarding",
+                     "Check for prior Claude permission-mode onboarding",
                      "Read Claude settings for safe communication defaults",
                      "Isolate peer machines and keep Remote Control opt-in"}
             tasks = [task for task in all_tasks if task["name"] in names]
@@ -130,6 +132,7 @@ class AgentRolesTest(unittest.TestCase):
             names = {
                 "Deploy ~/.claude/settings.json from template",
                 "Check for prior Claude remote-control onboarding",
+                "Check for prior Claude permission-mode onboarding",
                 "Read Claude settings for safe communication defaults",
                 "Isolate peer machines and keep Remote Control opt-in",
             }
@@ -151,10 +154,29 @@ class AgentRolesTest(unittest.TestCase):
             self.assertIs(migrated["remoteControlAtStartup"], False)
             self.assertIs(migrated["isolatePeerMachines"], True)
             self.assertEqual(migrated["theme"], "dark")
+            self.assertEqual(migrated["permissions"], {"defaultMode": "auto"})
             self.assertEqual(settings.stat().st_mode & 0o777, 0o600)
 
+            # Until the launcher's permission question is answered, an existing
+            # mode (an older release's, or one set by hand) is reset to auto,
+            # merged into the other permission keys rather than replacing them.
+            migrated["permissions"] = {"defaultMode": "bypassPermissions", "allow": ["Bash(ls)"]}
+            settings.write_text(json.dumps(migrated))
+            self.run_play(directory, play, variables)
+            self.assertEqual(json.loads(settings.read_text())["permissions"],
+                             {"defaultMode": "auto", "allow": ["Bash(ls)"]})
+
+            # Once it is answered, the user's choice survives a re-provision.
+            mode_marker = home / ".config/sandbar/claude-permission-mode-onboarding-complete"
+            mode_marker.parent.mkdir(parents=True)
+            mode_marker.touch()
+            migrated["permissions"] = {"defaultMode": "bypassPermissions"}
+            settings.write_text(json.dumps(migrated))
+            self.run_play(directory, play, variables)
+            self.assertEqual(json.loads(settings.read_text())["permissions"],
+                             {"defaultMode": "bypassPermissions"})
+
             marker = home / ".config/sandbar/claude-remote-control-onboarding-complete"
-            marker.parent.mkdir(parents=True)
             marker.touch()
             migrated["remoteControlAtStartup"] = True
             migrated["isolatePeerMachines"] = False
@@ -320,6 +342,7 @@ class AgentRolesTest(unittest.TestCase):
                              ".claude/settings.json", ".claude.json",
                              ".config/sandbar/claude-shell-wrapper.sh",
                              ".config/sandbar/claude-remote-control-onboarding-complete",
+                             ".config/sandbar/claude-permission-mode-onboarding-complete",
                              ".local/bin/codex", ".codex/packages/standalone/current/codex")
             for relative in (*old_artifacts, ".local/bin/other", ".local/share/other/data",
                              ".config/sandbar/secrets.env"):

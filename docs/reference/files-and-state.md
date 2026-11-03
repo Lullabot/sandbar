@@ -86,7 +86,7 @@ preserves these paths relative to the guest user's home:
 
 | Agent | Paths |
 | --- | --- |
-| Claude Code | `~/.claude`, `~/.claude.json`, `~/.config/sandbar/claude-remote-control-onboarding-complete` |
+| Claude Code | `~/.claude`, `~/.claude.json`, `~/.config/sandbar/claude-remote-control-onboarding-complete`, `~/.config/sandbar/claude-permission-mode-onboarding-complete` |
 | Codex | `~/.codex`, `~/.config/sandbar/codex-remote-control-onboarding-complete` |
 | OpenCode | `~/.config/opencode`, `~/.local/share/opencode`, `~/.local/state/opencode` |
 | Pi | `~/.pi/agent` |
