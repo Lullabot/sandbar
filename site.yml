@@ -20,9 +20,13 @@
   #                     otherwise.
   #   --fresh-clone     this guest's files are sandbar's own defaults: a base
   #                     build, a fresh clone, or a full run creating its user.
+  # sand_agent_file_flags is for agent state (AgentStatePaths in
+  # internal/provision/preserve.go), which a preserve-agents reset restores
+  # without the rest of the home.
   vars:
     sand_file_fresh_flag: "{{ ['--fresh-clone'] if provision_phase | default('full') == 'base' or sand_fresh_clone | default(false) | bool or sand_new_user | default(false) | bool else [] }}"
     sand_home_file_flags: "{{ (['--preserved-home'] if sand_preserved_home | default(false) | bool else []) + sand_file_fresh_flag }}"
+    sand_agent_file_flags: "{{ (['--preserved-home'] if sand_preserved_home | default(false) | bool or sand_preserved_agents | default(false) | bool else []) + sand_file_fresh_flag }}"
   roles:
     - base
     - user
@@ -100,4 +104,6 @@
           safe: "{{ provision_phase | default('full') == 'base' or sand_profile_writable | default(false) | bool }}"
         - path: .gitconfig
           safe: "{{ (sand_gitconfig_install.stdout | default('')) is search('installed default') }}"
+        - path: .claude/settings.json
+          safe: "{{ (sand_claude_settings_install.stdout | default('')) is search('installed default') and not sand_preserved_home | default(false) | bool and not sand_preserved_agents | default(false) | bool }}"
       when: item.safe | bool

@@ -15,15 +15,15 @@
     owner: "{{ user_name }}"
     group: "{{ user_name }}"
     mode: "0755"
+  when: (sand_fresh_clone | default(false) | bool or sand_new_user | default(false) | bool) and not sand_preserved_home | default(false) | bool and not sand_preserved_agents | default(false) | bool
 
 - name: Deploy ~/.codex/config.toml from template
-  ansible.builtin.template:
-    src: codex-config.toml.j2
-    dest: "{{ user_home }}/.codex/config.toml"
-    force: false
-    owner: "{{ user_name }}"
-    group: "{{ user_name }}"
-    mode: "0644"
+  ansible.builtin.command:
+    argv: "{{ ['python3', '/usr/local/libexec/sandbar-safe-home-file', user_home, '.codex/config.toml', user_name, '0644'] + sand_agent_file_flags }}"
+    stdin: "{{ lookup('ansible.builtin.template', 'codex-config.toml.j2') }}"
+    stdin_add_newline: false
+  register: sand_codex_config_install
+  changed_when: sand_codex_config_install.stdout is search('^changed:')
 
 # The Codex binary itself is installed by roles/agent-install, which runs
 # after every agent role so the installers can run concurrently without racing
@@ -37,6 +37,7 @@
     owner: "{{ user_name }}"
     group: "{{ user_name }}"
     mode: "0644"
+  when: sand_bashrc_writable | default(false) | bool
 
 - name: Ensure ~/.config/sandbar directory exists
   ansible.builtin.file:
@@ -45,14 +46,15 @@
     owner: "{{ user_name }}"
     group: "{{ user_name }}"
     mode: "0700"
+  when: (sand_fresh_clone | default(false) | bool or sand_new_user | default(false) | bool) and not sand_preserved_home | default(false) | bool
 
 - name: Install Codex first-run remote-control wrapper
-  ansible.builtin.copy:
-    src: codex-shell-wrapper.sh
-    dest: "{{ user_home }}/.config/sandbar/codex-shell-wrapper.sh"
-    owner: "{{ user_name }}"
-    group: "{{ user_name }}"
-    mode: "0644"
+  ansible.builtin.command:
+    argv: "{{ ['python3', '/usr/local/libexec/sandbar-safe-home-file', user_home, '.config/sandbar/codex-shell-wrapper.sh', user_name, '0644'] + sand_home_file_flags }}"
+    stdin: "{{ lookup('ansible.builtin.file', 'codex-shell-wrapper.sh') }}"
+    stdin_add_newline: false
+  register: sand_codex_wrapper_install
+  changed_when: sand_codex_wrapper_install.stdout is search('^changed:')
 
 - name: Ensure user systemd directory exists for Codex
   ansible.builtin.file:
@@ -61,14 +63,15 @@
     owner: "{{ user_name }}"
     group: "{{ user_name }}"
     mode: "0755"
+  when: (sand_fresh_clone | default(false) | bool or sand_new_user | default(false) | bool) and not sand_preserved_home | default(false) | bool
 
 - name: Install disabled Codex boot service
-  ansible.builtin.copy:
-    src: sandbar-codex-app-server.service
-    dest: "{{ user_home }}/.config/systemd/user/sandbar-codex-app-server.service"
-    owner: "{{ user_name }}"
-    group: "{{ user_name }}"
-    mode: "0644"
+  ansible.builtin.command:
+    argv: "{{ ['python3', '/usr/local/libexec/sandbar-safe-home-file', user_home, '.config/systemd/user/sandbar-codex-app-server.service', user_name, '0644'] + sand_home_file_flags }}"
+    stdin: "{{ lookup('ansible.builtin.file', 'sandbar-codex-app-server.service') }}"
+    stdin_add_newline: false
+  register: sand_codex_service_install
+  changed_when: sand_codex_service_install.stdout is search('^changed:')
 
 - name: Load Codex first-run remote-control wrapper from ~/.bashrc
   ansible.builtin.lineinfile:
@@ -79,3 +82,4 @@
     owner: "{{ user_name }}"
     group: "{{ user_name }}"
     mode: "0644"
+  when: sand_bashrc_writable | default(false) | bool
