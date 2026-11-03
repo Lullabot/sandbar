@@ -61,6 +61,12 @@ func main() {
 				os.Exit(1)
 			}
 			return
+		case "updates":
+			if err := runUpdates(os.Args[2:]); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			return
 		case "shell":
 			if err := runShell(os.Args[2:]); err != nil {
 				fmt.Fprintln(os.Stderr, err)
@@ -88,7 +94,7 @@ func main() {
 			}
 			return
 		default:
-			fmt.Fprintf(os.Stderr, "sandbar: unknown subcommand %q\n\nUsage:\n  sandbar              interactive TUI\n  sandbar create ...   headless create (see 'sandbar create -h')\n  sandbar reset NAME   rebuild a VM from its base image (see 'sandbar reset -h')\n  sandbar shell NAME   attach a shell to a VM (see 'sandbar shell -h')\n  sandbar land NAME    list/land a VM's git checkouts (see 'sandbar land -h')\n  sandbar publish NAME PATH ISSUE   publish a checkout's commits to a drupal.org issue fork (see 'sandbar publish -h')\n  sandbar paste-image NAME   stage the clipboard image on a VM (see 'sandbar paste-image -h')\n  sandbar template ... manage golden VM templates (see 'sandbar template -h')\n", os.Args[1])
+			fmt.Fprintf(os.Stderr, "sandbar: unknown subcommand %q\n\nUsage:\n  sandbar              interactive TUI\n  sandbar create ...   headless create (see 'sandbar create -h')\n  sandbar reset NAME   rebuild a VM from its base image (see 'sandbar reset -h')\n  sandbar updates NAME   inspect VM updates (see 'sandbar updates -h')\n  sandbar shell NAME   attach a shell to a VM (see 'sandbar shell -h')\n  sandbar land NAME    list/land a VM's git checkouts (see 'sandbar land -h')\n  sandbar publish NAME PATH ISSUE   publish a checkout's commits to a drupal.org issue fork (see 'sandbar publish -h')\n  sandbar paste-image NAME   stage the clipboard image on a VM (see 'sandbar paste-image -h')\n  sandbar template ... manage golden VM templates (see 'sandbar template -h')\n", os.Args[1])
 			os.Exit(2)
 		}
 	}
