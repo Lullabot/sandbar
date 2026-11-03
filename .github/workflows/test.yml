@@ -719,6 +719,9 @@ jobs:
 
       - name: Create the loopback "remote" user with passwordless ssh
         run: |
+          # Trace each command: GitHub timestamps every log line, so this
+          # shows which command the step's variable 6-110s goes to.
+          set -x
           sudo useradd -m -s /bin/bash sand-remote-e2e
           # QEMU under the second user needs /dev/kvm; lima-actions grants it
           # via the kvm group.
