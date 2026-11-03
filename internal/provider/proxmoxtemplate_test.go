@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/pve"
 	"github.com/lullabot/sandbar/internal/vm"
 )
@@ -90,21 +91,21 @@ func TestProxmoxSnapshotFromStoppedSourceLeavesItStopped(t *testing.T) {
 	}
 }
 
-func TestProxmoxSnapshotResultUsesProvenanceAndPlaybookVersion(t *testing.T) {
+func TestProxmoxSnapshotResultUsesActualSourceRevision(t *testing.T) {
 	for _, tc := range []struct {
-		name      string
-		locateErr error
-		wantHash  bool
+		name string
+		base string
 	}{
-		{name: "playbook available", wantHash: true},
-		{name: "playbook unavailable", locateErr: fmt.Errorf("playbook not found")},
+		{name: "known source", base: "actual-source-v1"},
+		{name: "legacy unknown source"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			m, configs := newStatefulConfigMock(t, 100)
+			m, configs := newStatefulConfigMock(t, 100, 900)
 			p := newProxmoxForTest(t, m)
 			p.setVMID("web", 100)
 			m.data("/nodes/pve1/qemu/100/status/current", "{\"vmid\":100,\"name\":\"web\",\"status\":\"stopped\"}")
 			pv := NewProvenance(vm.CreateConfig{Name: "web", BaseName: "base", WithClaude: true}, false)
+			pv.BaseRevision = tc.base
 			if err := p.MarkManaged(context.Background(), "web", pv); err != nil {
 				t.Fatalf("MarkManaged: %v", err)
 			}
@@ -112,21 +113,19 @@ func TestProxmoxSnapshotResultUsesProvenanceAndPlaybookVersion(t *testing.T) {
 				t.Fatal("MarkManaged did not persist the provenance fixture")
 			}
 
-			oldLocate := locatePlaybookFn
-			locatePlaybookFn = func() (string, error) {
-				if tc.locateErr != nil {
-					return "", tc.locateErr
-				}
-				return t.TempDir(), nil // an empty fileset still has a deterministic version
-			}
-			t.Cleanup(func() { locatePlaybookFn = oldLocate })
-
-			got := p.snapshotResult(context.Background(), "web")
+			got := p.snapshotResult(context.Background(), "web", "template-web", 900)
 			if got.ToolsetKey != pv.Config.ToolsetKey() {
 				t.Errorf("ToolsetKey = %q, want %q", got.ToolsetKey, pv.Config.ToolsetKey())
 			}
-			if (got.PlaybookVersion != "") != tc.wantHash {
-				t.Errorf("PlaybookVersion = %q, want present=%v", got.PlaybookVersion, tc.wantHash)
+			if got.PlaybookVersion != tc.base || provision.ReadBaseVersion(p.files, "template-web") != tc.base {
+				t.Errorf("result/stamp = %q/%q, want actual source %q", got.PlaybookVersion, provision.ReadBaseVersion(p.files, "template-web"), tc.base)
+			}
+			stored, ok := decodeProvenanceBlock(configs.get(900)["description"])
+			if tc.base != "" && (!ok || stored.BaseRevision != tc.base || configs.get(900)["tags"] != "") {
+				t.Fatalf("template metadata lost source revision or got managed tag: marker=%+v ok=%v config=%v", stored, ok, configs.get(900))
+			}
+			if tc.base == "" && ok {
+				t.Fatal("unknown legacy source wrote template revision")
 			}
 		})
 	}

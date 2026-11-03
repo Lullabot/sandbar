@@ -53,8 +53,8 @@ func callIndex(calls [][]string, tokens ...string) int {
 
 // TestSnapshotTemplate_RunningSource is the first leg of the power-state matrix:
 // a running source must be stopped before the clone and restarted afterwards, in
-// that exact order, and the template instance must come away stamped with the
-// captured playbook version and tool-set.
+// that exact order. The provisioner cannot infer a managed VM's source revision
+// from today's playbook; its provider will copy source provenance separately.
 func TestSnapshotTemplate_RunningSource(t *testing.T) {
 	f := &fakeRunner{status: map[string][]byte{"claude": []byte("Running\n")}}
 	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
@@ -66,14 +66,8 @@ func TestSnapshotTemplate_RunningSource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SnapshotTemplate: %v", err)
 	}
-	if res.PlaybookVersion != "v2:abc123:go" {
-		t.Errorf("PlaybookVersion = %q, want %q", res.PlaybookVersion, "v2:abc123:go")
-	}
-	if res.ToolsetKey != "go" {
-		t.Errorf("ToolsetKey = %q, want %q", res.ToolsetKey, "go")
-	}
-	if writes["sandbar-tmpl-golden"] != "v2:abc123:go" {
-		t.Errorf("template instance stamp not written; writes=%v", writes)
+	if res.PlaybookVersion != "" || res.ToolsetKey != "" || len(writes) != 0 {
+		t.Errorf("unproved source was stamped: result=%+v writes=%v", res, writes)
 	}
 
 	calls := f.snapshot()
@@ -227,8 +221,8 @@ func TestSnapshotTemplate_ReportsBestEffortRecoveryWarnings(t *testing.T) {
 		if err != nil {
 			t.Fatalf("SnapshotTemplate should keep a successfully cloned template usable: %v", err)
 		}
-		if res.PlaybookVersion != "" || !bytes.Contains(out.Bytes(), []byte("show as stale")) {
-			t.Errorf("result/log = %#v / %q; want no version and a stale warning", res, out.String())
+		if res.PlaybookVersion != "" {
+			t.Errorf("result = %#v; want unknown version", res)
 		}
 	})
 
@@ -254,10 +248,10 @@ func TestSnapshotTemplate_ReportsBestEffortRecoveryWarnings(t *testing.T) {
 		if err != nil {
 			t.Fatalf("SnapshotTemplate should report post-clone persistence/restart issues as warnings: %v", err)
 		}
-		if res.PlaybookVersion != "v3:hash" {
-			t.Errorf("PlaybookVersion = %q, want captured version", res.PlaybookVersion)
+		if res.PlaybookVersion != "" {
+			t.Errorf("PlaybookVersion = %q, want unknown source history", res.PlaybookVersion)
 		}
-		for _, want := range []string{"could not record", "could not restart"} {
+		for _, want := range []string{"could not restart"} {
 			if !bytes.Contains(out.Bytes(), []byte(want)) {
 				t.Errorf("log %q does not contain warning %q", out.String(), want)
 			}

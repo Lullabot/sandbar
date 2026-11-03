@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"sync"
+	"time"
 
 	"github.com/lullabot/sandbar/internal/guestsh"
 	"github.com/lullabot/sandbar/internal/lima"
@@ -150,7 +151,17 @@ func (p *limaProvider) markCompleted(ctx context.Context, cfg vm.CreateConfig, s
 // NewRemoteLima.
 
 func (p *limaProvider) SnapshotTemplate(ctx context.Context, source, templateInstance string, out io.Writer) (provision.SnapshotResult, error) {
-	return p.prov.SnapshotTemplate(ctx, source, templateInstance, out)
+	result, err := p.prov.SnapshotTemplate(ctx, source, templateInstance, out)
+	if err != nil {
+		return result, err
+	}
+	marker, ok, err := p.ProvenanceOf(ctx, source)
+	if err == nil && ok && marker.BaseRevision != "" {
+		result.PlaybookVersion = marker.BaseRevision
+		result.ToolsetKey = marker.Config.ToolsetKey()
+		_ = provision.WriteBaseVersion(p.hostFiles, templateInstance, marker.BaseRevision, time.Now())
+	}
+	return result, nil
 }
 
 func (p *limaProvider) DeleteTemplate(ctx context.Context, templateInstance string, out io.Writer) error {
