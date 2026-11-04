@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.17.0](https://github.com/Lullabot/sandbar/compare/v0.16.0...v0.17.0) (2026-11-03)
+
+
+### Features
+
+* **agents:** add global context information ([#255](https://github.com/Lullabot/sandbar/issues/255)) ([e054257](https://github.com/Lullabot/sandbar/commit/e054257012a625fdd196c57f491b1be4c82b10bf))
+* **agents:** keep edited agent settings when a reset updates their defaults ([#316](https://github.com/Lullabot/sandbar/issues/316)) ([bd2ed40](https://github.com/Lullabot/sandbar/commit/bd2ed407be47c8cf25845187c39db3f93a535bfc))
+* **baseimage:** update base-image-2026.11.03.011648 ([#320](https://github.com/Lullabot/sandbar/issues/320)) ([fae4bb5](https://github.com/Lullabot/sandbar/commit/fae4bb5873213ceabc59ecd4ae044b103eb8a0f3))
+* **claude:** default to auto mode, with a one-time bypass opt-in ([#321](https://github.com/Lullabot/sandbar/issues/321)) ([a65b56c](https://github.com/Lullabot/sandbar/commit/a65b56c7e46bbb6fc56557afd55b9663dbb18f88))
+* **deps:** update dependency @self-review/serve to v2 ([#257](https://github.com/Lullabot/sandbar/issues/257)) ([137fe2b](https://github.com/Lullabot/sandbar/commit/137fe2b092409dc300cdb4015bcfc54cf8611895))
+* **provider:** record the base and setup revisions each VM was built from ([#312](https://github.com/Lullabot/sandbar/issues/312)) ([b786cbd](https://github.com/Lullabot/sandbar/commit/b786cbd5cf0e7b79036436110b8f12a7597e10a7))
+* rename sand to sandbar with a warning compatibility symlink ([#261](https://github.com/Lullabot/sandbar/issues/261)) ([be21a8c](https://github.com/Lullabot/sandbar/commit/be21a8c2039c6949fb367481b6be0c197d467de6))
+* **reset:** keep edited home files when a preserved-home reset updates defaults ([#315](https://github.com/Lullabot/sandbar/issues/315)) ([3c12eb5](https://github.com/Lullabot/sandbar/commit/3c12eb5390eb916d8e5c85f64d328d67026aa4b2))
+* show VM base and setup update notices ([#314](https://github.com/Lullabot/sandbar/issues/314)) ([8dd9e6b](https://github.com/Lullabot/sandbar/commit/8dd9e6b95a88e70cecc130ca0a919623dce99153))
+* **template:** judge template freshness by the source VM's recorded revision ([#313](https://github.com/Lullabot/sandbar/issues/313)) ([ce20b76](https://github.com/Lullabot/sandbar/commit/ce20b76fe981c365a8d825875369c43474e5c5ce))
+
+
+### Bug Fixes
+
+* **deps:** update github.com/charmbracelet/x/exp/teatest/v2 digest to 835ad00 ([#294](https://github.com/Lullabot/sandbar/issues/294)) ([5474b56](https://github.com/Lullabot/sandbar/commit/5474b569f370ac1bfd6765f86bb5fe54a26a9de0))
+* **deps:** update github.com/charmbracelet/x/exp/teatest/v2 digest to ac49f62 ([#299](https://github.com/Lullabot/sandbar/issues/299)) ([36a0cc5](https://github.com/Lullabot/sandbar/commit/36a0cc5996bd6a838687a0eacd5ecfc8bffe516d))
+* **deps:** update module charm.land/bubbletea/v2 to v2.1.1 ([#298](https://github.com/Lullabot/sandbar/issues/298)) ([3856498](https://github.com/Lullabot/sandbar/commit/3856498202aaf1690706a28a8e46f43463c7bd4e))
+* **project:** leave a preserved home's stored GitLab credentials alone ([#317](https://github.com/Lullabot/sandbar/issues/317)) ([991d2bf](https://github.com/Lullabot/sandbar/commit/991d2bfa7c83e0f3341c2ae0ba0a957cef3825e3))
+
+
+### Performance Improvements
+
+* **provision:** install the selected coding agents concurrently ([#303](https://github.com/Lullabot/sandbar/issues/303)) ([4032c76](https://github.com/Lullabot/sandbar/commit/4032c7683e592e0cbfd6845a2002dc1966b0515d))
+
 ## [0.16.0](https://github.com/Lullabot/sandbar/compare/v0.15.0...v0.16.0) (2026-10-27)
 
 
