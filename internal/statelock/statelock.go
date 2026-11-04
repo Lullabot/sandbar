@@ -1,8 +1,9 @@
-// Package statelock serializes writes to sand's host-side JSON state files —
-// the managed-VM index (internal/registry) and the secrets store
-// (internal/secrets) — across concurrent sand processes.
+// Package statelock serializes writes to sand's host-side state files —
+// the managed-VM index (internal/registry), the secrets store
+// (internal/secrets) and the connection profiles (internal/profiles) — across
+// concurrent sand processes.
 //
-// Both files are rewritten WHOLE from an in-memory map. That is safe for one
+// Each file is rewritten WHOLE from an in-memory map. That is safe for one
 // writer and quietly lossy for two: a long-running TUI holds the state it read
 // at startup, a `sandbar create` in another terminal adds an entry, and the TUI's
 // next save — a delete, a reconcile, a secret edit — writes its own older map
