@@ -265,6 +265,14 @@ func resetParsed(fs *flag.FlagSet, o *resetOptions) error {
 		}
 	}
 
+	// A recorded slot (from the index or the backup's manifest) is kept as-is;
+	// an eligible VM recorded before slots existed is given one now, so its
+	// reset is what moves it off ddev's default ports. Before doReset, so the
+	// in-flight marker of the rebuilt VM already carries it.
+	if err := assignDDEVSlot(ctx, &cfg, target.Type, provenancer, reg, scope); err != nil {
+		return fmt.Errorf("sandbar reset: %w", err)
+	}
+
 	if err := doReset(ctx, reg, p, cfg, scope, opts, os.Stdout, provenancer); err != nil {
 		return err
 	}
@@ -493,6 +501,7 @@ func doReset(ctx context.Context, reg *registry.Registry, p resetter, cfg vm.Cre
 	if err := manage.RecordSuccess(reg, cfg, scope, provenancer...); err != nil {
 		fmt.Fprintln(out, "warning: VM ready, but recording it as managed failed:", err)
 	}
+	printDDEVPorts(out, cfg)
 	return nil
 }
 

@@ -2,7 +2,7 @@
 id: 3
 group: "entrypoints"
 dependencies: [1]
-status: "pending"
+status: "completed"
 created: 2026-11-05
 models:
   anthropic: "claude-opus-5-5"
@@ -23,13 +23,13 @@ Make every create and reset path allocate a slot for eligible VMs before provisi
 Go (cmd/sandbar CLI, internal/ui Bubble Tea model), Go testing.
 
 ## Acceptance Criteria
-- [ ] `adoptRecordedConfig` (`cmd/sandbar/create.go`) copies `rec.DDEVPortSlot`, so `sandbar reset` (`resetConfigFromRecord`) and `sandbar create --recreate` keep a recorded slot.
-- [ ] The TUI reset path keeps a recorded slot: `openResetForm` captures it (new model field beside `resetWithDDEV`) and `buildConfig` replays it in reset mode.
-- [ ] `sandbar create` (new VM, including `--template`), `sandbar create --recreate`, `sandbar reset` (including `--from-backup`), and the TUI's create (`submitForm`) and reset (`submitReset`) call `manage.AssignDDEVSlot` with the target profile's type, its provenance markers and `reg.ManagedInScope(scope)` BEFORE provisioning starts, so the in-flight marker written at clone time already carries the slot. A recorded slot is never re-probed.
-- [ ] Inputs: the CLI calls the provider's `Provenancer.Provenance(ctx)` once (tolerating an error by falling back to registry-only); the TUI uses its cached `mem.provenance` for the owning member — no new I/O on the TUI submit path.
-- [ ] After a successful `sandbar create` or `sandbar reset` of a VM with a slot, the CLI prints one line naming the router HTTP and HTTPS ports and the URL form, e.g. `ddev: http://<project>.ddev.site:20120  https://<project>.ddev.site:20121`. No TUI rendering change; `go test ./internal/ui -run TestTUI` goldens unchanged.
-- [ ] Tests prove a recorded slot survives each of: `resetConfigFromRecord`, `adoptRecordedConfig` (recreate), the TUI reset `buildConfig`, and a `reset.json` write/read; and that a create on a Lima profile with `WithDDEV` records a slot in the registry/marker while a Proxmox create or `WithDDEV=false` does not; and that a reset of a slot-less eligible VM allocates one that does not collide with another VM in the same scope.
-- [ ] `go test ./...`, `go vet ./...` pass; `gofmt -l .` empty.
+- [x] `adoptRecordedConfig` (`cmd/sandbar/create.go`) copies `rec.DDEVPortSlot`, so `sandbar reset` (`resetConfigFromRecord`) and `sandbar create --recreate` keep a recorded slot.
+- [x] The TUI reset path keeps a recorded slot: `openResetForm` captures it (new model field beside `resetWithDDEV`) and `buildConfig` replays it in reset mode.
+- [x] `sandbar create` (new VM, including `--template`), `sandbar create --recreate`, `sandbar reset` (including `--from-backup`), and the TUI's create (`submitForm`) and reset (`submitReset`) call `manage.AssignDDEVSlot` with the target profile's type, its provenance markers and `reg.ManagedInScope(scope)` BEFORE provisioning starts, so the in-flight marker written at clone time already carries the slot. A recorded slot is never re-probed.
+- [x] Inputs: the CLI calls the provider's `Provenancer.Provenance(ctx)` once (tolerating an error by falling back to registry-only); the TUI uses its cached `mem.provenance` for the owning member — no new I/O on the TUI submit path.
+- [x] After a successful `sandbar create` or `sandbar reset` of a VM with a slot, the CLI prints one line naming the router HTTP and HTTPS ports and the URL form, e.g. `ddev: http://<project>.ddev.site:20120  https://<project>.ddev.site:20121`. No TUI rendering change; `go test ./internal/ui -run TestTUI` goldens unchanged.
+- [x] Tests prove a recorded slot survives each of: `resetConfigFromRecord`, `adoptRecordedConfig` (recreate), the TUI reset `buildConfig`, and a `reset.json` write/read; and that a create on a Lima profile with `WithDDEV` records a slot in the registry/marker while a Proxmox create or `WithDDEV=false` does not; and that a reset of a slot-less eligible VM allocates one that does not collide with another VM in the same scope.
+- [x] `go test ./...`, `go vet ./...` pass; `gofmt -l .` empty.
 
 Use your internal Todo tool to track these and keep on track.
 

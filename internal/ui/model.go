@@ -407,6 +407,12 @@ type model struct {
 	resetCloneURL   string
 	resetCloneForge string
 	formCloneForge  string
+	// resetDDEVPortSlot is the reset target's RECORDED ddev port slot, replayed
+	// by buildConfig for the same reason as the tool-set below: the form has no
+	// row for it, and a config rebuilt from DefaultCreateConfig without it would
+	// hand the VM a different port block, breaking its URLs. nil when the VM has
+	// none, in which case submitReset allocates one.
+	resetDDEVPortSlot *int
 	// The reset target's RECORDED tool-set, captured in openResetForm. The reset
 	// form shows no tool toggles, so without carrying these the rebuilt config
 	// would fall back to DefaultCreateConfig()'s all-on selection and a reset

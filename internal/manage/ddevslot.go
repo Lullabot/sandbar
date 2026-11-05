@@ -24,10 +24,7 @@ import (
 // It performs no I/O: the TUI calls it on its submit path with the
 // provenance it already has cached, and the CLI with one Provenance call.
 func AssignDDEVSlot(cfg *vm.CreateConfig, kind profiles.Type, markers map[string]provider.Provenance, managed []registry.ManagedEntry) error {
-	if kind != profiles.TypeLocal && kind != profiles.TypeRemoteSSH {
-		return nil
-	}
-	if !cfg.WithDDEV || cfg.DDEVPortSlot != nil {
+	if !NeedsDDEVSlot(*cfg, kind) {
 		return nil
 	}
 	held := map[int]bool{}
@@ -49,4 +46,15 @@ func AssignDDEVSlot(cfg *vm.CreateConfig, kind profiles.Type, markers map[string
 	// A fresh pointer: cfg may be a copy whose fields alias a cached record.
 	cfg.DDEVPortSlot = &s
 	return nil
+}
+
+// NeedsDDEVSlot reports whether AssignDDEVSlot would allocate a slot for cfg.
+// It exists so a caller that has to do I/O to gather AssignDDEVSlot's inputs
+// (the CLI's provenance read) can skip it when the answer cannot matter,
+// without restating the eligibility rule and drifting from it.
+func NeedsDDEVSlot(cfg vm.CreateConfig, kind profiles.Type) bool {
+	if kind != profiles.TypeLocal && kind != profiles.TypeRemoteSSH {
+		return false
+	}
+	return cfg.WithDDEV && cfg.DDEVPortSlot == nil
 }

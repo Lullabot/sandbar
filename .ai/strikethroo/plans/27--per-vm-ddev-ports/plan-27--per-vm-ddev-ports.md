@@ -273,9 +273,9 @@ graph TD
 - ✔️ Task 01: Slot model, allocator and finalize extra vars
 - ✔️ Task 02: Guest ddev-ports role and sandbar-environment skill references
 
-### Phase 2: Entrypoint wiring
+### ✅ Phase 2: Entrypoint wiring
 **Parallel Tasks:**
-- Task 03: Allocate and carry the slot through every create/reset entrypoint (depends on: 01)
+- ✔️ Task 03: Allocate and carry the slot through every create/reset entrypoint (depends on: 01)
 
 ### Phase 3: CI assertion and documentation
 **Parallel Tasks:**
