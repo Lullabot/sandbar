@@ -37,7 +37,7 @@ module.exports = __toCommonJS(find_strikethroo_root_exports);
 // src/skill-scripts/shared/root.ts
 var fs = __toESM(require("fs"));
 var path = __toESM(require("path"));
-var EXPECTED_SCHEMA = true ? 2 : 2;
+var EXPECTED_SCHEMA = true ? 4 : 4;
 var isValidStrikethrooRoot = (strikethrooPath) => {
   try {
     if (!fs.existsSync(strikethrooPath)) return false;
@@ -61,10 +61,12 @@ var getParentPaths = (currentPath, acc = []) => {
   if (parentPath === absolutePath) return nextAcc;
   return getParentPaths(parentPath, nextAcc);
 };
-var checkWorkspaceSchema = (metadataPath) => {
+var checkWorkspaceSchema = (strikethrooRoot) => {
   let metadata;
   try {
-    metadata = JSON.parse(fs.readFileSync(metadataPath, "utf8"));
+    metadata = JSON.parse(
+      fs.readFileSync(path.join(strikethrooRoot, ".init-metadata.json"), "utf8")
+    );
   } catch {
     return;
   }
@@ -83,12 +85,15 @@ var checkWorkspaceSchema = (metadataPath) => {
   }
   process.exit(1);
 };
-var findStrikethrooRoot = (startPath = process.cwd()) => {
+var discoverStrikethrooRoot = (startPath = process.cwd()) => {
   const paths = getParentPaths(startPath);
   const found = paths.find((p) => getStrikethrooAt(p));
   if (!found) return null;
-  const root = getStrikethrooAt(found);
-  if (root) checkWorkspaceSchema(path.join(root, ".init-metadata.json"));
+  return getStrikethrooAt(found);
+};
+var findStrikethrooRoot = (startPath = process.cwd()) => {
+  const root = discoverStrikethrooRoot(startPath);
+  if (root) checkWorkspaceSchema(root);
   return root;
 };
 

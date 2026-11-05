@@ -2,7 +2,7 @@
 id: [TASK-ID]
 group: "user-authentication"
 dependencies: []  # List of task IDs, e.g., [2, 3]
-status: "[STATUS]"  # pending | in-progress | completed | needs-clarification
+status: "[STATUS]"  # pending | in-progress | completed | needs-clarification | failed
 created: [YYYY-MM-DD]
 models: # Provider-specific model IDs; dispatchers use only their current provider
   anthropic: "[ANTHROPIC-MODEL]" # claude-haiku-4-5 | claude-sonnet-5 | claude-opus-5-5; never Fable
@@ -11,6 +11,9 @@ effort: "[EFFORT]"  # low | medium | high | xhigh — shared reasoning tier
 skills: # Technical skills required for this task
   - [SKILL-1]
   - [SKILL-2]
+complexity_score: [1-10]  # Required on every newly generated task
+# Optional configured routing profile, assigned atomically during task generation.
+# execution_profile: "profile-name"
 ---
 # [TASK-TITLE]
 

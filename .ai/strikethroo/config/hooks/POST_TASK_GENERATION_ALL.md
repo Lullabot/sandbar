@@ -1,18 +1,8 @@
 # POST_TASK_GENERATION_ALL Hook
 
-After all tasks have been generated, perform these three steps:
+After all tasks have been generated, perform these two steps:
 
-## 1. Review Task Complexity
-
-For each generated task, do a quick sanity check:
-
-- **Too complex?** If a task spans 3+ technologies or requires 3+ skills, split it.
-- **Too vague?** If acceptance criteria are unclear, sharpen them.
-- **Too trivial?** If two tasks could be one without adding complexity, merge them.
-
-Target: every task should be completable with 1-2 skills and have clear acceptance criteria.
-
-## 2. Assign Model and Effort
+## 1. Assign Model and Effort
 
 Read `.ai/strikethroo/config/shared/model-effort-rubric.md`. For **every** task,
 determine the right-sized provider models and effort and write them into the
@@ -37,7 +27,7 @@ Bias toward the least costly model that can plausibly complete the task
 correctly. Upgrade the model before increasing effort; do not compensate for
 an underpowered model with more effort.
 
-## 3. Update Plan with Blueprint
+## 2. Update Plan with Blueprint
 
 After finalizing tasks, append to the plan document:
 
