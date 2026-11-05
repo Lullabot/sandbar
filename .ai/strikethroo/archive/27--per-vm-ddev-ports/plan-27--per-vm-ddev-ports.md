@@ -287,3 +287,49 @@ graph TD
 ### Execution Summary
 - Total Phases: 3
 - Total Tasks: 5
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-11-05
+
+### Results
+
+Every ddev-enabled Lima VM now gets a stable block of seven ddev ports in 20000–29999. Slots are recorded in `vm.CreateConfig.DDEVPortSlot` (nil = unrecorded), allocated by the pure `manage.AssignDDEVSlot`, and carried through every create/reset entrypoint (CLI and TUI). A new finalize-phase `roles/ddev-ports` role writes the ports into the guest's `~/.ddev/global_config.yaml`. The `sandbar-environment` skill states the ports. `sandbar create`/`reset` print them. `lima-e2e` asserts they reach the guest. Docs and AGENTS.md are updated.
+
+Commits: `37fbf58` (plan + tasks), `dc7185e` (slot model, allocator, extra vars, guest role, skill), `d6254bd` (entrypoint wiring + CLI output), `436565c` (docs, AGENTS.md, lima-e2e step).
+
+Verification run during execution:
+- `gofmt -l .` empty; `go vet ./...` and `go vet -tags limae2e ./...` pass; `go test -count=1 ./...` passes.
+- CI-equivalent coverage over `./internal/...` is 90.1% against the floor of 90.0%.
+- `ansible-playbook --syntax-check` passes, and the 46 Python tests pass.
+- `mkdocs build --strict` passes.
+- Real Lima VMs on this KVM host:
+  - Three ddev VMs got distinct slots (505, 648, 267), and each guest's `global_config.yaml` held exactly its slot's seven ports.
+  - ddev projects in two VMs answered simultaneously from the host over HTTP and HTTPS (`alpha.ddev.site:25051`, `beta.ddev.site:26481`), and `ddev describe` showed the slot ports.
+  - No host listener was on 80/443/8025/8026/8142/8143/10999.
+  - `this-vm.md` listed the ports on an agent-enabled VM.
+  - `sandbar reset` kept slot 267 and printed the same ports.
+- The VMs and the base they created were deleted afterwards.
+
+### Noteworthy Events
+
+- **Refinement before execution.** Code inspection found that `roles/dev-tools` never runs in finalize, that `toolset_ddev` is base-only, and that every reset path rebuilds the config field by field. The design was corrected before any code was written (see Plan Clarifications).
+- **Test comparisons updated.** The `*int` slot field makes `==` on `CreateConfig` compare addresses. 25 whole-config comparisons in tests were switched to `reflect.DeepEqual`; production code had none.
+- **New allocation details in task 3.**
+  - `manage.NeedsDDEVSlot` was added, so the CLI reads markers only when a slot is needed.
+  - The TUI also counts its own in-flight builds as holding slots, so two back-to-back creates cannot share a block.
+- **Idempotence test touched host state.** Task 2's agent ran the role twice against the developer's real `~/.ddev`, which did not previously exist, and then removed it. Confirmed absent afterwards.
+- **Skill needs an agent.** `this-vm.md` is only installed when at least one coding agent is selected (existing `agent-context` behaviour). The first two test VMs had none, so a third VM with Pi was used for that check. `lima-e2e` selects all agents, so its assertion holds.
+- **Docker group missing in fresh VMs (pre-existing, outside this plan).**
+  - On fresh VMs, `limactl shell` sessions lacked the `docker` supplementary group although `/etc/group` listed the user. `ddev start` failed with docker.sock permission denied.
+  - It worked under `sg docker`. The likely cause is Lima's shared SSH connection, which predates finalize's group grant.
+  - This contradicts AGENTS.md's claim that the first interactive shell is a fresh login.
+- **CI not dispatched.** Self Validation step 10 was not run, because the available `gh` token cannot dispatch workflows. The new `lima-e2e` step was exercised locally against fakes only.
+- **Lima config left in place.** Lima created `~/.lima/_config` (its per-user network config and SSH key) during the VM checks. It was left in place.
+
+### Necessary follow-ups
+
+- Open a PR for `worktree-plan-ddev-ports`, so CI (including the new `lima-e2e` assertion) runs.
+- Investigate the docker-group issue above. The reproduction is: fresh `sandbar create` with ddev, then `limactl shell <vm> id` shows no `docker` group. A user's first `ddev start` in a new VM may fail until the Lima SSH control connection is recycled.
+- Known limitation, recorded in AGENTS.md: a VM known only from another controller's marker is rebuilt from defaults on reset, so its slot is re-derived from the name hash rather than carried.
