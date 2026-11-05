@@ -23,14 +23,19 @@ before the execution blueprint is generated.
 
 ## Project-specific guidance
 
-This project does not use Strikethroo's native execution routing. Model and
-effort are assigned per task by `POST_TASK_GENERATION_ALL.md` from
-`config/shared/model-effort-rubric.md`, and `PRE_TASK_ASSIGNMENT.md` dispatches
-on those fields through the `st-worker-*` agents. Running both would let a
-routed profile's model override the rubric's choice at dispatch.
+Profiles live in each developer's local `config/config.yaml`, so match on
+their descriptions rather than assuming particular names. For this Go and
+Ansible repository:
 
-Keep routing off: leave `config/config.yaml` absent, or set
-`execution_routing.enabled: false` in it (the file is local and gitignored, so
-each developer sets this). If `route-task-execution.cjs profiles` reports
-routing as enabled, stop and ask the user to disable it rather than
-classifying tasks against the shipped example profiles.
+- Route to the most capable profile any task touching secrets or tokens,
+  the reset/preserve path (data that exists only in staged archives),
+  registry or state-lock read-modify-write, base-image locking and other
+  concurrency, the guest isolation boundary (writable mounts, clipboard,
+  Landing, drupal.org publishing), or a verification gate. A wrong answer
+  there loses data or leaks a credential silently.
+- Treat MkDocs pages, `AGENTS.md`, and other prose-only edits as routine
+  work.
+- Route ordinary Go changes in `internal/` and Ansible role changes to the
+  default implementation profile, including TUI work that only needs a
+  golden-file update.
+- When unsure between two profiles, choose the more capable one.
