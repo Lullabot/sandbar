@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/lullabot/sandbar/internal/statelock"
 )
 
 // currentVersion is the schema version this binary writes.
@@ -77,6 +79,13 @@ func LoadFrom(path string) (*Store, error) {
 
 func loadFrom(path string, readOnly bool) (*Store, error) {
 	s := &Store{path: path, profiles: map[string]Profile{}}
+	// A load that may WRITE (seed a missing file, quarantine a corrupt one)
+	// holds the same lock as every other write, so it cannot seed over, or
+	// move aside, a file another sand process wrote between this read and
+	// that write. A read-only load writes nothing and takes no lock.
+	if !readOnly {
+		defer s.lock()()
+	}
 	seed := func() error {
 		if readOnly {
 			s.seedLocalInMemory()
@@ -85,33 +94,65 @@ func loadFrom(path string, readOnly bool) (*Store, error) {
 		return s.seedLocal()
 	}
 
-	data, err := os.ReadFile(path)
+	snap, err := readSnapshot(path)
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
+		var perr *parseError
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
 			return s, seed()
+		case errors.As(err, &perr):
+			if readOnly {
+				s.seedLocalInMemory()
+				return s, fmt.Errorf("profiles file at %s was unreadable: %w", path, perr.err)
+			}
+			_ = os.Rename(path, path+".corrupt")
+			seedErr := s.seedLocal()
+			wrapped := fmt.Errorf("profiles file at %s was unreadable (moved to %s.corrupt): %w", path, path, perr.err)
+			if seedErr != nil {
+				return s, seedErr
+			}
+			return s, wrapped
+		default:
+			s.seedLocalInMemory()
+			return s, fmt.Errorf("profiles file at %s could not be read: %w", path, err)
 		}
-		s.seedLocalInMemory()
-		return s, fmt.Errorf("profiles file at %s could not be read: %w", path, err)
 	}
-	if len(data) == 0 {
+	if len(snap.profiles) == 0 {
 		return s, seed()
 	}
+	s.adopt(snap)
+	return s, nil
+}
 
+// snapshot is one parsed read of the profiles file.
+type snapshot struct {
+	profiles map[string]Profile
+	order    []string
+	lastUsed string
+}
+
+// parseError marks a file that was read but could not be parsed — the one
+// case LoadFrom quarantines, as distinct from a file it could not read.
+type parseError struct{ err error }
+
+func (e *parseError) Error() string { return e.err.Error() }
+
+// readSnapshot reads and parses the file at path. A missing file returns an
+// error satisfying errors.Is(err, fs.ErrNotExist); an empty file returns an
+// empty snapshot; an unparseable one returns a *parseError.
+func readSnapshot(path string) (snapshot, error) {
+	snap := snapshot{profiles: map[string]Profile{}}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return snap, err
+	}
+	if len(data) == 0 {
+		return snap, nil
+	}
 	var parsed fileSchema
 	if err := yaml.Unmarshal(data, &parsed); err != nil {
-		if readOnly {
-			s.seedLocalInMemory()
-			return s, fmt.Errorf("profiles file at %s was unreadable: %w", path, err)
-		}
-		_ = os.Rename(path, path+".corrupt")
-		seedErr := s.seedLocal()
-		wrapped := fmt.Errorf("profiles file at %s was unreadable (moved to %s.corrupt): %w", path, path, err)
-		if seedErr != nil {
-			return s, seedErr
-		}
-		return s, wrapped
+		return snap, &parseError{err: err}
 	}
-
 	for _, p := range parsed.Profiles {
 		if p.Type == TypeRemoteSSH && p.Port <= 0 {
 			// Canonicalize a hand-edited profile's missing/zero port to the SSH
@@ -121,15 +162,58 @@ func loadFrom(path string, readOnly bool) (*Store, error) {
 			// "host:0" vs "host:22".
 			p.Port = 22
 		}
-		s.profiles[p.ID] = p
-		s.order = append(s.order, p.ID)
+		snap.profiles[p.ID] = p
+		snap.order = append(snap.order, p.ID)
 	}
-	s.lastUsed = parsed.LastUsed
+	snap.lastUsed = parsed.LastUsed
+	return snap, nil
+}
 
-	if len(s.profiles) == 0 {
-		return s, seed()
+// adopt replaces the store's in-memory state with snap.
+func (s *Store) adopt(snap snapshot) {
+	s.profiles = snap.profiles
+	s.order = snap.order
+	s.lastUsed = snap.lastUsed
+}
+
+// lock takes the advisory lock beside the store's file (statelock) and
+// returns its release. The directory is created first so the lock file can
+// be, on a first run where nothing has been written yet. An in-memory store
+// (empty path) has nothing to serialize.
+func (s *Store) lock() (release func()) {
+	if s.path == "" {
+		return func() {}
 	}
-	return s, nil
+	_ = os.MkdirAll(filepath.Dir(s.path), 0o755)
+	return statelock.Acquire(s.path)
+}
+
+// mutate is the ONLY write path after load. The file is rewritten whole from
+// memory, and a long-lived holder (the TUI) and a short one (`sandbar
+// create`'s SetLastUsed) each loaded it at their own startup — so saving
+// in-memory state as-is lets one silently erase the other's change: a profile
+// added in the TUI while a create runs, or the create's last-used pointer.
+// mutate therefore takes the file lock, re-reads the file, applies the change
+// to what is on disk NOW, and saves. apply must make its own existence and
+// validation checks against that fresh state, and must return an error
+// before changing anything to abort the write.
+//
+// A failed or empty re-read keeps this process's in-memory state as the best
+// available source, matching internal/registry's mutate: the file may be
+// briefly unreadable, and an empty one is never a reason to drop the
+// permanent Local profile.
+func (s *Store) mutate(apply func() error) error {
+	if s.path == "" {
+		return apply()
+	}
+	defer s.lock()()
+	if snap, err := readSnapshot(s.path); err == nil && len(snap.profiles) > 0 {
+		s.adopt(snap)
+	}
+	if err := apply(); err != nil {
+		return err
+	}
+	return s.save()
 }
 
 // seedLocalInMemory populates the store with a single enabled Local profile
@@ -148,7 +232,7 @@ func (s *Store) seedLocalInMemory() {
 }
 
 // seedLocal populates the store with a single enabled Local profile and
-// persists it.
+// persists it. Only loadFrom calls it, with the file lock already held.
 func (s *Store) seedLocal() error {
 	s.seedLocalInMemory()
 	return s.save()
@@ -203,12 +287,7 @@ func (s *Store) Add(p Profile) (Profile, error) {
 	if p.Type == TypeRemoteSSH && p.Port <= 0 {
 		p.Port = 22 // finding 8: canonicalize before validate() so the scope key is stable
 	}
-	if p.Type == TypeLocal {
-		if _, exists := s.profiles[LocalProfileID]; exists {
-			return Profile{}, errors.New("only one Local profile may exist")
-		}
-		p.ID = LocalProfileID
-	} else {
+	if p.Type != TypeLocal {
 		id, err := generateID()
 		if err != nil {
 			return Profile{}, err
@@ -216,15 +295,25 @@ func (s *Store) Add(p Profile) (Profile, error) {
 		p.ID = id
 	}
 
-	trial := s.cloneProfiles()
-	trial[p.ID] = p
-	if err := validate(trial); err != nil {
-		return Profile{}, err
-	}
+	err := s.mutate(func() error {
+		if p.Type == TypeLocal {
+			if _, exists := s.profiles[LocalProfileID]; exists {
+				return errors.New("only one Local profile may exist")
+			}
+			p.ID = LocalProfileID
+		}
 
-	s.profiles[p.ID] = p
-	s.order = append(s.order, p.ID)
-	if err := s.save(); err != nil {
+		trial := s.cloneProfiles()
+		trial[p.ID] = p
+		if err := validate(trial); err != nil {
+			return err
+		}
+
+		s.profiles[p.ID] = p
+		s.order = append(s.order, p.ID)
+		return nil
+	})
+	if err != nil {
 		return Profile{}, err
 	}
 	return p, nil
@@ -237,22 +326,25 @@ func (s *Store) Update(p Profile) (Profile, error) {
 	if p.Type == TypeRemoteSSH && p.Port <= 0 {
 		p.Port = 22 // finding 8: canonicalize before validate() so the scope key is stable
 	}
-	existing, ok := s.profiles[p.ID]
-	if !ok {
-		return Profile{}, fmt.Errorf("no profile with id %q", p.ID)
-	}
-	if p.Type != existing.Type {
-		return Profile{}, fmt.Errorf("profile %q: type is immutable", p.ID)
-	}
+	err := s.mutate(func() error {
+		existing, ok := s.profiles[p.ID]
+		if !ok {
+			return fmt.Errorf("no profile with id %q", p.ID)
+		}
+		if p.Type != existing.Type {
+			return fmt.Errorf("profile %q: type is immutable", p.ID)
+		}
 
-	trial := s.cloneProfiles()
-	trial[p.ID] = p
-	if err := validate(trial); err != nil {
-		return Profile{}, err
-	}
+		trial := s.cloneProfiles()
+		trial[p.ID] = p
+		if err := validate(trial); err != nil {
+			return err
+		}
 
-	s.profiles[p.ID] = p
-	if err := s.save(); err != nil {
+		s.profiles[p.ID] = p
+		return nil
+	})
+	if err != nil {
 		return Profile{}, err
 	}
 	return p, nil
@@ -264,17 +356,19 @@ func (s *Store) Remove(id string) error {
 	if id == LocalProfileID {
 		return errors.New("the local profile is permanent and cannot be removed")
 	}
-	if _, ok := s.profiles[id]; !ok {
-		return fmt.Errorf("no profile with id %q", id)
-	}
-	delete(s.profiles, id)
-	for i, oid := range s.order {
-		if oid == id {
-			s.order = append(s.order[:i], s.order[i+1:]...)
-			break
+	return s.mutate(func() error {
+		if _, ok := s.profiles[id]; !ok {
+			return fmt.Errorf("no profile with id %q", id)
 		}
-	}
-	return s.save()
+		delete(s.profiles, id)
+		for i, oid := range s.order {
+			if oid == id {
+				s.order = append(s.order[:i], s.order[i+1:]...)
+				break
+			}
+		}
+		return nil
+	})
 }
 
 // Enable sets Enabled=true on the profile with the given ID and persists it.
@@ -289,20 +383,22 @@ func (s *Store) Disable(id string) error {
 }
 
 func (s *Store) setEnabled(id string, enabled bool) error {
-	p, ok := s.profiles[id]
-	if !ok {
-		return fmt.Errorf("no profile with id %q", id)
-	}
-	p.Enabled = enabled
+	return s.mutate(func() error {
+		p, ok := s.profiles[id]
+		if !ok {
+			return fmt.Errorf("no profile with id %q", id)
+		}
+		p.Enabled = enabled
 
-	trial := s.cloneProfiles()
-	trial[id] = p
-	if err := validate(trial); err != nil {
-		return err
-	}
+		trial := s.cloneProfiles()
+		trial[id] = p
+		if err := validate(trial); err != nil {
+			return err
+		}
 
-	s.profiles[id] = p
-	return s.save()
+		s.profiles[id] = p
+		return nil
+	})
 }
 
 // LastUsed returns the ID of the last-used profile, or "" if none has been
@@ -314,11 +410,13 @@ func (s *Store) LastUsed() string {
 // SetLastUsed records id as the last-used profile (by ID, so a later rename
 // of that profile does not lose the pointer) and persists it.
 func (s *Store) SetLastUsed(id string) error {
-	if _, ok := s.profiles[id]; !ok {
-		return fmt.Errorf("no profile with id %q", id)
-	}
-	s.lastUsed = id
-	return s.save()
+	return s.mutate(func() error {
+		if _, ok := s.profiles[id]; !ok {
+			return fmt.Errorf("no profile with id %q", id)
+		}
+		s.lastUsed = id
+		return nil
+	})
 }
 
 func (s *Store) cloneProfiles() map[string]Profile {
@@ -394,7 +492,8 @@ func validate(profiles map[string]Profile) error {
 
 // save writes the store atomically (temp file + os.Rename) to its backing
 // path. With an empty path it is a no-op, so an in-memory store never
-// touches disk.
+// touches disk. It is called only by mutate and seedLocal, which hold the
+// file lock; saving from anywhere else reopens the lost-update race.
 func (s *Store) save() error {
 	if s.path == "" {
 		return nil
