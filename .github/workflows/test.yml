@@ -211,6 +211,43 @@ jobs:
             loginctl show-user "$(id -un)" --property=Linger | grep -qx "Linger=yes"
           '
 
+      # The slot sandbar recorded for this VM must have reached the guest: in
+      # ddev's global config, in the sandbar-environment skill, and on the CLI's
+      # output. A unit test only proves the vars were rendered, not that they
+      # landed. Neither Docker nor a ddev project is started: the config file is
+      # the contract.
+      - name: Assert the recorded ddev port slot reached the guest
+        run: |
+          set -euo pipefail
+          marker="${LIMA_HOME:-$HOME/.lima}/claude-ci/sandbar.json"
+          slot=$(jq -r '.config.DDEVPortSlot // empty' "$marker")
+          if [ -z "$slot" ]; then
+            echo "::error::no DDEVPortSlot in the provenance marker $marker"
+            exit 1
+          fi
+          base=$((20000 + 10 * slot))
+          fail=0
+          cfg=$(limactl shell claude-ci bash -lc 'cat "$HOME/.ddev/global_config.yaml"')
+          i=0
+          for key in router_http_port router_https_port mailpit_http_port mailpit_https_port xhgui_http_port xhgui_https_port traefik_monitor_port; do
+            want="$key: $((base + i))"
+            if ! grep -qx "$want" <<<"$cfg"; then
+              echo "::error::~/.ddev/global_config.yaml lacks '$want' (slot $slot)"
+              fail=1
+            fi
+            i=$((i + 1))
+          done
+          https=$((base + 1))
+          if ! limactl shell claude-ci bash -lc 'cat "$HOME/.agents/skills/sandbar-environment/references/this-vm.md"' | grep -qF "$https"; then
+            echo "::error::sandbar-environment this-vm.md does not mention the router HTTPS port $https"
+            fail=1
+          fi
+          if ! grep -qF "$https" cold.log; then
+            echo "::error::the create output (cold.log) does not mention the router HTTPS port $https"
+            fail=1
+          fi
+          exit $fail
+
       - name: Smoke-test the installed toolchain
         run: |
           limactl shell claude-ci bash -lc '

@@ -277,10 +277,10 @@ graph TD
 **Parallel Tasks:**
 - ✔️ Task 03: Allocate and carry the slot through every create/reset entrypoint (depends on: 01)
 
-### Phase 3: CI assertion and documentation
+### ✅ Phase 3: CI assertion and documentation
 **Parallel Tasks:**
-- Task 04: lima-e2e assertion that the recorded ports reach the guest (depends on: 02, 03)
-- Task 05: Documentation and AGENTS.md (depends on: 01, 02, 03)
+- ✔️ Task 04: lima-e2e assertion that the recorded ports reach the guest (depends on: 02, 03)
+- ✔️ Task 05: Documentation and AGENTS.md (depends on: 01, 02, 03)
 
 ### Post-phase Actions
 

@@ -2,7 +2,7 @@
 id: 5
 group: "docs"
 dependencies: [1, 2, 3]
-status: "pending"
+status: "completed"
 created: 2026-11-05
 models:
   anthropic: "claude-sonnet-5"

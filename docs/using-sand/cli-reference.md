@@ -53,6 +53,10 @@ It never prompts: every flag has a default (or falls back to something on the
 host), and a missing *required* value — git identity — is a validation error,
 not a prompt.
 
+When the VM has ddev, a successful create ends with a line such as
+`ddev: http://<project>.ddev.site:20120  https://<project>.ddev.site:20121`,
+the VM's own router ports. See [Web Servers and Ports](web-servers.md#ddev-urls).
+
 ### Flags
 
 | Flag | Type | Default | Description |
@@ -500,6 +504,10 @@ before or after it.
 
 Omitted flags use the VM's recorded settings. Explicit flags override them,
 and the new settings become the defaults for the next reset.
+
+A reset of a Lima VM with ddev prints the same `ddev:` line when it finishes,
+and keeps the VM's port slot. A VM created before per-VM ports existed gets one
+on its first reset. See [Web Servers and Ports](web-servers.md#ddev-urls).
 
 ### There is no `--clone-url`
 
