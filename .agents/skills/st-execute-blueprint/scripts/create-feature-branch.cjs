@@ -39,10 +39,19 @@ var path4 = __toESM(require("path"));
 
 // src/skill-scripts/shared/git-utils.ts
 var import_child_process = require("child_process");
-var execGit = (command) => {
+var GIT_OUTPUT_LIMIT = 64 * 1024 * 1024;
+var run = (args, opts) => (0, import_child_process.execFileSync)("git", [...args], {
+  cwd: opts.cwd,
+  input: opts.input,
+  encoding: "utf8",
+  stdio: ["pipe", "pipe", "pipe"],
+  maxBuffer: GIT_OUTPUT_LIMIT
+});
+var execGit = (args, opts = {}) => {
   try {
-    return (0, import_child_process.execSync)(command, { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] }).trim();
-  } catch (_error) {
+    const out = run(args, opts);
+    return opts.trim === false ? out : out.trim();
+  } catch {
     return null;
   }
 };
@@ -54,7 +63,7 @@ var path3 = __toESM(require("path"));
 // src/skill-scripts/shared/root.ts
 var fs = __toESM(require("fs"));
 var path = __toESM(require("path"));
-var EXPECTED_SCHEMA = true ? 2 : 2;
+var EXPECTED_SCHEMA = true ? 4 : 4;
 var isValidStrikethrooRoot = (strikethrooPath) => {
   try {
     if (!fs.existsSync(strikethrooPath)) return false;
@@ -78,10 +87,12 @@ var getParentPaths = (currentPath, acc = []) => {
   if (parentPath === absolutePath) return nextAcc;
   return getParentPaths(parentPath, nextAcc);
 };
-var checkWorkspaceSchema = (metadataPath) => {
+var checkWorkspaceSchema = (strikethrooRoot) => {
   let metadata;
   try {
-    metadata = JSON.parse(fs.readFileSync(metadataPath, "utf8"));
+    metadata = JSON.parse(
+      fs.readFileSync(path.join(strikethrooRoot, ".init-metadata.json"), "utf8")
+    );
   } catch {
     return;
   }
@@ -100,12 +111,15 @@ var checkWorkspaceSchema = (metadataPath) => {
   }
   process.exit(1);
 };
-var findStrikethrooRoot = (startPath = process.cwd()) => {
+var discoverStrikethrooRoot = (startPath = process.cwd()) => {
   const paths = getParentPaths(startPath);
   const found = paths.find((p) => getStrikethrooAt(p));
   if (!found) return null;
-  const root = getStrikethrooAt(found);
-  if (root) checkWorkspaceSchema(path.join(root, ".init-metadata.json"));
+  return getStrikethrooAt(found);
+};
+var findStrikethrooRoot = (startPath = process.cwd()) => {
+  const root = discoverStrikethrooRoot(startPath);
+  if (root) checkWorkspaceSchema(root);
   return root;
 };
 
@@ -183,6 +197,13 @@ var getAllPlans = (taskManagerRoot) => {
 };
 
 // src/skill-scripts/shared/plan-resolve.ts
+var _classifyPlanInput = (input, isAbsolute2 = path3.isAbsolute) => {
+  if (input === null || input === void 0 || input === "") return { kind: "invalid" };
+  const candidate = String(input);
+  if (isAbsolute2(candidate)) return { kind: "path", planFile: candidate };
+  const planId = parseInt(candidate, 10);
+  return Number.isNaN(planId) ? { kind: "invalid" } : { kind: "id", planId };
+};
 var isValidRootDir = (strikethrooPath) => {
   try {
     if (!fs3.existsSync(strikethrooPath)) return false;
@@ -190,7 +211,7 @@ var isValidRootDir = (strikethrooPath) => {
     const metadataPath = path3.join(strikethrooPath, ".init-metadata.json");
     if (!fs3.existsSync(metadataPath)) return false;
     const metadata = JSON.parse(fs3.readFileSync(metadataPath, "utf8"));
-    return metadata && typeof metadata === "object" && "version" in metadata;
+    return typeof metadata === "object" && metadata !== null;
   } catch (_err) {
     return false;
   }
@@ -206,6 +227,12 @@ var checkStandardRootShortcut = (filePath) => {
   if (path3.basename(dotAiDir) !== ".ai") return null;
   return isValidRootDir(possibleRoot) ? possibleRoot : null;
 };
+var discoverRootForPlanFile = (planFile) => checkStandardRootShortcut(planFile) ?? discoverStrikethrooRoot(path3.dirname(planFile));
+var locateRootForPlanFile = (planFile) => {
+  const root = discoverRootForPlanFile(planFile);
+  if (root) checkWorkspaceSchema(root);
+  return root;
+};
 var resolveByPath = (absolutePath) => {
   let content;
   try {
@@ -215,7 +242,7 @@ var resolveByPath = (absolutePath) => {
   }
   const planId = extractPlanId(content, absolutePath);
   if (planId === null) return null;
-  const tmRoot = checkStandardRootShortcut(absolutePath) || findStrikethrooRoot(path3.dirname(absolutePath));
+  const tmRoot = locateRootForPlanFile(absolutePath);
   if (!tmRoot) return null;
   return {
     planFile: absolutePath,
@@ -224,35 +251,28 @@ var resolveByPath = (absolutePath) => {
     planId
   };
 };
-var resolveByIdInAncestry = (planId, startPath, searched = /* @__PURE__ */ new Set()) => {
+var resolveById = (planId, startPath) => {
   const tmRoot = findStrikethrooRoot(startPath);
   if (!tmRoot) return null;
-  const normalized = path3.normalize(tmRoot);
-  if (searched.has(normalized)) return null;
-  searched.add(normalized);
-  const plans = getAllPlans(tmRoot);
-  const match = plans.find((p) => p.id === planId);
-  if (match) {
-    return {
-      planFile: match.file,
-      planDir: match.dir,
-      strikethrooRoot: tmRoot,
-      planId
-    };
-  }
-  const parentOfRoot = path3.dirname(path3.dirname(tmRoot));
-  if (parentOfRoot === tmRoot) return null;
-  return resolveByIdInAncestry(planId, parentOfRoot, searched);
+  const match = getAllPlans(tmRoot).find((p) => p.id === planId);
+  if (!match) return null;
+  return {
+    planFile: match.file,
+    planDir: match.dir,
+    strikethrooRoot: tmRoot,
+    planId
+  };
 };
 var resolvePlan = (input, startPath = process.cwd()) => {
-  if (input === null || input === void 0 || input === "") return null;
-  const inputStr = String(input);
-  if (inputStr.startsWith("/")) {
-    return resolveByPath(inputStr);
+  const classified = _classifyPlanInput(input);
+  switch (classified.kind) {
+    case "path":
+      return resolveByPath(classified.planFile);
+    case "id":
+      return resolveById(classified.planId, startPath);
+    case "invalid":
+      return null;
   }
-  const planId = parseInt(inputStr, 10);
-  if (Number.isNaN(planId)) return null;
-  return resolveByIdInAncestry(planId, startPath);
 };
 
 // src/skill-scripts/create-feature-branch.ts
@@ -269,23 +289,20 @@ var _printInfo = (message) => {
   console.log(message);
 };
 var _isGitRepo = () => {
-  const result = execGit("git rev-parse --is-inside-work-tree");
+  const result = execGit(["rev-parse", "--is-inside-work-tree"]);
   return result === "true";
 };
 var _getCurrentBranch = () => {
-  return execGit("git rev-parse --abbrev-ref HEAD");
+  return execGit(["rev-parse", "--abbrev-ref", "HEAD"]);
 };
-var _hasUncommittedChanges = () => {
-  const status = execGit("git status --porcelain");
-  return status !== null && status.length > 0;
-};
+var _getUncommittedChangesOutsideWorkspace = () => execGit(["status", "--porcelain", "--", ":(top)", ":(top,exclude).ai/strikethroo"]);
 var _branchExists = (branchName) => {
-  const localMatch = execGit(`git branch --list "${branchName}"`);
+  const localMatch = execGit(["branch", "--list", branchName]);
   if (localMatch) {
     const names = localMatch.split("\n").map((b) => b.trim().replace(/^\*\s*/, "")).filter(Boolean);
     if (names.includes(branchName)) return true;
   }
-  const remoteMatch = execGit(`git branch -r --list "origin/${branchName}"`);
+  const remoteMatch = execGit(["branch", "-r", "--list", `origin/${branchName}`]);
   if (remoteMatch && remoteMatch.trim().length > 0) return true;
   return false;
 };
@@ -326,9 +343,14 @@ var main = (startPath = process.cwd()) => {
     _printInfo("Proceeding without creating a new branch");
     process.exit(0);
   }
-  if (_hasUncommittedChanges()) {
-    _printError("Uncommitted changes detected in working tree");
-    _printInfo("Please commit or stash your changes before creating a feature branch");
+  const outsideWorkspaceStatus = _getUncommittedChangesOutsideWorkspace();
+  if (outsideWorkspaceStatus === null) {
+    _printError("Could not inspect git status; branch creation has been blocked");
+    process.exit(1);
+  }
+  if (outsideWorkspaceStatus.length > 0) {
+    _printError("Uncommitted changes detected outside .ai/strikethroo");
+    _printInfo("Commit or stash changes outside .ai/strikethroo before creating a feature branch");
     process.exit(1);
   }
   const planName = _extractPlanName(planDir);
@@ -340,7 +362,7 @@ var main = (startPath = process.cwd()) => {
       process.exit(0);
     }
     _printWarning(`Branch "${branchName}" already exists`);
-    const checkoutResult = execGit(`git checkout "${branchName}"`);
+    const checkoutResult = execGit(["checkout", branchName]);
     if (checkoutResult === null) {
       _printError(`Failed to checkout branch "${branchName}"`);
       process.exit(1);
@@ -348,7 +370,7 @@ var main = (startPath = process.cwd()) => {
     _printSuccess(`Switched to existing branch: ${branchName}`);
     process.exit(0);
   }
-  const createResult = execGit(`git checkout -b "${branchName}"`);
+  const createResult = execGit(["checkout", "-b", branchName]);
   if (createResult === null) {
     _printError(`Failed to create branch "${branchName}"`);
     process.exit(1);
