@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+# cc-new — start a detached Claude Code session that shows up in Remote Control
+# (claude.ai/code and the mobile apps). The iOS/iPadOS app can only start
+# cloud sessions, so this is how a new local session is opened from an
+# existing one.
+#
+# Usage: cc-new [--here] [--name NAME] DIR [PROMPT...]
+#   DIR        directory to work in (~ is expanded)
+#   PROMPT     optional first message for the new session
+#   --name     session name shown in the app (default: <dir>-<HHMM>)
+#   --here     work in DIR itself instead of a fresh git worktree
+#
+# Permission mode: CC_NEW_PERMISSION_MODE if set; otherwise the calling
+# session's current mode, read from its transcript; otherwise "default".
+# The new session never ends up more permissive than the one that asked.
+#
+# Requires remoteControlAtStartup: true in ~/.claude/settings.json; without it
+# the session runs but never registers with claude.ai.
+set -euo pipefail
+
+usage() { sed -n '7,12p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
+
+here=0 name=
+while [ $# -gt 0 ]; do
+  case $1 in
+    --here) here=1; shift ;;
+    --name) name=${2:?--name needs a value}; shift 2 ;;
+    -h|--help) usage ;;
+    --) shift; break ;;
+    -*) echo "cc-new: unknown option $1" >&2; usage ;;
+    *) break ;;
+  esac
+done
+[ $# -ge 1 ] || usage
+
+dir=${1/#\~/$HOME}; shift
+cd "$dir" || { echo "cc-new: no such directory: $dir" >&2; exit 1; }
+
+# Session names double as worktree/branch names, so keep them git-safe.
+if [ -z "$name" ]; then
+  name="$(basename "$PWD")-$(date +%H%M)"
+fi
+name=$(printf '%s' "$name" | tr -cs 'A-Za-z0-9._-' '-' | sed 's/^-*//; s/-*$//')
+
+# The caller's transcript records its permission mode on every turn, so the
+# last entry is the mode it is in now (including a mid-session switch).
+caller_mode() {
+  local sid=${CLAUDE_CODE_SESSION_ID:-} f
+  [ -n "$sid" ] || return 0
+  for f in "${CLAUDE_CONFIG_DIR:-$HOME/.claude}"/projects/*/"$sid".jsonl; do
+    [ -f "$f" ] || continue
+    grep -o '"permissionMode":"[^"]*"' "$f" | tail -n 1 | cut -d'"' -f4
+    return 0
+  done
+}
+mode=${CC_NEW_PERMISSION_MODE:-$(caller_mode)}
+mode=${mode:-default}
+
+args=(--bg -n "$name" --permission-mode "$mode")
+if [ "$here" = 0 ] && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  args+=(-w "$name")
+fi
+[ $# -gt 0 ] && args+=("$*")
+
+echo "cc-new: permission mode $mode" >&2
+
+# When run from inside a session, don't let the new one inherit the caller's
+# session identity, Remote Control bridge, or messaging socket.
+exec env \
+  -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CODE_SESSION_ID \
+  -u CLAUDE_CODE_BRIDGE_SESSION_ID -u CLAUDE_CODE_MESSAGING_SOCKET \
+  -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ATTENDED -u CLAUDE_PID \
+  claude "${args[@]}"
