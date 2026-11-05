@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -136,7 +137,7 @@ func TestProxmoxProvenanceRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatal("ProvenanceOf ok = false after MarkManaged, want true")
 	}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ProvenanceOf = %+v, want %+v", got, want)
 	}
 
@@ -256,7 +257,7 @@ func TestProxmoxProvenanceOfUnparseableBlockIsNotManaged(t *testing.T) {
 	if ok {
 		t.Fatalf("ProvenanceOf ok = true for an unparseable block, want false (got %+v)", got)
 	}
-	if got != (Provenance{}) {
+	if !reflect.DeepEqual(got, Provenance{}) {
 		t.Fatalf("ProvenanceOf value = %+v, want the zero value", got)
 	}
 }

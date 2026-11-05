@@ -28,6 +28,7 @@ import (
 	"context"
 	"errors"
 	"os/exec"
+	"reflect"
 	"strconv"
 	"testing"
 
@@ -152,7 +153,7 @@ func TestE2EProvenanceConvergenceAndTwoController(t *testing.T) {
 	if !ok {
 		t.Fatal("a second controller with an empty registry did not see the marker — convergence failed")
 	}
-	if got2 != got {
+	if !reflect.DeepEqual(got2, got) {
 		t.Fatalf("controller B marker = %+v, want identical to controller A's %+v", got2, got)
 	}
 
@@ -187,7 +188,7 @@ func TestE2EProvenanceConvergenceAndTwoController(t *testing.T) {
 	if !ok {
 		t.Fatalf("the batched read did not return %q, though ProvenanceOf did — the roster would fall back to the legacy registry. Got %d markers: %v", name, len(batch), batch)
 	}
-	if inBatch != got {
+	if !reflect.DeepEqual(inBatch, got) {
 		t.Fatalf("batched marker for %q = %+v, want identical to the single read's %+v", name, inBatch, got)
 	}
 	// The refused mark above left NOTHING behind: the batched read walks every

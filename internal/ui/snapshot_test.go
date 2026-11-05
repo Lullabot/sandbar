@@ -14,6 +14,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -188,7 +189,7 @@ func TestFinishSnapshotRecordsOnlySuccessfulSnapshots(t *testing.T) {
 			if !tc.wantSave {
 				return
 			}
-			if got.Source != "claude" || got.Config != cfg || !got.CreatedAt.Equal(created) {
+			if got.Source != "claude" || !reflect.DeepEqual(got.Config, cfg) || !got.CreatedAt.Equal(created) {
 				t.Errorf("saved template = %#v; source/config/created time were not preserved", got)
 			}
 			if got.PlaybookVersion != "playbook-v1" || got.ToolsetKey != "tools-v1" {

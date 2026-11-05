@@ -2,6 +2,7 @@ package registry
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/lullabot/sandbar/internal/vm"
@@ -103,7 +104,7 @@ func TestAdoptSkipsAlreadyMarkedEntry(t *testing.T) {
 	if len(prov.marks) != 0 {
 		t.Fatalf("MarkManaged was called; want it never called for an already-marked instance")
 	}
-	if prov.markers["web"] != preexisting {
+	if !reflect.DeepEqual(prov.markers["web"], preexisting) {
 		t.Fatalf("existing marker was overwritten: got %+v, want %+v", prov.markers["web"], preexisting)
 	}
 }

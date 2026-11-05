@@ -108,6 +108,22 @@ type CreateConfig struct {
 	WithCodex    bool
 	WithOpenCode bool
 	WithPi       bool
+
+	// DDEVPortSlot is the block of host ports this VM's ddev router listens on
+	// (see DDEVPortsForSlot). It is allocated once, for a Lima VM with ddev,
+	// and every reset path must carry it across explicitly — none of them
+	// reuses a recorded config wholesale — so the VM's URLs stay stable.
+	//
+	// nil means "no slot recorded": the VM keeps ddev's default ports until a
+	// reset allocates one. That is what every record written before this field
+	// existed decodes to, and it is why the field is a pointer: slot 0 is a
+	// real slot and must not be mistaken for an old record. omitempty keeps an
+	// unrecorded slot out of the registry, provenance marker and reset.json.
+	//
+	// Being a pointer, it makes == on CreateConfig compare addresses; compare
+	// configs with reflect.DeepEqual. Assign a fresh pointer rather than
+	// writing through an existing one, which may be shared with another copy.
+	DDEVPortSlot *int `json:",omitempty"`
 }
 
 // DefaultCreateConfig returns the script's defaults (cpus left to caller/host).
@@ -231,6 +247,9 @@ func (c CreateConfig) Validate() error {
 	// resolves to a real file there and would pass the guest's own existence
 	// check, so it has to be rejected on this side of the wire.
 	if err := validateTimezone(c.Timezone); err != nil {
+		return err
+	}
+	if err := c.validateDDEVPortSlot(); err != nil {
 		return err
 	}
 	// A clone's qcow2 disk is grown from BaseDiskFloor and can never shrink live,

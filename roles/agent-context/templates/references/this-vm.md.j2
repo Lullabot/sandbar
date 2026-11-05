@@ -22,4 +22,20 @@ Profile types:
   Guest ports appear on that machine's loopback, not the workstation's.
 - `proxmox`: a Proxmox VE VM with its own network address.
 
+{% if ddev_router_https_port is defined %}
+ddev ports on this VM (set in `~/.ddev/global_config.yaml`; they differ from
+other VMs' and from ddev's defaults):
+
+- Router: HTTP {{ ddev_router_http_port }}, HTTPS {{ ddev_router_https_port }}.
+- Mailpit: HTTP {{ ddev_mailpit_http_port }}, HTTPS {{ ddev_mailpit_https_port }}.
+- XHGui: HTTP {{ ddev_xhgui_http_port }}, HTTPS {{ ddev_xhgui_https_port }}.
+- Traefik monitor: {{ ddev_traefik_monitor_port }}.
+
+Project sites are at `https://<project>.ddev.site:{{ ddev_router_https_port }}`;
+the port is part of the URL.
+{% else %}
+ddev ports: not set by Sandbar for this VM, so ddev uses its default ports
+(80/443) or is not configured. Check `ddev config global` if it matters.
+{% endif %}
+
 See [ports.md](ports.md) for what each means for reaching a guest server.

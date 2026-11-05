@@ -2,7 +2,7 @@
 id: 2
 group: "guest-config"
 dependencies: []
-status: "pending"
+status: "completed"
 created: 2026-11-05
 models:
   anthropic: "claude-sonnet-5"

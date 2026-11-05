@@ -1,0 +1,41 @@
+---
+# Gives this VM's ddev its own ports so two VMs on one Lima host (or a VM and
+# the workstation's own ddev) never fight over 80/443/8025/8143. The ports come
+# from sandbar's per-VM slot; without them (Proxmox, an older sandbar) the role
+# leaves ddev's defaults alone. It only edits ~/.ddev/global_config.yaml, so it
+# needs neither the ddev binary nor Docker.
+- name: Configure this VM's ddev ports
+  when: ddev_router_http_port is defined
+  block:
+    - name: Get home directory for {{ user_name }}
+      ansible.builtin.getent:
+        database: passwd
+        key: "{{ user_name }}"
+
+    - name: Ensure ~/.ddev exists
+      ansible.builtin.file:
+        path: "{{ ansible_facts.getent_passwd[user_name][4] }}/.ddev"
+        state: directory
+        owner: "{{ user_name }}"
+        group: "{{ user_name }}"
+        mode: "0755"
+
+    # One lineinfile per key keeps every other global setting (and anything a
+    # preserved ~/.ddev brought back) intact, and a second run changes nothing.
+    - name: Set this VM's ddev ports in the global config
+      ansible.builtin.lineinfile:
+        path: "{{ ansible_facts.getent_passwd[user_name][4] }}/.ddev/global_config.yaml"
+        regexp: "^{{ item.key }}:"
+        line: "{{ item.key }}: {{ item.value }}"
+        create: true
+        owner: "{{ user_name }}"
+        group: "{{ user_name }}"
+        mode: "0644"
+      loop:
+        - {key: router_http_port, value: "{{ ddev_router_http_port }}"}
+        - {key: router_https_port, value: "{{ ddev_router_https_port }}"}
+        - {key: mailpit_http_port, value: "{{ ddev_mailpit_http_port }}"}
+        - {key: mailpit_https_port, value: "{{ ddev_mailpit_https_port }}"}
+        - {key: xhgui_http_port, value: "{{ ddev_xhgui_http_port }}"}
+        - {key: xhgui_https_port, value: "{{ ddev_xhgui_https_port }}"}
+        - {key: traefik_monitor_port, value: "{{ ddev_traefik_monitor_port }}"}

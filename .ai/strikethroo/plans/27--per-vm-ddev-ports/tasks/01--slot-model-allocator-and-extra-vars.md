@@ -2,7 +2,7 @@
 id: 1
 group: "slot-core"
 dependencies: []
-status: "pending"
+status: "completed"
 created: 2026-11-05
 models:
   anthropic: "claude-opus-5-5"
@@ -23,14 +23,14 @@ Add the per-VM ddev port slot to `vm.CreateConfig` with an explicit "absent" sta
 Go (struct/JSON encoding, stdlib `hash/fnv`), Go testing (table tests, fixtures for previously written records).
 
 ## Acceptance Criteria
-- [ ] `vm.CreateConfig` has `DDEVPortSlot *int` tagged `json:",omitempty"`; nil means "no slot recorded"; slot 0 is a valid, distinguishable value.
-- [ ] `CreateConfig.Validate` rejects a non-nil slot outside `[0, DDEVPortSlots)`.
-- [ ] Pure helpers in `internal/vm` (`ddevports.go`): constants `DDEVPortBase = 20000`, `DDEVPortStride = 10`, `DDEVPortSlots = 1000`; `PreferredDDEVSlot(name string) int` (FNV-1a 32-bit of the name, mod `DDEVPortSlots`); `AllocateDDEVSlot(name string, held map[int]bool) (int, error)` (linear probe from preferred, wrapping, error when all held); `DDEVPorts` struct + `DDEVPortsForSlot(slot int) DDEVPorts` with RouterHTTP +0, RouterHTTPS +1, MailpitHTTP +2, MailpitHTTPS +3, XHGuiHTTP +4, XHGuiHTTPS +5, TraefikMonitor +6.
-- [ ] `manage.AssignDDEVSlot(cfg *vm.CreateConfig, kind profiles.Type, markers map[string]provider.Provenance, managed []registry.ManagedEntry) error`: no-op unless `kind` is `profiles.TypeLocal` or `profiles.TypeRemoteSSH` AND `cfg.WithDDEV` AND `cfg.DDEVPortSlot == nil`; otherwise builds the held set from every marker's and every managed entry's `Config.DDEVPortSlot` whose name != `cfg.Name`, allocates, and sets `cfg.DDEVPortSlot`. Performs no I/O.
-- [ ] `provision.BuildExtraVars` emits, only when `phase != "base"`, `backend != profiles.TypeProxmox`, `cfg.WithDDEV` and `cfg.DDEVPortSlot != nil`, these integer vars: `ddev_router_http_port`, `ddev_router_https_port`, `ddev_mailpit_http_port`, `ddev_mailpit_https_port`, `ddev_xhgui_http_port`, `ddev_xhgui_https_port`, `ddev_traefik_monitor_port`.
-- [ ] Tests cover: deterministic preferred slot for a fixed name (pin the expected value); probing past a held slot; wrap-around from slot 999 to 0; exhaustion error; slot 0 vs absent round-trips through JSON; `AssignDDEVSlot` excludes the VM's own name, keeps an existing slot, and is a no-op for Proxmox and `WithDDEV=false`; `BuildExtraVars` emits the vars only for finalize/full + Lima + slot (base phase and Proxmox omit them).
-- [ ] A previously written registry entry, provenance marker and `reset.json` (fixture JSON without the field) decode with `DDEVPortSlot == nil` and otherwise unchanged.
-- [ ] `go test ./internal/vm/... ./internal/manage/... ./internal/provision/... ./internal/registry/... ./internal/provider/...` passes; `gofmt -l .` is empty; `go vet ./...` passes.
+- [x] `vm.CreateConfig` has `DDEVPortSlot *int` tagged `json:",omitempty"`; nil means "no slot recorded"; slot 0 is a valid, distinguishable value.
+- [x] `CreateConfig.Validate` rejects a non-nil slot outside `[0, DDEVPortSlots)`.
+- [x] Pure helpers in `internal/vm` (`ddevports.go`): constants `DDEVPortBase = 20000`, `DDEVPortStride = 10`, `DDEVPortSlots = 1000`; `PreferredDDEVSlot(name string) int` (FNV-1a 32-bit of the name, mod `DDEVPortSlots`); `AllocateDDEVSlot(name string, held map[int]bool) (int, error)` (linear probe from preferred, wrapping, error when all held); `DDEVPorts` struct + `DDEVPortsForSlot(slot int) DDEVPorts` with RouterHTTP +0, RouterHTTPS +1, MailpitHTTP +2, MailpitHTTPS +3, XHGuiHTTP +4, XHGuiHTTPS +5, TraefikMonitor +6.
+- [x] `manage.AssignDDEVSlot(cfg *vm.CreateConfig, kind profiles.Type, markers map[string]provider.Provenance, managed []registry.ManagedEntry) error`: no-op unless `kind` is `profiles.TypeLocal` or `profiles.TypeRemoteSSH` AND `cfg.WithDDEV` AND `cfg.DDEVPortSlot == nil`; otherwise builds the held set from every marker's and every managed entry's `Config.DDEVPortSlot` whose name != `cfg.Name`, allocates, and sets `cfg.DDEVPortSlot`. Performs no I/O.
+- [x] `provision.BuildExtraVars` emits, only when `phase != "base"`, `backend != profiles.TypeProxmox`, `cfg.WithDDEV` and `cfg.DDEVPortSlot != nil`, these integer vars: `ddev_router_http_port`, `ddev_router_https_port`, `ddev_mailpit_http_port`, `ddev_mailpit_https_port`, `ddev_xhgui_http_port`, `ddev_xhgui_https_port`, `ddev_traefik_monitor_port`.
+- [x] Tests cover: deterministic preferred slot for a fixed name (pin the expected value); probing past a held slot; wrap-around from slot 999 to 0; exhaustion error; slot 0 vs absent round-trips through JSON; `AssignDDEVSlot` excludes the VM's own name, keeps an existing slot, and is a no-op for Proxmox and `WithDDEV=false`; `BuildExtraVars` emits the vars only for finalize/full + Lima + slot (base phase and Proxmox omit them).
+- [x] A previously written registry entry, provenance marker and `reset.json` (fixture JSON without the field) decode with `DDEVPortSlot == nil` and otherwise unchanged.
+- [x] `go test ./internal/vm/... ./internal/manage/... ./internal/provision/... ./internal/registry/... ./internal/provider/...` passes; `gofmt -l .` is empty; `go vet ./...` passes.
 
 Use your internal Todo tool to track these and keep on track.
 

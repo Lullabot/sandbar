@@ -46,6 +46,11 @@
     # to each clone. This role follows dev-tools so full runs have the binary.
     - role: mkcert-ca
       when: provision_phase | default('full') != 'base'
+    # Per-VM ddev ports. Not part of dev-tools, which finalize skips, so a
+    # clone would never get them. It edits the global config's keys directly
+    # rather than running `ddev config global`, which has no XHGui port flags.
+    - role: ddev-ports
+      when: provision_phase | default('full') != 'base'
     # Agent releases change frequently, so fetch them only after cloning.
     - role: claude-code
       when:

@@ -38,7 +38,7 @@ func TestRecordSuccessDoesNotEraseUnreadableRevisionHistory(t *testing.T) {
 	prov.markers[cfg.Name] = marker
 	prov.readErr = errors.New("temporary provider read failure")
 	err := RecordSuccess(registry.NewEmpty(), cfg, registry.LocalScope, prov)
-	if err == nil || len(prov.markCalls) != 0 || prov.markers[cfg.Name] != marker {
+	if err == nil || len(prov.markCalls) != 0 || !reflect.DeepEqual(prov.markers[cfg.Name], marker) {
 		t.Fatalf("read failure erased provider history: err=%v calls=%v marker=%+v", err, prov.markCalls, prov.markers[cfg.Name])
 	}
 }
@@ -196,7 +196,7 @@ func TestRecordSuccess(t *testing.T) {
 	if !ok {
 		t.Fatalf("registry has no config recorded for %q", cfg.Name)
 	}
-	if got != cfg {
+	if !reflect.DeepEqual(got, cfg) {
 		t.Fatalf("recorded config = %+v, want %+v", got, cfg)
 	}
 }
@@ -295,7 +295,7 @@ func TestRecordSuccess_WritesProvenanceMarker(t *testing.T) {
 	}
 	wantConfig := cfg
 	wantConfig.CloneToken = ""
-	if got.Config != wantConfig {
+	if !reflect.DeepEqual(got.Config, wantConfig) {
 		t.Fatalf("marker Config = %+v, want %+v", got.Config, wantConfig)
 	}
 }
