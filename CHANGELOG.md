@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.18.0](https://github.com/Lullabot/sandbar/compare/v0.17.0...v0.18.0) (2026-11-06)
+
+
+### Features
+
+* **claude:** add new-session skill for starting Remote Control sessions ([#322](https://github.com/Lullabot/sandbar/issues/322)) ([0169c35](https://github.com/Lullabot/sandbar/commit/0169c35993d0ce5f1ec8ab27939de5b229d6f4f7))
+
+
+### Bug Fixes
+
+* **deps:** update github.com/charmbracelet/x/exp/teatest/v2 digest to 27ecf3e ([#324](https://github.com/Lullabot/sandbar/issues/324)) ([618dbf1](https://github.com/Lullabot/sandbar/commit/618dbf1d77a62d3d914c0c84d47973dd54c3781e))
+* **profiles:** serialize profiles.yaml writes behind the state lock ([#323](https://github.com/Lullabot/sandbar/issues/323)) ([4af83ac](https://github.com/Lullabot/sandbar/commit/4af83acb5e559ef5f92620bbc49ff2151d6afc13))
+
 ## [0.17.0](https://github.com/Lullabot/sandbar/compare/v0.16.0...v0.17.0) (2026-11-03)
 
 
