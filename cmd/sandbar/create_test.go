@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"io"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -68,7 +69,7 @@ func TestHeadlessCreateRecordsManagedVM(t *testing.T) {
 	if !ok {
 		t.Fatalf("registry has no config recorded for %q", cfg.Name)
 	}
-	if got != cfg {
+	if !reflect.DeepEqual(got, cfg) {
 		t.Fatalf("recorded config = %+v, want %+v (round-trip mismatch)", got, cfg)
 	}
 }

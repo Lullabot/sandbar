@@ -34,30 +34,63 @@ Two properties worth knowing:
   Linux host an unprivileged process cannot bind ports below 1024 — a guest
   server on port 80 or 443 is silently skipped (Lima logs a warning in the
   instance's `ha.stderr.log`). macOS hosts don't have this restriction.
+  ddev avoids the problem: its router [uses high ports](#ddev-urls).
 
 ### ddev URLs
 
-[ddev](https://ddev.com/) project URLs work from your host browser as-is on
-a macOS host: `*.ddev.site` resolves to `127.0.0.1` in public DNS, ddev's
-router listens on ports 80/443 in the guest, and Lima forwards them to your
-loopback — so `https://myproj.ddev.site` just works.
+[ddev](https://ddev.com/) project URLs work from your host browser, with a
+port on the end. Each Lima VM gets its own block of ports for ddev's router,
+Mailpit, XHGui and Traefik monitor, so several VMs (and ddev running natively
+on your machine) can serve at the same time without fighting over 80 and 443.
+`*.ddev.site` resolves to `127.0.0.1` in public DNS, and Lima forwards the
+VM's ports to your loopback, so the URL is the same inside the guest and in
+your browser:
 
-On a **Linux host**, ports 80/443 hit the privileged-port rule above.
-Either allow unprivileged binds on the host:
-
-```console
-$ sudo sysctl net.ipv4.ip_unprivileged_port_start=80   # persist in /etc/sysctl.d/
+```text
+https://<project>.ddev.site:<router https port>
 ```
 
-or move ddev's router to high ports inside the guest and keep everything
-unprivileged:
+The ports come from a **slot**: seven ports used out of a block of ten, in
+the range 20000–29999. The router's HTTP port is the block's first port and
+HTTPS is the next one. Slot 12, for example, starts at 20120, so its router
+is `http://<project>.ddev.site:20120` and `https://<project>.ddev.site:20121`.
+The rest of the block is Mailpit (HTTP, then HTTPS), XHGui (HTTP, then
+HTTPS), and the Traefik monitor.
 
-```console
-claude@myvm$ ddev config global --router-http-port=8080 --router-https-port=8443
-claude@myvm$ ddev restart
-```
+A new VM's slot is picked from its name, moving to the next free slot if
+another VM on the same profile already holds it. Once recorded, it stays with
+the VM across resets.
 
-after which the project URL is `https://myproj.ddev.site:8443`.
+**Finding a VM's ports.** Any of these works:
+
+- `sandbar create` and `sandbar reset` print a `ddev:` line with the router
+  URLs when they finish.
+- Inside the guest, `ddev describe` shows the URLs, and the `sandbar-environment`
+  skill's `this-vm.md` lists every port for the VM.
+- `~/.ddev/global_config.yaml` in the guest holds the same numbers.
+
+A few things to know:
+
+- **Existing VMs keep 80/443 until their next reset.** A VM created before
+  this scheme has no slot. Resetting it assigns one.
+- **A reset replaces hand-set global ports.** `sandbar` writes the seven port
+  settings into `~/.ddev/global_config.yaml` on every reset, so a value you set
+  there with `ddev config global` is overwritten. Other global settings are
+  left alone.
+- **Project settings win.** A port set in a project's `.ddev/config.yaml`
+  overrides the global one for that project. Leave them out unless you need
+  them, or that project will leave the VM's block.
+- **The range is fixed, and there is no opt-out.** Every Lima VM with ddev
+  uses it. If something on your machine already listens on a port in
+  20000–29999, a VM that needs the same port loses it. Lima does not tell
+  you. Ddev running natively on your machine keeps 80/443.
+- **Users and Lima homes don't see each other.** Slots are chosen from the VMs
+  `sandbar` can see on one profile. Two users, or two Lima homes, on the same
+  host share one loopback but not their slot lists, so two VMs can land on the
+  same port. A reset keeps a VM's slot, so if that happens, delete one of the VMs
+  and create it again.
+- **Proxmox VMs are unchanged.** They have their own address and keep ddev's
+  default ports; see [below](#proxmox-vms-the-guest-has-its-own-address).
 
 !!! note "Expect a certificate warning"
     HTTPS certificates are minted by `mkcert` **inside the guest**, so the
@@ -159,13 +192,13 @@ forwarding works today, using the connection details already in your
 [profile](connection-profiles.md#profilesyaml):
 
 ```console
-$ ssh -N -L 8443:127.0.0.1:8443 -p <port> -i <identity_path> <user>@<host>
+$ ssh -N -L 20121:127.0.0.1:20121 -p <port> -i <identity_path> <user>@<host>
 ```
 
-While that runs, `localhost:8443` on your machine reaches the remote host's
-loopback port 8443 — that is, a guest port Lima forwarded there. For the
-high-ports ddev configuration above, `https://myproj.ddev.site:8443` then
-works from your browser: `*.ddev.site` still resolves to `127.0.0.1`, where
+While that runs, `localhost:20121` on your machine reaches the remote host's
+loopback port 20121 — that is, a guest port Lima forwarded there. Here 20121
+stands for your VM's router HTTPS port (slot 12 in the example above); use
+yours. `https://myproj.ddev.site:20121` then works from your browser: `*.ddev.site` still resolves to `127.0.0.1`, where
 the tunnel now listens, and the router still sees the project's name in the
 `Host` header. The mkcert certificate warning applies exactly as with a
 local VM.
@@ -174,13 +207,14 @@ The catches, and why this recipe is manual:
 
 - **The remote end must exist.** The remote hosts `sandbar` targets are Linux,
   so the privileged-port rule applies *there*: out of the box Lima has not
-  forwarded a guest's port 80/443 to the remote loopback at all. Move ddev
-  to high router ports (easiest), or raise
+  forwarded a guest's port 80/443 to the remote loopback at all. ddev's
+  per-VM ports are above 1024, so they do get forwarded; for a service of
+  your own, use a high port or raise
   `net.ipv4.ip_unprivileged_port_start` on the remote host.
 - **The local end has the same rule.** Binding your *local* port 443 (to
   make a bare `https://myproj.ddev.site` work) needs root on a Linux
-  laptop; macOS allows it unprivileged. A high local port with the `:8443`
-  URL suffix avoids the question entirely.
+  laptop; macOS allows it unprivileged. Forwarding the VM's high port to
+  the same number locally avoids the question entirely.
 - **One `-L` per port, one process to babysit.** The forward lives and dies
   with that `ssh` process.
 

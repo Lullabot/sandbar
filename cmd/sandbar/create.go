@@ -378,6 +378,13 @@ Flags:
 	// Provenancer).
 	manage.AdoptOnce(ctx, reg.ManagedInScope(scope), live, scope, provenancer)
 
+	// Allocate the ddev port slot (or keep the recorded one) before anything is
+	// built, so the provider, the in-flight marker and RecordSuccess all see
+	// the same cfg. The TUI's submitForm does the same from its cached markers.
+	if err := assignDDEVSlot(ctx, &cfg, profile.Type, provenancer, reg, scope); err != nil {
+		return fmt.Errorf("sandbar create: %w", err)
+	}
+
 	cloneCfg := cfg
 	if *recreate {
 		cloneCfg, err = resetCloneConfig(cfg, scope)
@@ -490,6 +497,14 @@ func adoptRecordedConfig(cfg *vm.CreateConfig, rec vm.CreateConfig, explicit map
 	// unknown one as fatal, and it would be a lie carried over on its own.
 	if !explicit["timezone"] && rec.Timezone != "" {
 		cfg.Timezone, cfg.TimezoneExplicit = rec.Timezone, rec.TimezoneExplicit
+	}
+	// The ddev port slot has no flag: like the name and the repo it is part of
+	// the VM's identity, and a rebuild that dropped it would hand the VM a new
+	// port block on the next finalize, breaking every URL and tunnel the user
+	// has for it. Copied into a fresh pointer so cfg never aliases the record.
+	if rec.DDEVPortSlot != nil {
+		s := *rec.DDEVPortSlot
+		cfg.DDEVPortSlot = &s
 	}
 }
 
@@ -605,5 +620,6 @@ func doHeadlessCreate(ctx context.Context, reg *registry.Registry, prov headless
 	if err := manage.RecordSuccessWithTemplate(reg, cfg, scope, templateSource, provenancer...); err != nil {
 		fmt.Fprintln(out, "warning: VM ready, but recording it as managed failed:", err)
 	}
+	printDDEVPorts(out, cfg)
 	return nil
 }

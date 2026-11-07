@@ -145,6 +145,31 @@ func BuildExtraVars(cfg vm.CreateConfig, phase, hostname string, backend profile
 		}
 	}
 
+	// The VM's ddev port slot moves its ddev router off ddev's defaults so
+	// several Lima VMs (and a host-native ddev) can share the host loopback
+	// Lima forwards to. The ports are per-VM, so the shared base never gets
+	// them — they must not end up in the base image or its version stamp.
+	//
+	// The guard lives here rather than in Ansible because the guest cannot
+	// make the decision: toolset_ddev is emitted for the base phase only, so
+	// in finalize it is just the role default and says nothing about this VM.
+	// The presence of these vars is therefore the guest's whole signal. A
+	// Proxmox guest has its own address and keeps the defaults; a VM with no
+	// recorded slot (created before slots existed) keeps whatever it has until
+	// a reset allocates one.
+	if phase != "base" && backend != profiles.TypeProxmox && cfg.WithDDEV && cfg.DDEVPortSlot != nil {
+		p := vm.DDEVPortsForSlot(*cfg.DDEVPortSlot)
+		items = append(items,
+			varItem{"ddev_router_http_port", p.RouterHTTP},
+			varItem{"ddev_router_https_port", p.RouterHTTPS},
+			varItem{"ddev_mailpit_http_port", p.MailpitHTTP},
+			varItem{"ddev_mailpit_https_port", p.MailpitHTTPS},
+			varItem{"ddev_xhgui_http_port", p.XHGuiHTTP},
+			varItem{"ddev_xhgui_https_port", p.XHGuiHTTPS},
+			varItem{"ddev_traefik_monitor_port", p.TraefikMonitor},
+		)
+	}
+
 	// Build an ordered mapping node so output is stable and yaml.v3 handles all
 	// scalar quoting (notably for a token containing special characters).
 	mapping := &yaml.Node{Kind: yaml.MappingNode}

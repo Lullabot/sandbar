@@ -432,3 +432,62 @@ func TestProvisionerProfileType(t *testing.T) {
 		t.Errorf("remote provisioner = %q, want %q", got, profiles.TypeRemoteSSH)
 	}
 }
+
+// TestBuildExtraVars_DDEVPorts proves the per-VM ddev port vars reach exactly
+// the runs that should configure them: a VM's own finalize/full pass on Lima
+// with ddev selected and a slot recorded. The base image is shared, so a
+// per-VM port must never reach it; Proxmox guests keep ddev's defaults; and a
+// record with no slot (written before slots existed) must emit nothing so the
+// guest stays on its current ports until a reset allocates one.
+func TestBuildExtraVars_DDEVPorts(t *testing.T) {
+	keys := []string{
+		"ddev_router_http_port", "ddev_router_https_port",
+		"ddev_mailpit_http_port", "ddev_mailpit_https_port",
+		"ddev_xhgui_http_port", "ddev_xhgui_https_port",
+		"ddev_traefik_monitor_port",
+	}
+	slot := func(n int) *int { return &n }
+	for _, tt := range []struct {
+		name    string
+		phase   string
+		backend profiles.Type
+		ddev    bool
+		slot    *int
+		want    bool
+	}{
+		{"finalize on local Lima", "finalize", profiles.TypeLocal, true, slot(7), true},
+		{"full on remote Lima", "full", profiles.TypeRemoteSSH, true, slot(7), true},
+		{"slot 0 is a real slot", "finalize", profiles.TypeLocal, true, slot(0), true},
+		{"base phase never", "base", profiles.TypeLocal, true, slot(7), false},
+		{"Proxmox never", "finalize", profiles.TypeProxmox, true, slot(7), false},
+		{"no slot recorded", "finalize", profiles.TypeLocal, true, nil, false},
+		{"ddev not selected", "finalize", profiles.TypeLocal, false, slot(7), false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := fullConfig()
+			cfg.WithDDEV = tt.ddev
+			cfg.DDEVPortSlot = tt.slot
+			data, err := BuildExtraVars(cfg, tt.phase, cfg.Name, tt.backend, false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			m := parseVars(t, data)
+			if !tt.want {
+				for _, k := range keys {
+					if v, ok := m[k]; ok {
+						t.Errorf("%s = %v emitted, want absent", k, v)
+					}
+				}
+				return
+			}
+			base := 20000 + 10**tt.slot
+			for i, k := range keys {
+				// Integers, not strings: the guest writes them into ddev's
+				// YAML config, where a quoted port is the wrong type.
+				if v, ok := m[k].(int); !ok || v != base+i {
+					t.Errorf("%s = %v (%T), want int %d", k, m[k], m[k], base+i)
+				}
+			}
+		})
+	}
+}

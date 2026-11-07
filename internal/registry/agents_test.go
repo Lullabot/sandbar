@@ -3,6 +3,7 @@ package registry
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -30,7 +31,7 @@ func TestLegacyAgentConfigSurvivesDiskMigration(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, ok := r.Config("old")
-	if !ok || got != c {
+	if !ok || !reflect.DeepEqual(got, c) {
 		t.Fatalf("roundtrip changed selection: %+v", got)
 	}
 }

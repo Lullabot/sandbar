@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -76,7 +77,7 @@ func TestLimaProviderProvenanceRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatal("ProvenanceOf ok = false after MarkManaged, want true")
 	}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ProvenanceOf = %+v, want %+v", got, want)
 	}
 }
@@ -94,7 +95,7 @@ func TestLimaProviderProvenanceOfUnmanaged(t *testing.T) {
 	if ok {
 		t.Fatalf("ProvenanceOf ok = true for an unmarked instance, want false (got %+v)", got)
 	}
-	if got != (provider.Provenance{}) {
+	if !reflect.DeepEqual(got, provider.Provenance{}) {
 		t.Fatalf("ProvenanceOf value = %+v, want the zero value", got)
 	}
 }
@@ -167,10 +168,10 @@ func TestLimaProviderProvenanceBatchedRead(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("Provenance returned %d entries, want 2 (web, api): %+v", len(got), got)
 	}
-	if got["web"] != web {
+	if !reflect.DeepEqual(got["web"], web) {
 		t.Fatalf("Provenance[web] = %+v, want %+v", got["web"], web)
 	}
-	if got["api"] != api {
+	if !reflect.DeepEqual(got["api"], api) {
 		t.Fatalf("Provenance[api] = %+v, want %+v", got["api"], api)
 	}
 	if _, present := got["broken"]; present {
@@ -326,7 +327,7 @@ func TestProvenanceProgressRoundTripAndV2Compat(t *testing.T) {
 	if got.Progress != want.Progress {
 		t.Fatalf("Progress = %+v, want %+v", got.Progress, want.Progress)
 	}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("marker did not round-trip:\n got %+v\nwant %+v", got, want)
 	}
 
@@ -510,7 +511,7 @@ func TestProvenanceReady(t *testing.T) {
 	want.Provisioning = false
 	want.Progress = provider.BuildProgress{}
 
-	if got := before.Ready(); got != want {
+	if got := before.Ready(); !reflect.DeepEqual(got, want) {
 		t.Errorf("Ready() = %+v, want %+v", got, want)
 	}
 	// A value receiver means the caller's copy is untouched — the heal path holds
@@ -520,7 +521,7 @@ func TestProvenanceReady(t *testing.T) {
 	}
 	// Idempotent: healing an already-ready marker is a no-op, which is what makes
 	// a duplicate repair harmless.
-	if got := want.Ready(); got != want {
+	if got := want.Ready(); !reflect.DeepEqual(got, want) {
 		t.Errorf("Ready() is not idempotent: %+v", got)
 	}
 }

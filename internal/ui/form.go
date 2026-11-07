@@ -405,6 +405,14 @@ func (m *model) openResetForm(scope registry.Scope, name string, cfg vm.CreateCo
 	m.resetWithDDEV = cfg.WithDDEV
 	m.resetWithGo = cfg.WithGo
 	m.resetWithJava = cfg.WithJava
+	// Always assigned, nil included: the model outlives the form, and a slot
+	// left over from the previous reset must not ride into this one. A fresh
+	// copy, because cfg's pointer may be shared with the registry's record.
+	m.resetDDEVPortSlot = nil
+	if cfg.DDEVPortSlot != nil {
+		s := *cfg.DDEVPortSlot
+		m.resetDDEVPortSlot = &s
+	}
 	m.preserveAgents = false
 	m.preserveProject = false
 	m.preserveHome = false
@@ -1101,6 +1109,10 @@ func (m model) buildConfig() (vm.CreateConfig, error) {
 		cfg.WithDDEV = m.resetWithDDEV
 		cfg.WithGo = m.resetWithGo
 		cfg.WithJava = m.resetWithJava
+		// The ddev port slot is identity, like the locked name and repo: the
+		// recorded one is replayed, never re-chosen (submitReset allocates only
+		// when there is none).
+		cfg.DDEVPortSlot = m.resetDDEVPortSlot
 		// Codex is replayed like its siblings: the RECORDED selection is the
 		// truth here, not the default. Its default-off only protects the ADD
 		// direction (an unconfigured create never installs it); a VM reset
@@ -1233,6 +1245,13 @@ func (m model) submitForm() (tea.Model, tea.Cmd) {
 		m.formErr = fmt.Errorf("loading saved agent selections; submit again when ready")
 		return m, nil
 	}
+	// Before the job starts, so the provider's in-flight marker and the
+	// success bookkeeping (provisionDoneMsg records m.jobs' copy of cfg) carry
+	// the same slot.
+	if err := m.assignDDEVSlot(&cfg); err != nil {
+		m.formErr = err
+		return m, nil
+	}
 	m.formErr = nil
 	// toolRebuild carries the "Rebuild base image" toggle's intent through to
 	// the same code path `sandbar create --rebuild` uses: the rebuild happens
@@ -1279,6 +1298,28 @@ func (m model) checkNotBusy(name string) error {
 	return fmt.Errorf("%s already has a run in flight — wait for it to finish, or cancel it from its log (l)", name)
 }
 
+// assignDDEVSlot gives a create/reset config its ddev port slot, if it needs
+// one, from what the form's member already knows — its cached provenance
+// markers and the registry — so the submit path does no I/O (the CLI does one
+// provenance read instead; see manage.AssignDDEVSlot for the rule).
+//
+// Builds this TUI has in flight hold their slots too. A just-submitted create
+// is in neither source yet: the registry records it only on success, and its
+// in-flight marker reaches the cached markers only on a refresh after its
+// clone. Without its job's config two creates submitted back to back could
+// share a port block — exactly the clash slots exist to prevent. A finished
+// job's config only over-holds, which costs a probe step.
+func (m model) assignDDEVSlot(cfg *vm.CreateConfig) error {
+	mem, _ := m.memberByScope(m.formScope)
+	held := m.reg.ManagedInScope(m.formScope)
+	for _, name := range m.jobs.names(m.formScope) {
+		if c, ok := m.jobs.config(m.formScope, name); ok {
+			held = append(held, registry.ManagedEntry{Name: name, Config: c})
+		}
+	}
+	return manage.AssignDDEVSlot(cfg, mem.profile.Type, mem.provenance, held)
+}
+
 // resetConfig overrides everything a reset does not let the form decide: the
 // VM's name, its base image, and its repo. All three come from the locked
 // target captured in openResetForm rather than from the inputs — the name and
@@ -1300,6 +1341,13 @@ func (m model) resetConfig(cfg vm.CreateConfig) vm.CreateConfig {
 // not shrink.
 func (m model) submitReset(cfg vm.CreateConfig) (tea.Model, tea.Cmd) {
 	cfg = m.resetConfig(cfg)
+	// A recorded slot came through buildConfig and is kept; a VM recorded
+	// before slots existed gets one here. Ahead of cloneCfg so the provider and
+	// the bookkeeping see the same slot.
+	if err := m.assignDDEVSlot(&cfg); err != nil {
+		m.formErr = err
+		return m, nil
+	}
 	cloneCfg := manage.ResolveCloneToken(m.sec, cfg, m.formScope)
 	// Deliberately NOT name-checked the way submitForm is. A reset's name is the
 	// locked target's, not something the form can edit (see resetConfig), so a

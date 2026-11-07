@@ -99,6 +99,55 @@ class AgentContextTest(unittest.TestCase):
             self.assertIn("not recorded", text)
             self.assertNotIn("``", text)
 
+    DDEV_VARS = {
+        "ddev_router_http_port": 8081, "ddev_router_https_port": 8444,
+        "ddev_mailpit_http_port": 8026, "ddev_mailpit_https_port": 8144,
+        "ddev_xhgui_http_port": 8142, "ddev_xhgui_https_port": 8143,
+        "ddev_traefik_monitor_port": 10355,
+    }
+
+    def test_this_vm_reference_states_ddev_ports_only_when_known(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            this_vm = Path(".agents/skills/sandbar-environment/references/this-vm.md")
+            known = directory / "known"
+            known.mkdir()
+            self.run_role(directory, known, selected=("codex",), extra=self.DDEV_VARS)
+            text = (known / this_vm).read_text()
+            self.assertIn("HTTPS 8444", text)
+            self.assertIn("https://<project>.ddev.site:8444", text)
+
+            unknown = directory / "unknown"
+            unknown.mkdir()
+            self.run_role(directory, unknown, selected=("codex",))
+            text = (unknown / this_vm).read_text()
+            self.assertIn("ddev uses its default ports", text)
+            self.assertNotIn("8444", text)
+
+    def run_ddev_ports(self, directory, home, extra):
+        play = [{"hosts": "all", "gather_facts": False, "become": False,
+                 "roles": ["ddev-ports"]}]
+        playbook = directory / "ddev-play.yml"
+        playbook.write_text(yaml.safe_dump(play))
+        variables = {"user_name": getpass.getuser(), **extra}
+        result = subprocess.run(
+            ["ansible-playbook", "-i", "localhost,", "-c", "local", str(playbook),
+             "-e", json.dumps(variables)],
+            cwd=directory, text=True, capture_output=True,
+            env={**os.environ, "HOME": str(home),
+                 "ANSIBLE_ROLES_PATH": str(ROOT / "roles"), "ANSIBLE_NOCOLOR": "1"},
+        )
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 0, output)
+        return output
+
+    def test_ddev_ports_role_does_nothing_without_vars(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            output = self.run_ddev_ports(directory, directory, {})
+            self.assertIn("skipping", output)
+            self.assertIn("changed=0", output)
+
     def test_skill_links_resolve(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary)

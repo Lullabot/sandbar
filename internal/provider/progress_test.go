@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -86,7 +87,7 @@ func TestLimaProgressCannotEraseRevisions(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, ok, err = p.ProvenanceOf(ctx, cfg.Name)
-	if err != nil || !ok || got != ready {
+	if err != nil || !ok || !reflect.DeepEqual(got, ready) {
 		t.Fatalf("late progress overwrote successful marker: got=%+v ok=%v err=%v", got, ok, err)
 	}
 	// An explicit reset still needs to replace the ready marker with a new build.
@@ -132,7 +133,7 @@ func TestProxmoxProgressCannotEraseRevisions(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, ok, err = p.ProvenanceOf(ctx, cfg.Name)
-	if err != nil || !ok || got != ready {
+	if err != nil || !ok || !reflect.DeepEqual(got, ready) {
 		t.Fatalf("late progress overwrote PVE ready marker: got=%+v ok=%v err=%v", got, ok, err)
 	}
 	if configs.get(100)["description"] == "" {
@@ -189,7 +190,7 @@ func TestLimaProgressAndCompletionWritesSerialize(t *testing.T) {
 		t.Fatal("completion wrote while progress read-modify-write was in flight")
 	}
 	got, ok, err := p.ProvenanceOf(ctx, cfg.Name)
-	if err != nil || !ok || got != ready {
+	if err != nil || !ok || !reflect.DeepEqual(got, ready) {
 		t.Fatalf("interleaved progress erased successful marker: got=%+v ok=%v err=%v", got, ok, err)
 	}
 }
@@ -265,7 +266,7 @@ func TestProxmoxProgressAndCompletionWritesSerialize(t *testing.T) {
 		t.Fatal("PVE completion wrote while progress read-modify-write was in flight")
 	}
 	got, ok, err := p.ProvenanceOf(ctx, cfg.Name)
-	if err != nil || !ok || got != ready {
+	if err != nil || !ok || !reflect.DeepEqual(got, ready) {
 		t.Fatalf("interleaved PVE progress erased ready marker: got=%+v ok=%v err=%v", got, ok, err)
 	}
 }

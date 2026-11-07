@@ -79,7 +79,7 @@ func TestResetConfigUsesTheVMsOwnSettings(t *testing.T) {
 		t.Fatalf("resetConfigFor: %v", err)
 	}
 	want := recordedVM()
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("reset config = %+v\nwant the recorded %+v", got, want)
 	}
 }

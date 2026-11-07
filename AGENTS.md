@@ -374,7 +374,8 @@ the wall-clock time rather than their sum):
 - `lima-e2e` — builds `sandbar` and provisions a real Lima VM end to end under
   QEMU+KVM on the hosted runner. (It does not run the fast Go suite — that's the `unit` job.) It checks all
   four agent executables in a clone, their absence from the base, and
-  remembered choices in the next create.
+  remembered choices in the next create, and that the guest's ddev global
+  config and `this-vm.md` carry the VM's recorded slot ports.
   Published images may contain an older self-review release: before the
   review round-trip, run the checkout's self-review role and assert the
   installed version and staged skills stamp match the checkout's pin. The
@@ -1171,6 +1172,46 @@ shared rules.
   already have set the name, leaving no Ansible change to trigger it. Do
   not use `reconfigure`, which can drop the provisioning SSH connection's
   address.
+
+## ddev ports (read before touching `internal/vm/ddevports.go`, `roles/ddev-ports`)
+
+Each Lima VM with ddev gets its own block of ports so VMs on one Lima host (and
+a host-native ddev) do not race for 80/443/8025/8143.
+
+- **Ports are changed in ddev's global config inside the guest, not by Lima
+  remapping.** A Lima port remap makes the URL differ inside and outside the
+  guest; changing ddev's own ports keeps one URL valid in both places, and
+  moves the router above 1024, which fixes remote Lima and Linux hosts where
+  Lima cannot forward 80/443.
+- **`roles/ddev-ports` edits `~/.ddev/global_config.yaml` one key at a time
+  (`lineinfile`)**, because `ddev config global` has no XHGui port flags. It
+  needs neither the ddev binary nor Docker, and leaves other global keys alone.
+- **The role is gated on the `ddev_*_port` vars, and lives outside `dev-tools`.**
+  `toolset_ddev` is emitted for the base phase only, so it cannot decide this
+  in finalize; and `dev-tools` is skipped in finalize. `provision/vars.go`
+  emits the port vars for non-base phases, Lima backends, with ddev and a
+  recorded slot. Per-VM vars never enter the base phase or its stamp.
+- **`vm.CreateConfig.DDEVPortSlot` is a `*int`: nil means unrecorded.**
+  A recorded slot is never re-probed, even if another VM has since claimed
+  it. Every reset path must carry it explicitly: `adoptRecordedConfig`
+  (`cmd/sandbar/create.go`) and the TUI's reset replay (`resetDDEVPortSlot` in
+  `internal/ui/form.go`). Dropping it on one path silently moves a VM's URLs.
+- **Allocation is `manage.AssignDDEVSlot`: pure, no I/O.** It holds the slots
+  of the union of provenance markers and registry entries, excluding the VM
+  itself so a reset never collides with its own record, and probes forward from
+  an FNV-1a hash of the name (`vm.AllocateDDEVSlot`). The TUI's wrapper also
+  counts its own in-flight builds. The CLI reads markers once, only when
+  `NeedsDDEVSlot`. Allocation runs before the provider sees the config so the
+  in-flight marker already carries the slot.
+- **The constants (`DDEVPortBase`, stride, slot count) are fixed.** A recorded
+  slot is turned back into ports on every finalize; changing them moves every
+  existing VM.
+- **Lima only, `WithDDEV` only; Proxmox keeps ddev's defaults** (the guest has
+  its own address). There is **no opt-out, by design**.
+- **Known limitation:** a VM known only from another controller's marker,
+  absent from this machine's registry, is rebuilt from defaults on reset like
+  every other field. Its slot is re-derived from the name hash rather than
+  carried, which equals the original unless that allocation had to probe.
 
 ## VM naming (read before touching `Provider.ValidateName`)
 

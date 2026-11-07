@@ -3,6 +3,7 @@ package registry
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -682,7 +683,7 @@ func TestTemplateRoundTrip(t *testing.T) {
 	if !got.CreatedAt.Equal(tmpl.CreatedAt) {
 		t.Fatalf("CreatedAt = %v, want %v", got.CreatedAt, tmpl.CreatedAt)
 	}
-	if got.Config != tmpl.Config {
+	if !reflect.DeepEqual(got.Config, tmpl.Config) {
 		t.Fatalf("Config not preserved:\ngot:  %+v\nwant: %+v", got.Config, tmpl.Config)
 	}
 

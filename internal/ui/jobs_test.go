@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -789,7 +790,7 @@ func TestCreateFormRefusesANameWithARunInFlight(t *testing.T) {
 	if got := m.jobs.names(registry.LocalScope); len(got) != 1 {
 		t.Fatalf("the refused create must not register a run, got %v", got)
 	}
-	if got, _ := m.jobs.config(registry.LocalScope, "web"); got != building {
+	if got, _ := m.jobs.config(registry.LocalScope, "web"); !reflect.DeepEqual(got, building) {
 		t.Fatalf("the running build's config = %+v, want it untouched (%+v)", got, building)
 	}
 }
