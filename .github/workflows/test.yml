@@ -30,6 +30,16 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+env:
+  # The Lima the VM jobs install. Pinned because lima-actions/setup defaults to
+  # the latest release, and Lima v2.3.0 (2026-11-06) intermittently aborts
+  # `limactl start` with `failed to unmarshal ... as events.Event: unexpected
+  # end of JSON input`. It reads its host agent's event stream before a line is
+  # fully written. That failed VM jobs on unrelated PRs. The fix is
+  # https://github.com/lima-vm/lima/pull/5742. Renovate offers newer releases
+  # (renovate.json skips v2.3.0 and asks for review instead of automerging).
+  LIMA_VERSION: v2.2.1
+
 jobs:
   lint:
     runs-on: ubuntu-26.04
@@ -108,6 +118,8 @@ jobs:
       - name: Set up Lima (installs QEMU, configures KVM + SSH)
         id: lima
         uses: lima-vm/lima-actions/setup@55627e31b78637bf254a8b2a14da8ea7d12564e5 # v1.1.0
+        with:
+          version: ${{ env.LIMA_VERSION }}
 
       # Cache the downloaded Debian cloud image across runs so repeat builds
       # don't re-download it. Keyed on the Lima version from the setup step;
@@ -655,6 +667,8 @@ jobs:
       - name: Set up Lima (installs QEMU, configures KVM + SSH)
         id: lima
         uses: lima-vm/lima-actions/setup@55627e31b78637bf254a8b2a14da8ea7d12564e5 # v1.1.0
+        with:
+          version: ${{ env.LIMA_VERSION }}
 
       - name: Cache Lima image downloads
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -724,6 +738,8 @@ jobs:
       - name: Set up Lima (installs QEMU, configures KVM + SSH)
         id: lima
         uses: lima-vm/lima-actions/setup@55627e31b78637bf254a8b2a14da8ea7d12564e5 # v1.1.0
+        with:
+          version: ${{ env.LIMA_VERSION }}
 
       - name: Cache Lima image downloads
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
