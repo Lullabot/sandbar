@@ -1713,6 +1713,10 @@ preserved Codex daemon settings.</p>
 <td>The <code>claude</code> and <code>codex</code> shell launchers for the agents this VM selected, loaded by a <code>sandbar shell launchers</code> block in <code>/etc/bash.bashrc</code>. They live outside the home so every create and reset installs the current version, even when the home is preserved. To override one, define your own function in <code>~/.bashrc</code>, which bash reads afterwards.</td>
 </tr>
 <tr>
+<td><code>/etc/tmux.conf</code></td>
+<td>Sandbar's tmux configuration (the <code>C-a</code> prefix, mouse, clipboard and Claude Code terminal settings). It lives outside the home so every create and reset installs the current version, even when the home is preserved. tmux reads it before <code>~/.tmux.conf</code>, so put your own settings there. Earlier releases installed this configuration as <code>~/.tmux.conf</code>; a preserved-home reset removes such a copy when it is unchanged from a release and keeps an edited one.</td>
+</tr>
+<tr>
 <td><code>/etc/systemd/user/sandbar-codex-app-server.service</code></td>
 <td>Codex's boot service. Whether it is enabled is recorded in your home (<code>~/.config/systemd/user/default.target.wants/</code>), so that choice survives a reset.</td>
 </tr>

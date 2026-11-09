@@ -942,6 +942,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#customizing-the-guest-tmux" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Customizing the guest tmux
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#copying-text-out-of-the-guest" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1560,6 +1571,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#customizing-the-guest-tmux" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Customizing the guest tmux
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#copying-text-out-of-the-guest" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1816,8 +1838,23 @@ again later with either <code>S</code> or <code>sandbar shell NAME</code> and it
 <td><code>C-a S</code></td>
 <td>Split horizontally</td>
 </tr>
+<tr>
+<td><code>C-a r</code></td>
+<td>Reload the tmux configuration</td>
+</tr>
 </tbody>
 </table>
+<h3 id="customizing-the-guest-tmux">Customizing the guest tmux</h3>
+<p>Sandbar installs its tmux configuration as <code>/etc/tmux.conf</code> in the guest.
+tmux reads that file first and then your own <code>~/.tmux.conf</code>, so put your
+settings in <code>~/.tmux.conf</code>: they override sandbar's, and <code>C-a r</code> reloads
+both in that order. Every create and reset installs the current
+<code>/etc/tmux.conf</code>, including a reset that preserves the home.</p>
+<p>Earlier releases wrote sandbar's configuration to <code>~/.tmux.conf</code>. A reset that
+preserves the home removes that file if it is unchanged from a sandbar
+release, so it no longer hides the current settings. If you edited it, it is
+kept and still overrides <code>/etc/tmux.conf</code>; remove the settings you did not
+change to pick up sandbar's updates.</p>
 <p>A second terminal attaching to the same VM gets its own session grouped
 against the first, sharing the same windows but tracking its own current
 one — so two terminals can look at two different windows of the same VM at
@@ -1847,7 +1884,7 @@ to be true on your side for it to arrive:</p>
   the clipboard capability for your terminal; see the configuration below.</li>
 </ul>
 <p>A VM created before sandbar shipped this doesn't need rebuilding: the setting
-is applied at attach time as well as baked into the guest's <code>~/.tmux.conf</code>,
+is applied at attach time as well as baked into the guest's <code>/etc/tmux.conf</code>,
 so the next <code>S</code> or <code>sandbar shell</code> has it.</p>
 <h3 id="claude-code-and-host-tmux-settings">Claude Code and host tmux settings</h3>
 <p>The guest configuration includes
