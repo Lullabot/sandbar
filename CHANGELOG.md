@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.18.0](https://github.com/Lullabot/sandbar/compare/v0.17.0...v0.18.0) (2026-11-09)
+
+
+### Features
+
+* **claude:** add new-session skill for starting Remote Control sessions ([#322](https://github.com/Lullabot/sandbar/issues/322)) ([0169c35](https://github.com/Lullabot/sandbar/commit/0169c35993d0ce5f1ec8ab27939de5b229d6f4f7))
+* **claude:** provision the new-session skill into Claude VMs ([#335](https://github.com/Lullabot/sandbar/issues/335)) ([97b15a5](https://github.com/Lullabot/sandbar/commit/97b15a58628f70f47be48342324eb474990dee35))
+
+
+### Bug Fixes
+
+* **deps:** update github.com/charmbracelet/x/exp/teatest/v2 digest to 27ecf3e ([#324](https://github.com/Lullabot/sandbar/issues/324)) ([618dbf1](https://github.com/Lullabot/sandbar/commit/618dbf1d77a62d3d914c0c84d47973dd54c3781e))
+* **deps:** update module golang.org/x/sys to v0.50.0 ([#339](https://github.com/Lullabot/sandbar/issues/339)) ([5da906b](https://github.com/Lullabot/sandbar/commit/5da906b0046f1c565f077a0aad81a85df2caf9ec))
+* **lima:** recover from the Lima 2.3.0 limactl start event-log race ([#338](https://github.com/Lullabot/sandbar/issues/338)) ([415ea5b](https://github.com/Lullabot/sandbar/commit/415ea5b2d443b26b5092c20e8bdf58b38e33f01e))
+* **profiles:** serialize profiles.yaml writes behind the state lock ([#323](https://github.com/Lullabot/sandbar/issues/323)) ([4af83ac](https://github.com/Lullabot/sandbar/commit/4af83acb5e559ef5f92620bbc49ff2151d6afc13))
+* **reset:** install launchers outside so resets updates them ([#333](https://github.com/Lullabot/sandbar/issues/333)) ([e0458a2](https://github.com/Lullabot/sandbar/commit/e0458a2e9dd8c6e2ed5361d88e5c49303135f849))
+* **reset:** install the tmux config as /etc/tmux.conf so resets update it ([#336](https://github.com/Lullabot/sandbar/issues/336)) ([014d233](https://github.com/Lullabot/sandbar/commit/014d23375421a6688b42d1b4292ecc5998e529d2))
+* **reset:** refresh self-review skills in restored checkouts ([#334](https://github.com/Lullabot/sandbar/issues/334)) ([5da7e33](https://github.com/Lullabot/sandbar/commit/5da7e33aa79f7bebc506982425885ccf4ed5e340))
+
 ## [0.17.0](https://github.com/Lullabot/sandbar/compare/v0.16.0...v0.17.0) (2026-11-03)
 
 
