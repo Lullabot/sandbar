@@ -1204,6 +1204,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#limactl-start-fails-with-as-eventsevent-unexpected-end-of-json-input" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        limactl start fails with "as events.Event: unexpected end of JSON input"
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#a-build-failed-and-the-tile-is-red" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1535,6 +1546,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#limactl-start-fails-with-as-eventsevent-unexpected-end-of-json-input" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        limactl start fails with "as events.Event: unexpected end of JSON input"
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#a-build-failed-and-the-tile-is-red" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1746,6 +1768,25 @@ flashing empty or reporting every VM as failed. If you see a message about a
 VM being cloned or deleted, it's transient — wait for the clone or delete to
 finish and the listing recovers on its own. <code>limactl shell</code>, <code>start</code>, and
 <code>stop</code> are unaffected; only enumeration (<code>limactl list</code>) is subject to this.</p>
+<h2 id="limactl-start-fails-with-as-eventsevent-unexpected-end-of-json-input"><code>limactl start</code> fails with "as events.Event: unexpected end of JSON input"</h2>
+<p><strong>Symptom:</strong> with Lima 2.3.0, a create, reset, or start occasionally stops
+with a fatal line like:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>level=fatal msg="failed to unmarshal `{\"time\":\"…\",\"status\":{\"sshLocalPort\":36889,` as events.Event: unexpected end of JSON input"
+</code></pre></div>
+<p><code>sandbar</code> warns about this when it detects Lima 2.3.0: on stderr for
+<code>sandbar create</code>, <code>reset</code>, and <code>template snapshot</code>, and once in the TUI's
+Messages log.</p>
+<p><strong>Why:</strong> <code>limactl start</code> follows the boot by reading Lima's own event log, and
+can read half of an event that is still being written. It then exits with an
+error, although the VM keeps booting. Lima 2.3.0 writes many more events
+during boot, so this happens much more often than before. The upstream fix is
+<a href="https://github.com/lima-vm/lima/pull/5742">lima-vm/lima#5742</a>.</p>
+<p><strong>Fix:</strong> none needed. <code>sandbar</code> recognizes this exact failure, shows
+<code>==&gt; Lima 2.3.0 bug: waiting for boot</code>, and waits up to 10 minutes for the VM
+to report <code>Running</code> and finish booting. Any other <code>limactl start</code> failure is
+reported unchanged. If the VM still hasn't booted by then, the error names
+this bug so you can tell it apart from an ordinary boot failure. To avoid it
+entirely, use Lima 2.2.x, or a release that includes the fix once one ships.</p>
 <h2 id="a-build-failed-and-the-tile-is-red">A build failed and the tile is red</h2>
 <p>A red tile means the last provision on that VM failed. Its Ansible log is
 still available — press <code>l</code> on the tile to reopen it, whether the build is
@@ -1759,7 +1800,7 @@ so a slow task and a wedged one look identical on the tile: the same name, the
 same bar. To tell them apart, a building tile shows the <strong>current task's elapsed
 time</strong>, right-aligned on the <code>ansible: …</code> row, once that task has been running
 more than ten seconds:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>ansible: project · 72/72           8m14s
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>ansible: project · 72/72           8m14s
 </code></pre></div>
 <p>A number appearing there means the task is genuinely slow, not that anything is
 wrong — under ten seconds nothing is shown, so the row stays quiet through the
@@ -1788,7 +1829,7 @@ or lower the <code>--disk</code> size on future creates.</p>
 installed Lima predates that command, <code>sandbar</code> detects it up front and refuses
 with an explicit "your Lima is too old" error rather than failing partway
 through a build. Upgrade Lima and try again:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>brew<span class="w"> </span>upgrade<span class="w"> </span>lima
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>brew<span class="w"> </span>upgrade<span class="w"> </span>lima
 </code></pre></div>
 <p>If you didn't install Lima via Homebrew, use whatever method you used
 originally — see the <a href="https://lima-vm.io/docs/installation/">Lima installation docs</a>.</p>
