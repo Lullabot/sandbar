@@ -123,3 +123,92 @@
     owner: root
     group: root
     mode: "0644"
+
+# The new-session skill starts a detached session that registers with Remote
+# Control, so a session can be opened from the Claude web or mobile app. Like
+# the launcher it is code, so the skill itself lives outside the home and every
+# clone gets the current copy; Claude sees it through a link in its skills
+# directory, which a preserved home carries across a reset unchanged.
+- name: Ensure sandbar's skill directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - "{{ sand_skills_dir }}"
+    - "{{ sand_skills_dir }}/new-session"
+
+- name: Install the Claude Code new-session skill
+  ansible.builtin.copy:
+    src: "new-session/{{ item.name }}"
+    dest: "{{ sand_skills_dir }}/new-session/{{ item.name }}"
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - {name: SKILL.md, mode: "0644"}
+    - {name: cc-new, mode: "0755"}
+  loop_control:
+    label: "{{ item.name }}"
+
+# Anything already at the link's path that is not sandbar's own link is the
+# user's: it is left alone and reported, never replaced. This must not fail
+# the play, because a reset runs it after the old VM has been deleted.
+- name: Inspect Claude's skills directory
+  ansible.builtin.stat:
+    path: "{{ user_home }}/.claude/skills"
+    # A skills directory that is itself a link (to a dotfiles checkout, say)
+    # is still a directory Claude reads.
+    follow: true
+  register: _sand_claude_skills_dir
+
+# Only to tell a missing directory from a dangling link, which is not ours to
+# replace with a directory.
+- name: Inspect Claude's skills directory without following a link
+  ansible.builtin.stat:
+    path: "{{ user_home }}/.claude/skills"
+    follow: false
+  register: _sand_claude_skills_entry
+
+- name: Inspect the new-session skill link
+  ansible.builtin.stat:
+    path: "{{ user_home }}/.claude/skills/new-session"
+    follow: false
+  register: _sand_new_session_link
+  when: _sand_claude_skills_dir.stat.isdir | default(false)
+
+- name: Decide whether the new-session skill link is sandbar's to write
+  ansible.builtin.set_fact:
+    _sand_new_session_ours: >-
+      {{ (not _sand_claude_skills_entry.stat.exists or (_sand_claude_skills_dir.stat.isdir | default(false)))
+         and (not (_sand_new_session_link.stat.exists | default(false))
+              or ((_sand_new_session_link.stat.islnk | default(false))
+                  and _sand_new_session_link.stat.lnk_target == sand_skills_dir ~ '/new-session')) }}
+
+- name: Ensure Claude skill directory exists for the new-session skill
+  ansible.builtin.file:
+    path: "{{ user_home }}/.claude/skills"
+    state: directory
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
+  when: _sand_new_session_ours | bool and not _sand_claude_skills_entry.stat.exists
+
+- name: Expose the new-session skill to Claude
+  ansible.builtin.file:
+    src: "{{ sand_skills_dir }}/new-session"
+    dest: "{{ user_home }}/.claude/skills/new-session"
+    state: link
+    owner: "{{ user_name }}"
+    group: "{{ user_name }}"
+  when: _sand_new_session_ours | bool
+
+- name: Report a new-session skill sandbar left in place
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: {{ user_home }}/.claude/skills/new-session (or ~/.claude/skills
+      itself) is not sandbar's link to {{ sand_skills_dir }}/new-session, so it
+      was left untouched and sandbar's new-session skill is not available to
+      Claude. Move it aside and reset the VM to get sandbar's copy.
+  when: not _sand_new_session_ours | bool

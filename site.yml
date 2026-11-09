@@ -36,6 +36,8 @@
     sand_bashrc_d: /usr/local/share/sandbar/bashrc.d
     sand_system_bashrc: /etc/bash.bashrc
     sand_systemd_user_dir: /etc/systemd/user
+    # Skills sandbar ships to an agent, linked into its skills directory.
+    sand_skills_dir: /usr/local/share/sandbar/skills
   roles:
     - base
     - user

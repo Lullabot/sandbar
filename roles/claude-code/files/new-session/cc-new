@@ -15,7 +15,13 @@
 # The new session never ends up more permissive than the one that asked.
 #
 # Requires remoteControlAtStartup: true in ~/.claude/settings.json; without it
-# the session runs but never registers with claude.ai.
+# the session runs but never registers with claude.ai, so cc-new refuses to
+# start one and says how to turn it on. CC_NEW_SKIP_REMOTE_CHECK=1 skips that
+# check, for Remote Control enabled through another settings file.
+#
+# `claude` is the real binary on PATH, falling back to ~/.local/bin/claude:
+# a sandbar VM's interactive shells wrap `claude` in a shell function, which
+# this script never sees, and the caller's PATH may lack ~/.local/bin.
 set -euo pipefail
 
 usage() { sed -n '7,12p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
@@ -32,6 +38,42 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ $# -ge 1 ] || usage
+
+settings="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
+remote_control_on() {
+  [ -f "$settings" ] || return 1
+  if command -v jq >/dev/null 2>&1; then
+    jq -e '.remoteControlAtStartup == true' "$settings" >/dev/null 2>&1
+  else
+    grep -Eq '"remoteControlAtStartup"[[:space:]]*:[[:space:]]*true' "$settings"
+  fi
+}
+if [ "${CC_NEW_SKIP_REMOTE_CHECK:-}" != 1 ] && ! remote_control_on; then
+  cat >&2 <<EOF
+cc-new: Remote Control is off (remoteControlAtStartup is not true in
+$settings), so a new session would run but never appear
+in claude.ai/code or the Claude app. No session was started.
+
+To turn it on:
+  - In a sandbar VM where you have not yet answered sandbar's one-time
+    Remote Control question: open a VM shell (S in the sandbar TUI, or
+    'sandbar shell' on your workstation), run 'claude' and answer y.
+  - Otherwise, turn the default on in Claude Code's /config screen, or set
+    it in the settings file, for example:
+      jq '.remoteControlAtStartup = true' "$settings" > "$settings.tmp" &&
+        mv "$settings.tmp" "$settings"
+EOF
+  exit 3
+fi
+
+claude_bin=$(type -P claude || true)
+if [ -z "$claude_bin" ] && [ -x "$HOME/.local/bin/claude" ]; then
+  claude_bin=$HOME/.local/bin/claude
+fi
+if [ -z "$claude_bin" ]; then
+  echo "cc-new: claude not found on PATH or in ~/.local/bin" >&2
+  exit 1
+fi
 
 dir=${1/#\~/$HOME}; shift
 cd "$dir" || { echo "cc-new: no such directory: $dir" >&2; exit 1; }
@@ -70,4 +112,4 @@ exec env \
   -u CLAUDECODE -u CLAUDE_CODE_CHILD_SESSION -u CLAUDE_CODE_SESSION_ID \
   -u CLAUDE_CODE_BRIDGE_SESSION_ID -u CLAUDE_CODE_MESSAGING_SOCKET \
   -u CLAUDE_CODE_MESSAGING_TOKEN -u CLAUDE_CODE_SESSION_ATTENDED -u CLAUDE_PID \
-  claude "${args[@]}"
+  "$claude_bin" "${args[@]}"

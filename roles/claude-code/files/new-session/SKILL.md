@@ -14,8 +14,11 @@ Run the `cc-new` script that sits in this skill's base directory:
 ```
 
 - **DIR**: the directory the user named. If they named a repo loosely (e.g.
-  "sandbar"), resolve it under `~/github.com/<org>/<repo>`; if none was given,
-  use the current working directory.
+  "sandbar"), look for it in the checkout layout `~/<host>/<group>/<repo>`,
+  where the group can have subgroups: for example
+  `~/github.com/<org>/<repo>`, `~/gitlab.com/<group>/<subgroup>/<repo>` or
+  `~/git.drupalcode.org/project/<repo>`. If more than one checkout matches,
+  ask which one. If none was given, use the current working directory.
 - **PROMPT**: the task they want the new session to start on, passed as the
   remaining arguments. Omit it if they gave none.
 - **--name**: pass one only if the user chose a name; otherwise the script
@@ -27,6 +30,15 @@ Run the `cc-new` script that sits in this skill's base directory:
 
 The new session inherits this session's permission mode. Set
 `CC_NEW_PERMISSION_MODE` only if the user asks for a different one.
+
+`cc-new` refuses to start a session when `remoteControlAtStartup` is not
+`true`, because that session would run but never appear in the app. When it
+exits with that message, do not retry or edit the setting yourself: pass the
+message on. It tells the user how to turn Remote Control on (in a sandbar VM,
+the `claude` launcher asks once; after that, Claude Code's `/config` screen or
+the settings file).
+Set `CC_NEW_SKIP_REMOTE_CHECK=1` only if the user says Remote Control is
+enabled some other way, such as a managed or project settings file.
 
 Run it once with Bash, then reply with the session name from its output (what
 the user looks for in the app), its permission mode, and the short id for

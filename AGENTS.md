@@ -967,6 +967,15 @@ comment at `roles/agent-clipboard/tasks/main.yml`.
   users running host tmux must enable passthrough there too. Terminal detection
   must not become a base-image stamp input.
 
+- **The `new-session` skill has one source, shared by this repo and every
+  Claude VM.** It lives in `roles/claude-code/files/new-session`;
+  `.claude/skills/new-session` is a relative symlink to it, so edit the role
+  copy. The role installs it under `sand_skills_dir` (root-owned) and links
+  `~/.claude/skills/new-session` to it. Anything else at that path is the
+  user's: report it and carry on, never replace it or fail the play, since a
+  reset runs this after the old VM is gone. `tests/new_session_skill_test.py`
+  covers both the provisioning and `cc-new`'s argv.
+
 - **Reset has one agent-state preservation option.** Keep its path set in
   `internal/provision/staging.go` (`AgentStatePaths`), covering all four
   agents even when deselected. This includes credentials and sessions and

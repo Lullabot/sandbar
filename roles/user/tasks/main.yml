@@ -110,9 +110,33 @@
     - {path: "{{ sand_bashrc_d }}/claude.sh", selected: "{{ toolset_claude | default(false) }}"}
     - {path: "{{ sand_bashrc_d }}/codex.sh", selected: "{{ toolset_codex | default(false) }}"}
     - {path: "{{ sand_systemd_user_dir }}/sandbar-codex-app-server.service", selected: "{{ toolset_codex | default(false) }}"}
+    - {path: "{{ sand_skills_dir }}/new-session", selected: "{{ toolset_claude | default(false) }}"}
   loop_control:
     label: "{{ item.path }}"
   when: provision_phase | default('full') == 'base' or not item.selected | bool
+
+# The link Claude's skills directory held to the skill removed above. Only
+# sandbar's own link goes; anything else at that path is the user's.
+- name: Check for sandbar's new-session skill link
+  ansible.builtin.stat:
+    path: "{{ user_home }}/.claude/skills/new-session"
+    follow: false
+  register: _sand_unselected_new_session_link
+  # A ~/.claude/skills that is not a directory just means there is no link.
+  failed_when: false
+  when:
+    - provision_phase | default('full') != 'base'
+    - not toolset_claude | default(false) | bool
+
+- name: Remove sandbar's new-session skill link from a VM without Claude
+  ansible.builtin.file:
+    path: "{{ user_home }}/.claude/skills/new-session"
+    state: absent
+  when:
+    - provision_phase | default('full') != 'base'
+    - not toolset_claude | default(false) | bool
+    - _sand_unselected_new_session_link.stat.islnk | default(false)
+    - _sand_unselected_new_session_link.stat.lnk_target == sand_skills_dir ~ '/new-session'
 
 - name: Check whether preserved shell configuration is unchanged
   ansible.builtin.command:
