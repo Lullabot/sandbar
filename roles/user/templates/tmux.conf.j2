@@ -48,8 +48,10 @@ bind | split-window -h -c "#{pane_current_path}"
 bind S split-window -v -c "#{pane_current_path}"
 bind c new-window -c "#{pane_current_path}"
 
-# Reload config
-bind r source-file ~/.tmux.conf \; display "Reloaded!"
+# Reload config: sandbar installs this file as /etc/tmux.conf, and tmux 3.5
+# reads that, then every user file below that exists. Reload them in the same
+# order so a user's own settings still win; -q skips the ones that are absent.
+bind r source-file -q /etc/tmux.conf ~/.tmux.conf ~/.config/tmux/tmux.conf \; display "Reloaded!"
 
 # ssh forwarding
 set -g update-environment "DISPLAY KRB5CCNAME SSH_ASKPASS SSH_AGENT_PID SSH_CONNECTION WINDOWID XAUTHORITY"

@@ -16,7 +16,6 @@ REPO = Path(__file__).resolve().parents[1]
 TASKS = {
     "Check whether preserved shell configuration is unchanged",
     "Set preserved shell write permissions",
-    "Deploy ~/.tmux.conf",
     "Deploy ~/.gitconfig",
     "Deploy ~/.config/direnv/direnv.toml",
     "Deploy bashrc customizations",
@@ -53,7 +52,7 @@ class HomeRoleTest(unittest.TestCase):
             home = root / "home"
             home.mkdir()
             (root / "templates").symlink_to(REPO / "roles/user/templates", target_is_directory=True)
-            for name, body in ((".bashrc", "# base shell\n"), (".profile", "# base login\n"), (".tmux.conf", "# inherited old default\n")):
+            for name, body in ((".bashrc", "# base shell\n"), (".profile", "# base login\n")):
                 (home / name).write_text(body)
             variables = {
                 **yaml.safe_load((REPO / "roles/user/defaults/main.yml").read_text()),
@@ -80,9 +79,8 @@ class HomeRoleTest(unittest.TestCase):
                 return result.stdout
 
             run("fresh clone installs defaults")
-            self.assertIn("set -g prefix C-a", (home / ".tmux.conf").read_text())
             self.assertIn("[user]", (home / ".gitconfig").read_text())
-            names = [".tmux.conf", ".gitconfig", ".bashrc", ".profile", ".config/direnv/direnv.toml"]
+            names = [".gitconfig", ".bashrc", ".profile", ".config/direnv/direnv.toml"]
             for name in names:
                 self.assertTrue((home / ".config/sandbar/home-baselines" / name).is_file(), name)
 

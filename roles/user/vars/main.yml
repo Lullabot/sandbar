@@ -1,14 +1,17 @@
 ---
 # Files earlier releases installed in the home and sandbar now installs outside
-# it (see sand_bashrc_d in site.yml). A reset that preserves the home brings the
-# old copies back, and ~/.bashrc sources a launcher's home copy AFTER
-# /etc/bash.bashrc has loaded the current one, so a leftover copy would win.
-# The "Retire home copies" task takes back each copy that is byte-for-byte a
-# released version (or what this VM recorded installing).
+# it (see sand_bashrc_d in site.yml, and sand_system_tmux_conf in defaults). A
+# reset that preserves the home brings the old copies back, and each is read
+# AFTER the current system copy: ~/.bashrc sources a launcher's home copy once
+# /etc/bash.bashrc has loaded the current one, and tmux reads ~/.tmux.conf after
+# /etc/tmux.conf. A leftover copy would win either way. The "Retire home copies"
+# task takes back each copy that is byte-for-byte a released version (or what
+# this VM recorded installing).
 #
 # sha256 lists every released version, hashed after stripping trailing
 # whitespace. This list is FROZEN: these files no longer reach a home, so a
-# later edit to the role's file never adds an entry. tests/fixtures/
+# later edit to the role's file never adds an entry. A file newly moved out of
+# the home adds its whole history once, as ~/.tmux.conf did. tests/fixtures/
 # legacy-home-launchers holds the released bytes, and a test checks this list
 # against them.
 #
@@ -40,3 +43,18 @@ sand_retired_home_files:
     stub: ""
     sha256:
       - cf255afbd5ea9069fe62301ccdd784f23fd560c8b3340193b2b2f7d9905476cb
+  # Nothing loads ~/.tmux.conf by path except tmux itself, so a released copy
+  # is always removed. Every version of roles/user/templates/tmux.conf.j2 that
+  # reached main, oldest first; none used a Jinja expression, so each rendered
+  # to its own bytes.
+  - path: .tmux.conf
+    remove: true
+    stub: ""
+    sha256:
+      - 7fdcac0f4f92aabcb4481221a6c8aeeac1ca76842b094b32dc636f4958b3600c
+      - de9d785ddc924050e6c7c778b9d39d1855c0a2f3c89cf9ab6f0716b58e1f026a
+      - 9a1a729edad94338cce67fea287a25619f3fb799439e3d47a1c37f0b0f79436a
+      - f5557abc7639dddab229c6d6cc1ee13b50e6e69d0da29216ce3742f70426f4f4
+      - b1b1340aa9599e6ca4511745eeab16a953f78036f9f502c48962d0a8ee69b5ae
+      - 61684ae7b443f1dad2c155622989309f7a3734782abddb5b862412d4876c75c3
+      - 1ab629377898baee5080198d610f630a170ebaea6d9da52e2f4655bd27759c3c

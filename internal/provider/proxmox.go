@@ -1504,7 +1504,7 @@ func (p *proxmoxProvider) GuestHome(vm.VM) string {
 //
 // The interface's contract is that a new VM's user must default to whatever
 // account the shell will land in, or the playbook provisions one account (git
-// identity, ~/.tmux.conf, secrets) while the user logs into another. For local
+// identity, home defaults, secrets) while the user logs into another. For local
 // Lima that account happens to mirror the host user, and for remote Lima it is
 // the remote host's — but for Proxmox there is no "host limactl runs on" at all:
 // sandbar creates the account itself as the cloud-init ciuser. Returning that same

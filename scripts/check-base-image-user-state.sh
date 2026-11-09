@@ -22,8 +22,13 @@ normal_group=$(awk -F: '$3 >= 1000 && $3 < 65534 {print $1; exit}' "$root/etc/gr
 home_entry=$(find "$root/home" -mindepth 1 -maxdepth 1 -print -quit)
 [[ -z $home_entry ]] || die "baked home remains: ${home_entry#"$root"}"
 
-for relative in .local/bin/uv .local/bin/uvx .tmux.conf .ssh/rc .config/direnv/direnv.toml; do
+for relative in .local/bin/uv .local/bin/uvx .ssh/rc .config/direnv/direnv.toml; do
   [[ -f $root/etc/skel/$relative ]] || die "missing reusable home setup: /etc/skel/$relative"
 done
+# tmux reads ~/.tmux.conf after /etc/tmux.conf, so a skeleton copy would
+# override the current system configuration in every new home.
+[[ -f $root/etc/tmux.conf ]] || die 'missing sandbar tmux configuration: /etc/tmux.conf'
+[[ ! -e $root/etc/skel/.tmux.conf ]] || \
+  die 'skeleton ~/.tmux.conf would override /etc/tmux.conf in every new home'
 [[ ! -e $root/etc/skel/.config/uv/uv-receipt.json ]] || \
   die 'uv install receipt still names the transient build home'

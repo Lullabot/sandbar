@@ -6,3 +6,7 @@ user_git_user_email: "you@example.com"
 # Empty by default: Lima provides its own key for `limactl shell`, so this is
 # only needed for non-Lima / remote-host deployments that SSH in as the user.
 user_github_keys_url: ""
+# Where sandbar's tmux configuration is installed. tmux reads /etc/tmux.conf
+# before ~/.tmux.conf, so a user's own file still wins. Only tests change this:
+# the template's reload binding and tmux itself name /etc/tmux.conf directly.
+sand_system_tmux_conf: /etc/tmux.conf

@@ -1,0 +1,56 @@
+# Familiar prefix
+unbind C-b
+set -g prefix C-a
+bind C-a send-prefix
+
+# Sane defaults
+set -sg escape-time 10  # not 0: this conf also rides WAN transports (ssh), where 0 eats real ESC keys
+set -g base-index 1
+setw -g pane-base-index 1
+set -g mouse on
+set -g history-limit 50000
+# Forward native Claude notifications through the guest multiplexer.
+set -g allow-passthrough on
+set -g focus-events on  # forward terminal focus in/out to apps (Claude Code, vim) so they can refresh on refocus
+
+# Claude Code: modified keys, notifications and terminal progress updates.
+# https://code.claude.com/docs/en/terminal-config#configure-tmux
+set -g allow-passthrough on
+set -s extended-keys on
+set -as terminal-features ',xterm*:extkeys'
+# The outer terminal is another tmux when sand runs in a host tmux window.
+set -as terminal-features ',screen*:extkeys,tmux*:extkeys'
+
+# Vi copy mode
+setw -g mode-keys vi
+
+# Copy to the CLIPBOARD OF THE TERMINAL YOU ARE SITTING AT, which is on the far
+# side of an ssh / limactl hop. OSC 52 is the only channel that crosses it, and
+# with `mouse on` above there is no fallback: the mouse belongs to tmux, so a
+# drag no longer makes a terminal-native selection you could copy yourself.
+#
+# `on` lets applications inside tmux write the clipboard as well as tmux's
+# own copies. `external` permits only tmux's own copies, so it blocks a nested
+# tmux or an application such as Claude Code from setting the clipboard.
+set -s set-clipboard on
+# ...and tmux only writes OSC 52 to a terminal it believes supports it (the `Ms`
+# capability, matched against TERM). Its built-in list is `xterm*` and nothing
+# else, so without this line the clipboard is silently dead for a guest reached
+# from inside a host tmux (TERM=screen-256color / tmux-256color — exactly what
+# sand's host-tmux fast path produces) and for alacritty, foot, wezterm and the
+# rest. Claiming the capability for every terminal is safe in a way the reverse
+# is not: a terminal that does not understand the sequence ignores it, while a
+# terminal wrongly assumed not to support it loses copy entirely.
+set -as terminal-features ',*:clipboard'
+
+# Intuitive splits (and keep current path)
+bind | split-window -h -c "#{pane_current_path}"
+bind S split-window -v -c "#{pane_current_path}"
+bind c new-window -c "#{pane_current_path}"
+
+# Reload config
+bind r source-file ~/.tmux.conf \; display "Reloaded!"
+
+# ssh forwarding
+set -g update-environment "DISPLAY KRB5CCNAME SSH_ASKPASS SSH_AGENT_PID SSH_CONNECTION WINDOWID XAUTHORITY"
+set-environment -g 'SSH_AUTH_SOCK' ~/.ssh/ssh_auth_sock

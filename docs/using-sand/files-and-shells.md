@@ -23,6 +23,21 @@ Useful bindings once you're attached (tmux's own, with `sandbar`'s default
 | `C-a c` | Open a new window |
 | `C-a \|` | Split vertically |
 | `C-a S` | Split horizontally |
+| `C-a r` | Reload the tmux configuration |
+
+### Customizing the guest tmux
+
+Sandbar installs its tmux configuration as `/etc/tmux.conf` in the guest.
+tmux reads that file first and then your own `~/.tmux.conf`, so put your
+settings in `~/.tmux.conf`: they override sandbar's, and `C-a r` reloads
+both in that order. Every create and reset installs the current
+`/etc/tmux.conf`, including a reset that preserves the home.
+
+Earlier releases wrote sandbar's configuration to `~/.tmux.conf`. A reset that
+preserves the home removes that file if it is unchanged from a sandbar
+release, so it no longer hides the current settings. If you edited it, it is
+kept and still overrides `/etc/tmux.conf`; remove the settings you did not
+change to pick up sandbar's updates.
 
 A second terminal attaching to the same VM gets its own session grouped
 against the first, sharing the same windows but tracking its own current
@@ -57,7 +72,7 @@ to be true on your side for it to arrive:
   the clipboard capability for your terminal; see the configuration below.
 
 A VM created before sandbar shipped this doesn't need rebuilding: the setting
-is applied at attach time as well as baked into the guest's `~/.tmux.conf`,
+is applied at attach time as well as baked into the guest's `/etc/tmux.conf`,
 so the next `S` or `sandbar shell` has it.
 
 ### Claude Code and host tmux settings

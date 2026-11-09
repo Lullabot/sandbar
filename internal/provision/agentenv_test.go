@@ -9,7 +9,7 @@ import (
 
 // TestAgentEnvironmentMarkerDeployedInEveryPhase guards the `when:` that is
 // NOT on roles/base's /etc/lullabot/agent-environment tasks, for the reason
-// TestTmuxConfDeployedInEveryPhase guards ~/.tmux.conf: gating them out of
+// TestTmuxConfDeployedInEveryPhase guards /etc/tmux.conf: gating them out of
 // finalize looks consistent with their neighbours, and a clone of a current
 // base still gets the file, but a clone of an older base would not. The
 // molecule scenario cannot catch this. Its finalize pass runs on a container

@@ -28,7 +28,7 @@ import "regexp"
 // see the guest's tmux server without a round trip that would race anyway.
 //
 // **The first client creates `main`**, the canonical session that holds the user's
-// work. tmux finds the shipped ~/.tmux.conf itself (C-a prefix, mouse, 50k
+// work. tmux finds the shipped /etc/tmux.conf itself (C-a prefix, mouse, 50k
 // scrollback, splits bound to -c "#{pane_current_path}"), so no -f is passed.
 //
 // **Every later client gets its OWN session GROUPED against `main`** (`new-session
@@ -91,7 +91,7 @@ import "regexp"
 // wins those — they only diverge on windows opened after attaching.
 //
 // **terminalSetupCmds is prepended to BOTH new-session commands** — see its own comment
-// for what it does and why it is here rather than only in the shipped ~/.tmux.conf.
+// for what it does and why it is here rather than only in the shipped /etc/tmux.conf.
 func guestAttachExpr(colortermEnv, ccFlag string) string {
 	return agentEnvironmentCmd + `if tmux has-session -t =main 2>/dev/null; then s=sand-$$; tmux` + ccFlag + ` ` + terminalSetupCmds + `new-session` + colortermEnv + ` -t =main -s "$s" \; set-option -t "$s" destroy-unattached on; else tmux` + ccFlag + ` ` + terminalSetupCmds + `new-session` + colortermEnv + ` -s main; fi`
 }
@@ -173,7 +173,7 @@ func (m AttachMode) flag() string {
 // terminalSetupCmds is the `start-server \; set -s … \; ` prefix that turns on tmux's
 // OSC 52 clipboard bridge, so a copy inside the guest (mouse drag, or copy-mode
 // `y`) reaches the clipboard of the terminal the user is actually sitting at,
-// several hops away. Both settings are also in the ~/.tmux.conf roles/user ships
+// several hops away. Both settings are also in the /etc/tmux.conf roles/user ships
 // — this prefix is what reaches a VM PROVISIONED BEFORE THAT CONF CARRIED THEM,
 // which is every VM already in existence when this landed. They are cheap and
 // idempotent, so the duplication costs a VM with a current conf nothing.
