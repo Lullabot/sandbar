@@ -172,6 +172,70 @@ def install(home, relative, user, mode, candidate, preserved_home, fresh_clone=F
         return
 
 
+KEPT = 3
+
+
+def retire(home, relative, user, mode, stub, known, remove):
+    """Take back a home file sandbar used to install and now installs elsewhere.
+
+    A file is sandbar's when its bytes, ignoring trailing whitespace, hash to a
+    released version (older releases copied the file verbatim, newer ones
+    piped it through Ansible's file lookup, which strips the final newline),
+    equal the baseline this VM recorded installing, or equal the stub. Such a
+    file is replaced by the stub, or removed with --remove once nothing loads
+    it by path. Anything else is the user's edit: it is kept and the exit
+    status is KEPT. Proposals of released versions are deleted either way, so
+    proposed-defaults stops offering a file sandbar no longer installs here.
+    """
+    if not home.is_dir() or home.is_symlink():
+        raise ValueError("home must be a real directory")
+    account = pwd.getpwnam(user)
+    uid, gid = account.pw_uid, account.pw_gid
+    destination = checked_path(home, relative)
+    baseline = checked_path(home, ".config/sandbar/home-baselines/" + relative)
+    proposed = checked_path(home, ".config/sandbar/proposed-defaults/" + relative)
+    old = regular_bytes(destination)
+    installed = regular_bytes(baseline)
+
+    def released(content):
+        return content is not None and hashlib.sha256(content.rstrip()).hexdigest() in known
+
+    actions = []
+    if proposed.parent.is_dir() and not proposed.parent.is_symlink():
+        for entry in sorted(proposed.parent.iterdir()):
+            if (entry.name == proposed.name or entry.name.startswith(proposed.name + ".")) and released(regular_bytes(entry)):
+                entry.unlink()
+                actions.append("removed proposal " + entry.name)
+
+    status = 0
+    if old is None and os.path.lexists(destination):
+        status = KEPT
+        actions.insert(0, "kept non-regular file at " + str(destination))
+    elif old is None:
+        actions.insert(0, "absent")
+    elif not (released(old) or (installed is not None and old == installed) or old == stub):
+        status = KEPT
+        actions.insert(0, "kept edited file at " + str(destination))
+    elif remove:
+        destination.unlink()
+        actions.insert(0, "removed " + str(destination))
+    elif old != stub:
+        put(destination, stub, mode, uid, gid)
+        actions.insert(0, "retired " + str(destination))
+    else:
+        actions.insert(0, "already retired")
+
+    # The baseline only described a file sandbar no longer writes here.
+    if installed is not None:
+        baseline.unlink()
+        actions.append("removed baseline")
+
+    changed = any(not action.startswith(("absent", "kept", "already")) for action in actions)
+    print(("changed: " if changed else "unchanged: ") + "; ".join(actions))
+    if status:
+        sys.exit(status)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("home", type=Path)
@@ -184,8 +248,15 @@ def main():
     parser.add_argument("--check-managed", action="store_true")
     parser.add_argument("--propose-only", action="store_true")
     parser.add_argument("--preserve-git-credentials-block", action="store_true")
+    parser.add_argument("--retire", action="store_true")
+    parser.add_argument("--remove", action="store_true")
+    parser.add_argument("--known-sha256", action="append", default=[])
     args = parser.parse_args()
     try:
+        if args.retire:
+            retire(args.home, args.relative, args.user, args.mode, sys.stdin.buffer.read(),
+                   set(args.known_sha256), args.remove)
+            return
         # Only modes that write a default take one. The record and check modes
         # run with no stdin from Ansible, and reading an inherited stdin that
         # never reaches EOF would block the provision.

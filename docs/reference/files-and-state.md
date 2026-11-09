@@ -115,6 +115,16 @@ Source: `internal/provision/preserve.go` (`AgentStatePaths`).
 | `~/<scope>/.env` | A **scoped** secret set for directory `<scope>`, auto-loaded by direnv when you `cd` into it and unloaded when you leave. |
 | `~/.config/sandbar/home-baselines/` | Copies of home files sandbar actually installed. A preserved-home reset compares their bytes to recognize unchanged provisioned files; missing baselines mean unknown ownership. |
 | `~/.config/sandbar/proposed-defaults/` | New defaults that could not safely replace an edited, untracked, deleted, or symlinked home path during a preserved-home reset. Review them manually. |
+| `/usr/local/share/sandbar/bashrc.d/` | The `claude` and `codex` shell launchers for the agents this VM selected, loaded by a `sandbar shell launchers` block in `/etc/bash.bashrc`. They live outside the home so every create and reset installs the current version, even when the home is preserved. To override one, define your own function in `~/.bashrc`, which bash reads afterwards. |
+| `/etc/systemd/user/sandbar-codex-app-server.service` | Codex's boot service. Whether it is enabled is recorded in your home (`~/.config/systemd/user/default.target.wants/`), so that choice survives a reset. |
+
+Earlier releases installed the launchers in `~/.config/sandbar/` and the Codex
+unit in `~/.config/systemd/user/`, and a preserved-home reset kept those old
+copies. A reset now retires each copy that is unchanged from a release: it is
+removed along with the `~/.bashrc` line that loaded it, or, when sandbar does
+not manage your `~/.bashrc`, replaced by an empty file so that line keeps
+working. A copy you edited is kept, and still overrides the current launcher
+because `~/.bashrc` still loads it.
 
 Source: `internal/provision/secrets.go:37` (global scope sourced from `.profile`/`.bashrc`) and `internal/provision/secrets.go:78` (`RenderDotenv` for a scoped `~/<scope>/.env`).
 

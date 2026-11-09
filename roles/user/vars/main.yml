@@ -1,0 +1,42 @@
+---
+# Files earlier releases installed in the home and sandbar now installs outside
+# it (see sand_bashrc_d in site.yml). A reset that preserves the home brings the
+# old copies back, and ~/.bashrc sources a launcher's home copy AFTER
+# /etc/bash.bashrc has loaded the current one, so a leftover copy would win.
+# The "Retire home copies" task takes back each copy that is byte-for-byte a
+# released version (or what this VM recorded installing).
+#
+# sha256 lists every released version, hashed after stripping trailing
+# whitespace. This list is FROZEN: these files no longer reach a home, so a
+# later edit to the role's file never adds an entry. tests/fixtures/
+# legacy-home-launchers holds the released bytes, and a test checks this list
+# against them.
+#
+# A launcher is removed only when ~/.bashrc is sandbar-managed, because the
+# same pass then deletes the line that sources it. Otherwise the line stays and
+# needs a file to source, so it gets the stub instead.
+sand_retired_home_files:
+  - path: .config/sandbar/claude-shell-wrapper.sh
+    remove: "{{ sand_bashrc_writable | default(false) | bool }}"
+    stub: |
+      # Sandbar now installs the `claude` launcher in /usr/local/share/sandbar/bashrc.d,
+      # which /etc/bash.bashrc loads. This file is intentionally empty; it remains
+      # only because ~/.bashrc sources it. Delete that line and this file together.
+    sha256:
+      - 9601d244a25d9eed01dc8df0455ee75d753ea1240408639e6e994d5f93e9dda7
+      - 5df7526aafa1ab479a91b9a26ce9bb8406c580320a941133323361f9fa3c07bb
+  - path: .config/sandbar/codex-shell-wrapper.sh
+    remove: "{{ sand_bashrc_writable | default(false) | bool }}"
+    stub: |
+      # Sandbar now installs the `codex` launcher in /usr/local/share/sandbar/bashrc.d,
+      # which /etc/bash.bashrc loads. This file is intentionally empty; it remains
+      # only because ~/.bashrc sources it. Delete that line and this file together.
+    sha256:
+      - 16b61c0f7312b14cd73c01fe70f069d1586b209eab86e8894fe73a4ebde6863b
+  # A home copy of a user unit shadows /etc/systemd/user's, and nothing loads
+  # it by path, so a released copy is always removed.
+  - path: .config/systemd/user/sandbar-codex-app-server.service
+    remove: true
+    stub: ""
+    sha256:
+      - cf255afbd5ea9069fe62301ccdd784f23fd560c8b3340193b2b2f7d9905476cb

@@ -113,22 +113,13 @@
     mode: "0700"
   when: (sand_fresh_clone | default(false) | bool or sand_new_user | default(false) | bool) and not sand_preserved_home | default(false) | bool
 
-- name: Install Claude first-run remote-control wrapper
-  ansible.builtin.command:
-    argv: "{{ ['python3', '/usr/local/libexec/sandbar-safe-home-file', user_home, '.config/sandbar/claude-shell-wrapper.sh', user_name, '0644'] + sand_home_file_flags }}"
-    stdin: "{{ lookup('ansible.builtin.file', 'claude-shell-wrapper.sh') }}"
-    stdin_add_newline: false
-  register: sand_claude_wrapper_install
-  changed_when: sand_claude_wrapper_install.stdout is search('^changed:')
-
-- name: Configure the Claude Code interactive launcher
-  ansible.builtin.blockinfile:
-    path: "{{ user_home }}/.bashrc"
-    marker: "# {mark} ANSIBLE MANAGED BLOCK - Claude Code"
-    create: true
-    owner: "{{ user_name }}"
-    group: "{{ user_name }}"
+# The launcher is code, not configuration, so it lives outside the home where
+# every clone rewrites it; roles/user loads sand_bashrc_d from /etc/bash.bashrc.
+# Its state (the onboarding markers and settings.json) stays in the home.
+- name: Install the Claude Code interactive launcher
+  ansible.builtin.copy:
+    src: claude-shell-wrapper.sh
+    dest: "{{ sand_bashrc_d }}/claude.sh"
+    owner: root
+    group: root
     mode: "0644"
-    block: |
-      . "$HOME/.config/sandbar/claude-shell-wrapper.sh"
-  when: sand_bashrc_writable | default(false) | bool

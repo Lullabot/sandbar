@@ -73,6 +73,47 @@
     group: root
     mode: "0755"
 
+# Ungated, like ~/.tmux.conf below: a clone of a base built before this block
+# existed needs it written by finalize. The agent roles drop their launchers in
+# sand_bashrc_d. bash reads /etc/bash.bashrc before ~/.bashrc in every
+# interactive shell (login shells reach it through /etc/profile), and Debian's
+# copy returns early for non-interactive shells, as ~/.bashrc does.
+- name: Ensure sandbar's shell launcher directory exists
+  ansible.builtin.file:
+    path: "{{ sand_bashrc_d }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Load sandbar's shell launchers in every interactive bash
+  ansible.builtin.blockinfile:
+    path: "{{ sand_system_bashrc }}"
+    marker: "# {mark} sandbar shell launchers"
+    create: true
+    owner: root
+    group: root
+    mode: "0644"
+    block: |
+      for sandbar_launcher in {{ sand_bashrc_d }}/*.sh; do
+        [ -r "$sandbar_launcher" ] && . "$sandbar_launcher"
+      done
+      unset sandbar_launcher
+
+# A clone's root filesystem starts without these, but a full run on a reused
+# host may be dropping an agent it selected last time.
+- name: Remove launchers of coding agents this VM did not select
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop:
+    - {path: "{{ sand_bashrc_d }}/claude.sh", selected: "{{ toolset_claude | default(false) }}"}
+    - {path: "{{ sand_bashrc_d }}/codex.sh", selected: "{{ toolset_codex | default(false) }}"}
+    - {path: "{{ sand_systemd_user_dir }}/sandbar-codex-app-server.service", selected: "{{ toolset_codex | default(false) }}"}
+  loop_control:
+    label: "{{ item.path }}"
+  when: provision_phase | default('full') == 'base' or not item.selected | bool
+
 - name: Check whether preserved shell configuration is unchanged
   ansible.builtin.command:
     argv: "{{ ['python3', '/usr/local/libexec/sandbar-safe-home-file', user_home, item, user_name, '0644', '--check-managed'] + sand_home_file_flags }}"
@@ -87,6 +128,73 @@
     sand_bashrc_writable: "{{ sand_shell_ownership.results[0].rc == 0 }}"
     sand_profile_writable: "{{ sand_shell_ownership.results[1].rc == 0 }}"
   when: provision_phase | default('full') != 'base'
+
+# Earlier releases installed the agent launchers and Codex's boot unit in the
+# home. See sand_retired_home_files (vars/main.yml) for why a preserved copy
+# must go. A copy the user edited is kept, and keeps overriding the system
+# launcher, because ~/.bashrc still sources it.
+- name: Retire home copies of sandbar's agent launchers
+  ansible.builtin.command:
+    argv: "{{ ['python3', '/usr/local/libexec/sandbar-safe-home-file', user_home, item.path, user_name, '0644', '--retire'] + (['--remove'] if item.remove | bool else []) + (item.sha256 | map('regex_replace', '^', '--known-sha256=') | list) }}"
+    stdin: "{{ item.stub }}"
+    stdin_add_newline: false
+  loop: "{{ sand_retired_home_files }}"
+  loop_control:
+    label: "{{ item.path }}"
+  register: sand_home_retire
+  changed_when: sand_home_retire.stdout is search('^changed:')
+  failed_when: sand_home_retire.rc not in [0, 3]
+  when: provision_phase | default('full') != 'base'
+
+# blockinfile fails on a missing file even when removing a block.
+- name: Check for ~/.bashrc before removing retired launcher lines
+  ansible.builtin.stat:
+    path: "{{ user_home }}/.bashrc"
+    get_checksum: false
+  register: sand_bashrc_stat
+  when: provision_phase | default('full') != 'base'
+
+- name: Stop ~/.bashrc loading the retired Claude launcher
+  ansible.builtin.blockinfile:
+    path: "{{ user_home }}/.bashrc"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - Claude Code"
+    state: absent
+  when:
+    - provision_phase | default('full') != 'base'
+    - sand_bashrc_writable | default(false) | bool
+    - sand_bashrc_stat.stat.exists
+    - (sand_home_retire.results | selectattr('item.path', 'equalto', '.config/sandbar/claude-shell-wrapper.sh') | first).rc == 0
+
+- name: Stop ~/.bashrc loading the retired Codex launcher
+  ansible.builtin.lineinfile:
+    path: "{{ user_home }}/.bashrc"
+    regexp: '^\. "\$HOME/\.config/sandbar/codex-shell-wrapper\.sh"$'
+    state: absent
+  when:
+    - provision_phase | default('full') != 'base'
+    - sand_bashrc_writable | default(false) | bool
+    - (sand_home_retire.results | selectattr('item.path', 'equalto', '.config/sandbar/codex-shell-wrapper.sh') | first).rc == 0
+
+# `systemctl --user enable` linked the old home unit by absolute path. With that
+# file gone the link dangles; roles/codex's boot service re-enables the unit
+# from sand_systemd_user_dir for a user who had opted in.
+- name: Check the Codex boot unit's enablement link
+  ansible.builtin.stat:
+    path: "{{ user_home }}/.config/systemd/user/default.target.wants/sandbar-codex-app-server.service"
+    follow: false
+    get_checksum: false
+  register: sand_codex_unit_link
+  when: provision_phase | default('full') != 'base'
+
+- name: Drop the enablement link left pointing at the retired Codex unit
+  ansible.builtin.file:
+    path: "{{ sand_codex_unit_link.stat.path }}"
+    state: absent
+  when:
+    - provision_phase | default('full') != 'base'
+    - sand_codex_unit_link.stat.islnk | default(false)
+    - sand_codex_unit_link.stat.lnk_target == user_home + '/.config/systemd/user/sandbar-codex-app-server.service'
+    - (sand_home_retire.results | selectattr('item.path', 'equalto', '.config/systemd/user/sandbar-codex-app-server.service') | first).rc == 0
 
 # The base playbook added its temporary user to docker, but the distributed
 # image removes that user. Apply this small per-login membership on finalize.
