@@ -339,6 +339,10 @@ func RestoreBeforeFinalize(ctx context.Context, cli guestRunner, name, home, use
 // The direnv approval runs for a whole-home restore as well as a staged project.
 // It is idempotent, and the alternative is a VM whose GH_TOKEN silently never
 // loads because the .env came back unapproved.
+//
+// Finally the restored checkouts' self-review skills are refreshed to match the
+// rebuilt base (see reviewskills.go). That step only warns: it cannot fail a
+// reset whose data is already back.
 func RestoreAfterFinalize(ctx context.Context, cli guestRunner, name, home, user string, plan PreservePlan, stage *StageGuard, out io.Writer) error {
 	if plan.Project.Staged {
 		if err := StageIn(ctx, cli, name, home, user, []string{plan.Project.OrgRel}, stage.Path(projectArchive), projectLabel, out); err != nil {
@@ -355,5 +359,8 @@ func RestoreAfterFinalize(ctx context.Context, cli guestRunner, name, home, user
 			return fmt.Errorf("approve the restored .env in %q: %w", name, err)
 		}
 	}
+	// Last, and never fatal: the restored trees carry the OLD VM's review
+	// skills, while the rebuilt base serves the NEW review tool.
+	RefreshReviewSkills(ctx, cli, name, home, user, plan, out)
 	return nil
 }

@@ -264,6 +264,13 @@ enter to toggle the focused option; its help text describes what it copies.
   and have no separate row. A VM with no cached sweep has no checkout rows;
   use the whole-home option if you need to keep its files.
 
+After restoring them, the reset refreshes the
+[self-review skills](review.md#the-assistant-skills) in any restored checkout
+that already has sandbar-installed copies, so they match the rebuilt VM's
+review server. Checkouts without them, and copies your repository tracks in
+Git, are left alone. If the refresh fails, the reset still succeeds and prints
+the `self-review-install-skills` command to run by hand.
+
 Preserved data passes through a private directory on your workstation.
 `sandbar` removes the copy after a successful reset. If a reset fails after
 attempting to delete the VM, it keeps the archives and prints their path
