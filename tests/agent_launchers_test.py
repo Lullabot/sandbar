@@ -100,6 +100,7 @@ class AgentLaunchersTest(unittest.TestCase):
             "sand_bashrc_d": str(self.bashrc_d),
             "sand_system_bashrc": str(self.system_bashrc),
             "sand_systemd_user_dir": str(self.unit_dir),
+            "sand_skills_dir": str(system / "share/sandbar/skills"),
             "user_home": str(self.home),
             "user_name": getpass.getuser(),
             "provision_phase": "finalize",

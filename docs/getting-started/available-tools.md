@@ -95,6 +95,34 @@ with no agents selected receives no agent context. Existing running VMs are
 not updated automatically. Start a fresh agent session after provisioning to
 load the global context.
 
+### Claude Code `new-session` skill
+
+A VM with Claude Code selected also gets a `new-session` skill. Ask Claude to
+"start a new session in sandbar with a prompt to fix the failing test", for
+example, and it starts a separate, detached Claude Code session in the VM that
+appears in [Remote Control](https://code.claude.com/docs/en/remote-control).
+This is how you open a new VM session from the Claude web or mobile app, which
+can otherwise only start cloud sessions.
+
+- A loosely named repository is looked up in the VM's checkout layout,
+  `~/<host>/<group>/<repo>`.
+- In a git repository the new session works in a fresh worktree branched from
+  `origin/main`, unless you ask it to work in the directory itself.
+- The new session starts in the permission mode of the session that asked.
+- The skill requires Remote Control to be on by default
+  (`remoteControlAtStartup` in `~/.claude/settings.json`). If it is off, the
+  skill starts nothing and tells you how to turn it on: answer **y** to the
+  launcher's Remote Control question (see
+  [Your First VM](first-vm.md)), or enable it later in Claude Code's `/config`
+  screen.
+
+The skill is sandbar's code, so it lives outside your home at
+`/usr/local/share/sandbar/skills/new-session` and every create or reset
+installs the current copy. Claude finds it through a symlink at
+`~/.claude/skills/new-session`. If something of yours already occupies that
+path, provisioning leaves it in place, prints a warning, and continues without
+linking the skill.
+
 ## Git
 
 - The [GitHub CLI (`gh`)](https://cli.github.com/), configured as the git
