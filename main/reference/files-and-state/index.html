@@ -1708,8 +1708,23 @@ preserved Codex daemon settings.</p>
 <td><code>~/.config/sandbar/proposed-defaults/</code></td>
 <td>New defaults that could not safely replace an edited, untracked, deleted, or symlinked home path during a preserved-home reset. Review them manually.</td>
 </tr>
+<tr>
+<td><code>/usr/local/share/sandbar/bashrc.d/</code></td>
+<td>The <code>claude</code> and <code>codex</code> shell launchers for the agents this VM selected, loaded by a <code>sandbar shell launchers</code> block in <code>/etc/bash.bashrc</code>. They live outside the home so every create and reset installs the current version, even when the home is preserved. To override one, define your own function in <code>~/.bashrc</code>, which bash reads afterwards.</td>
+</tr>
+<tr>
+<td><code>/etc/systemd/user/sandbar-codex-app-server.service</code></td>
+<td>Codex's boot service. Whether it is enabled is recorded in your home (<code>~/.config/systemd/user/default.target.wants/</code>), so that choice survives a reset.</td>
+</tr>
 </tbody>
 </table>
+<p>Earlier releases installed the launchers in <code>~/.config/sandbar/</code> and the Codex
+unit in <code>~/.config/systemd/user/</code>, and a preserved-home reset kept those old
+copies. A reset now retires each copy that is unchanged from a release: it is
+removed along with the <code>~/.bashrc</code> line that loaded it, or, when sandbar does
+not manage your <code>~/.bashrc</code>, replaced by an empty file so that line keeps
+working. A copy you edited is kept, and still overrides the current launcher
+because <code>~/.bashrc</code> still loads it.</p>
 <p>Source: <code>internal/provision/secrets.go:37</code> (global scope sourced from <code>.profile</code>/<code>.bashrc</code>) and <code>internal/provision/secrets.go:78</code> (<code>RenderDotenv</code> for a scoped <code>~/&lt;scope&gt;/.env</code>).</p>
 <p>See <a href="../security-model/">Security Model</a> for why the host secrets store is
 unencrypted and what that means for you.</p>
