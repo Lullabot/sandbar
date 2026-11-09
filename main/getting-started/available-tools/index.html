@@ -715,6 +715,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#claude-code-new-session-skill" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Claude Code new-session skill
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1508,6 +1519,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#claude-code-new-session-skill" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Claude Code new-session skill
+      
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1666,6 +1688,32 @@ the same destination causes provisioning to stop with a collision error. A VM
 with no agents selected receives no agent context. Existing running VMs are
 not updated automatically. Start a fresh agent session after provisioning to
 load the global context.</p>
+<h3 id="claude-code-new-session-skill">Claude Code <code>new-session</code> skill</h3>
+<p>A VM with Claude Code selected also gets a <code>new-session</code> skill. Ask Claude to
+"start a new session in sandbar with a prompt to fix the failing test", for
+example, and it starts a separate, detached Claude Code session in the VM that
+appears in <a href="https://code.claude.com/docs/en/remote-control">Remote Control</a>.
+This is how you open a new VM session from the Claude web or mobile app, which
+can otherwise only start cloud sessions.</p>
+<ul>
+<li>A loosely named repository is looked up in the VM's checkout layout,
+  <code>~/&lt;host&gt;/&lt;group&gt;/&lt;repo&gt;</code>.</li>
+<li>In a git repository the new session works in a fresh worktree branched from
+  <code>origin/main</code>, unless you ask it to work in the directory itself.</li>
+<li>The new session starts in the permission mode of the session that asked.</li>
+<li>The skill requires Remote Control to be on by default
+  (<code>remoteControlAtStartup</code> in <code>~/.claude/settings.json</code>). If it is off, the
+  skill starts nothing and tells you how to turn it on: answer <strong>y</strong> to the
+  launcher's Remote Control question (see
+  <a href="../first-vm/">Your First VM</a>), or enable it later in Claude Code's <code>/config</code>
+  screen.</li>
+</ul>
+<p>The skill is sandbar's code, so it lives outside your home at
+<code>/usr/local/share/sandbar/skills/new-session</code> and every create or reset
+installs the current copy. Claude finds it through a symlink at
+<code>~/.claude/skills/new-session</code>. If something of yours already occupies that
+path, provisioning leaves it in place, prints a warning, and continues without
+linking the skill.</p>
 <h2 id="git">Git</h2>
 <ul>
 <li>The <a href="https://cli.github.com/">GitHub CLI (<code>gh</code>)</a>, configured as the git
