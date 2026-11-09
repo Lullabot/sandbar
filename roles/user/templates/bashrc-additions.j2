@@ -7,9 +7,3 @@ eval "$(direnv hook bash)"
 if [ -f "$HOME/.config/sandbar/secrets.env" ]; then
   . "$HOME/.config/sandbar/secrets.env"
 fi
-{% if toolset_claude | default(false) | bool %}
-. "$HOME/.config/sandbar/claude-shell-wrapper.sh"
-{% endif %}
-{% if toolset_codex | default(false) | bool %}
-. "$HOME/.config/sandbar/codex-shell-wrapper.sh"
-{% endif %}

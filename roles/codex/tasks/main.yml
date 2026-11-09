@@ -48,38 +48,30 @@
     mode: "0700"
   when: (sand_fresh_clone | default(false) | bool or sand_new_user | default(false) | bool) and not sand_preserved_home | default(false) | bool
 
-- name: Install Codex first-run remote-control wrapper
-  ansible.builtin.command:
-    argv: "{{ ['python3', '/usr/local/libexec/sandbar-safe-home-file', user_home, '.config/sandbar/codex-shell-wrapper.sh', user_name, '0644'] + sand_home_file_flags }}"
-    stdin: "{{ lookup('ansible.builtin.file', 'codex-shell-wrapper.sh') }}"
-    stdin_add_newline: false
-  register: sand_codex_wrapper_install
-  changed_when: sand_codex_wrapper_install.stdout is search('^changed:')
+# The launcher and boot unit are code, not configuration, so they live outside
+# the home where every clone rewrites them; roles/user loads sand_bashrc_d from
+# /etc/bash.bashrc. Whether the unit is enabled is the user's choice and stays
+# in the home: `systemctl --user enable` links it from ~/.config/systemd/user.
+- name: Install the Codex interactive launcher
+  ansible.builtin.copy:
+    src: codex-shell-wrapper.sh
+    dest: "{{ sand_bashrc_d }}/codex.sh"
+    owner: root
+    group: root
+    mode: "0644"
 
-- name: Ensure user systemd directory exists for Codex
+- name: Ensure the system-wide user unit directory exists
   ansible.builtin.file:
-    path: "{{ user_home }}/.config/systemd/user"
+    path: "{{ sand_systemd_user_dir }}"
     state: directory
-    owner: "{{ user_name }}"
-    group: "{{ user_name }}"
+    owner: root
+    group: root
     mode: "0755"
-  when: (sand_fresh_clone | default(false) | bool or sand_new_user | default(false) | bool) and not sand_preserved_home | default(false) | bool
 
 - name: Install disabled Codex boot service
-  ansible.builtin.command:
-    argv: "{{ ['python3', '/usr/local/libexec/sandbar-safe-home-file', user_home, '.config/systemd/user/sandbar-codex-app-server.service', user_name, '0644'] + sand_home_file_flags }}"
-    stdin: "{{ lookup('ansible.builtin.file', 'sandbar-codex-app-server.service') }}"
-    stdin_add_newline: false
-  register: sand_codex_service_install
-  changed_when: sand_codex_service_install.stdout is search('^changed:')
-
-- name: Load Codex first-run remote-control wrapper from ~/.bashrc
-  ansible.builtin.lineinfile:
-    path: "{{ user_home }}/.bashrc"
-    line: '. "$HOME/.config/sandbar/codex-shell-wrapper.sh"'
-    regexp: '^\. "\$HOME/\.config/sandbar/codex-shell-wrapper\.sh"$'
-    create: true
-    owner: "{{ user_name }}"
-    group: "{{ user_name }}"
+  ansible.builtin.copy:
+    src: sandbar-codex-app-server.service
+    dest: "{{ sand_systemd_user_dir }}/sandbar-codex-app-server.service"
+    owner: root
+    group: root
     mode: "0644"
-  when: sand_bashrc_writable | default(false) | bool

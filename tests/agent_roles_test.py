@@ -417,18 +417,6 @@ class AgentRolesTest(unittest.TestCase):
             for retained in ("# user customization", "direnv hook bash", "secrets.env", "export EDITOR=vim"):
                 self.assertIn(retained, bashrc.read_text())
 
-            # Only selecting Claude adds its launcher back to this clean base.
-            tasks = yaml.safe_load((ROOT / "roles/claude-code/tasks/main.yml").read_text())
-            launcher = next(task for task in tasks if task["name"] == "Configure the Claude Code interactive launcher")
-            launcher["ansible.builtin.blockinfile"]["group"] = grp.getgrgid(os.getgid()).gr_name
-            variables["user_name"] = getpass.getuser()
-            variables["sand_bashrc_writable"] = True
-            self.run_play(directory, [{"hosts": "all", "gather_facts": False,
-                                       "tasks": [launcher]}], variables)
-            self.assertIn("claude-shell-wrapper.sh", bashrc.read_text())
-            syntax = subprocess.run(["bash", "-n", str(bashrc)], capture_output=True, text=True)
-            self.assertEqual(syntax.returncode, 0, syntax.stderr)
-
 
 if __name__ == "__main__":
     unittest.main()

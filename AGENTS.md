@@ -1044,6 +1044,20 @@ comment at `roles/agent-clipboard/tasks/main.yml`.
   side of that trade. `TestTmuxConfDeployedInEveryPhase` guards it, the way
   `molecule/base` guards the same property for the timezone tasks.
 
+- **Sandbar's own launchers and user units live outside the home.** The
+  `claude`/`codex` shell launchers go in `sand_bashrc_d`
+  (`/usr/local/share/sandbar/bashrc.d`, loaded from `/etc/bash.bashrc`) and
+  Codex's boot unit in `/etc/systemd/user`. A reset preserves the home but
+  never the root filesystem, so these need no baseline. Inside the home they
+  were judged by the safe home writer, and a home from before baselines
+  existed kept the old launcher on every reset, forever. Keep code there; keep
+  the user's state (onboarding markers, settings, the unit's enable link) in
+  the home. Earlier releases' home copies are retired by the `user` role
+  against `sand_retired_home_files` (`roles/user/vars/main.yml`). That hash list is
+  **frozen**: these files never reach a home again, so editing a launcher
+  must not add an entry. Do not move them back into the home, where
+  `~/.bashrc` would source them after the system copy and win.
+
 - **Measure reset transfers on the host; show no backup percentage**
   (`internal/provision/stageprogress.go`). Count bytes in the archive being
   written during backup or read during restore. This works on both backends

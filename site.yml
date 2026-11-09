@@ -27,6 +27,15 @@
     sand_file_fresh_flag: "{{ ['--fresh-clone'] if provision_phase | default('full') == 'base' or sand_fresh_clone | default(false) | bool or sand_new_user | default(false) | bool else [] }}"
     sand_home_file_flags: "{{ (['--preserved-home'] if sand_preserved_home | default(false) | bool else []) + sand_file_fresh_flag }}"
     sand_agent_file_flags: "{{ (['--preserved-home'] if sand_preserved_home | default(false) | bool or sand_preserved_agents | default(false) | bool else []) + sand_file_fresh_flag }}"
+    # Sandbar's own agent launchers and user units are code, not configuration
+    # a user is expected to edit, so they live outside the home: a reset
+    # preserves the home but always rebuilds the root filesystem, so every
+    # clone gets the current copies with no baseline to consult. Each file
+    # dropped in sand_bashrc_d is loaded by a block in sand_system_bashrc,
+    # which bash reads before ~/.bashrc, so a user's own definition still wins.
+    sand_bashrc_d: /usr/local/share/sandbar/bashrc.d
+    sand_system_bashrc: /etc/bash.bashrc
+    sand_systemd_user_dir: /etc/systemd/user
   roles:
     - base
     - user

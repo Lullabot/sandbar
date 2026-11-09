@@ -181,5 +181,102 @@ class SafeHomeFileTest(unittest.TestCase):
         self.assertEqual(sorted(path.name for path in base.parent.iterdir()), before)
 
 
+class RetireTest(unittest.TestCase):
+    """--retire takes back a home file sandbar now installs outside the home."""
+
+    REL = ".config/sandbar/claude-shell-wrapper.sh"
+    RELEASED = "claude() { command claude; }\n"
+    STUB = "# moved\n"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.home = Path(self.tmp.name) / "home"
+        (self.home / ".config/sandbar").mkdir(parents=True)
+        self.target = self.home / self.REL
+        self.baseline = self.home / ".config/sandbar/home-baselines" / self.REL
+        self.proposals = self.home / ".config/sandbar/proposed-defaults/.config/sandbar"
+
+    def retire(self, remove=False, known=None):
+        known = [hashlib.sha256(self.RELEASED.rstrip().encode()).hexdigest()] if known is None else known
+        command = [sys.executable, str(SCRIPT), str(self.home), self.REL, USER, "0644", "--retire"]
+        command += ["--known-sha256=" + digest for digest in known]
+        if remove:
+            command.append("--remove")
+        return subprocess.run(command, input=self.STUB.encode(), capture_output=True)
+
+    def write(self, path, content):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+
+    def test_released_version_is_stubbed_whatever_its_trailing_newlines(self):
+        # Older releases copied the file verbatim; newer ones piped it through
+        # Ansible's file lookup, which strips the final newline.
+        for installed in (self.RELEASED, self.RELEASED.rstrip(), self.RELEASED + "\n\n"):
+            with self.subTest(installed=installed):
+                self.write(self.target, installed)
+                result = self.retire()
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertTrue(result.stdout.startswith(b"changed:"))
+                self.assertEqual(self.target.read_text(), self.STUB)
+
+    def test_stub_is_idempotent_and_removable_later(self):
+        self.write(self.target, self.RELEASED)
+        self.retire()
+        again = self.retire()
+        self.assertEqual(again.returncode, 0)
+        self.assertTrue(again.stdout.startswith(b"unchanged:"), again.stdout)
+        # Once ~/.bashrc no longer sources it, a later pass removes the stub.
+        removed = self.retire(remove=True)
+        self.assertEqual(removed.returncode, 0)
+        self.assertFalse(self.target.exists())
+        absent = self.retire(remove=True)
+        self.assertTrue(absent.stdout.startswith(b"unchanged: absent"), absent.stdout)
+
+    def test_recorded_baseline_counts_as_sandbar_owned(self):
+        self.write(self.target, "a version this list never saw\n")
+        self.write(self.baseline, "a version this list never saw\n")
+        result = self.retire(remove=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(self.target.exists())
+        self.assertFalse(self.baseline.exists())
+
+    def test_edited_copy_is_kept(self):
+        self.write(self.target, self.RELEASED + "# my tweak\n")
+        self.write(self.baseline, self.RELEASED)
+        result = self.retire(remove=True)
+        self.assertEqual(result.returncode, 3)
+        self.assertIn(b"kept edited", result.stdout)
+        self.assertEqual(self.target.read_text(), self.RELEASED + "# my tweak\n")
+        # Sandbar no longer installs the file here, so its baseline goes.
+        self.assertFalse(self.baseline.exists())
+
+    def test_symlink_is_kept_and_never_followed(self):
+        outside = Path(self.tmp.name) / "outside"
+        outside.write_text(self.RELEASED)
+        self.target.symlink_to(outside)
+        result = self.retire(remove=True)
+        self.assertEqual(result.returncode, 3)
+        self.assertTrue(self.target.is_symlink())
+        self.assertEqual(outside.read_text(), self.RELEASED)
+
+    def test_released_proposals_are_withdrawn_and_others_kept(self):
+        name = Path(self.REL).name
+        released = self.proposals / name
+        hashed = self.proposals / (name + ".0123456789ab")
+        edited = self.proposals / (name + ".0123456789ab.1")
+        unrelated = self.proposals / "codex-shell-wrapper.sh"
+        for path in (released, hashed, unrelated):
+            self.write(path, self.RELEASED.rstrip())
+        self.write(edited, "a proposal the user edited\n")
+        result = self.retire()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(result.stdout.startswith(b"changed:"), result.stdout)
+        self.assertFalse(released.exists())
+        self.assertFalse(hashed.exists())
+        self.assertTrue(edited.exists())
+        self.assertTrue(unrelated.exists())
+
+
 if __name__ == "__main__":
     unittest.main()
