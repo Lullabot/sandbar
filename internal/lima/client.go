@@ -14,12 +14,20 @@ import (
 	"io"
 	"os/exec"
 	"strings"
+	"sync"
 
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
 // Client exposes the limactl lifecycle operations the TUI needs.
-type Client struct{ r Runner }
+type Client struct {
+	r Runner
+
+	// mu guards version, which Preflight writes and Advisories reads, from
+	// different goroutines in the TUI.
+	mu      sync.Mutex
+	version string
+}
 
 // New wraps a Runner in a Client.
 func New(r Runner) *Client { return &Client{r: r} }
@@ -177,8 +185,11 @@ func (c *Client) Status(name string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-// Start boots a stopped instance.
-func (c *Client) Start(name string) error { return c.run("start", name) }
+// Start boots a stopped instance. A start that dies of Lima 2.3.0's event-log
+// race is recovered rather than reported (see runStart).
+func (c *Client) Start(name string) error {
+	return c.runStart(context.Background(), nil, false, name, "start", name)
+}
 
 // Stop shuts down a running instance.
 func (c *Client) Stop(name string) error { return c.run("stop", name) }
@@ -274,7 +285,7 @@ func (c *Client) Configure(name string, cpus int, memory, disk, playbookDir stri
 
 // Create builds and starts a new instance from an overlay/template file.
 func (c *Client) Create(name, overlayPath string) error {
-	return c.run("start", "--name", name, "--tty=false", overlayPath)
+	return c.runStart(context.Background(), nil, false, name, "start", "--name", name, "--tty=false", overlayPath)
 }
 
 // The streaming variants below mirror Create/Clone/Start/Stop but pipe limactl's
@@ -286,7 +297,7 @@ func (c *Client) Create(name, overlayPath string) error {
 // CreateStreaming builds and boots a new instance from an overlay/template,
 // streaming the (slow) image download + first boot to out.
 func (c *Client) CreateStreaming(ctx context.Context, name, overlayPath string, out io.Writer) error {
-	return c.runStream(ctx, out, "start", "--name", name, "--tty=false", overlayPath)
+	return c.runStart(ctx, out, true, name, "start", "--name", name, "--tty=false", overlayPath)
 }
 
 // CloneStreaming copies a base image into a new instance, streaming progress.
@@ -296,7 +307,7 @@ func (c *Client) CloneStreaming(ctx context.Context, base, name string, out io.W
 
 // StartStreaming boots a stopped instance, streaming its boot output to out.
 func (c *Client) StartStreaming(ctx context.Context, name string, out io.Writer) error {
-	return c.runStream(ctx, out, "start", name)
+	return c.runStart(ctx, out, true, name, "start", name)
 }
 
 // StopStreaming shuts a running instance down, streaming progress to out.
@@ -432,12 +443,20 @@ func GuestPath(instance, path string) string { return instance + ":" + path }
 // installed and new enough to support `limactl clone`.
 func (c *Client) Preflight() error {
 	ctx := context.Background()
-	if _, err := c.r.Output(ctx, "--version"); err != nil {
+	out, err := c.r.Output(ctx, "--version")
+	if err != nil {
 		if errors.Is(err, exec.ErrNotFound) {
 			return fmt.Errorf("limactl not found — install Lima (https://lima-vm.io/docs/installation/): %w", err)
 		}
 		return fmt.Errorf("limactl --version failed: %w", err)
 	}
+	// Remembered for Advisories, which must answer without I/O. This probe
+	// already runs once per CLI command and once per TUI connect, so a
+	// known-affected Lima is detected without an extra round trip to a remote
+	// host.
+	c.mu.Lock()
+	c.version = parseLimaVersion(string(out))
+	c.mu.Unlock()
 	if _, err := c.r.Output(ctx, "clone", "--help"); err != nil {
 		return fmt.Errorf("your Lima is too old: 'limactl clone' is required — upgrade Lima: https://lima-vm.io/docs/installation/")
 	}

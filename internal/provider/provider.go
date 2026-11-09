@@ -261,6 +261,23 @@ type VMHostMemoryProvider interface {
 	VMHostMemory(ctx context.Context, name string) (int64, error)
 }
 
+// Advisor is the optional capability for a backend that can warn about itself
+// without failing: a known-affected Lima release, for instance (see
+// lima.Client.Advisories). Advisories reports what the last successful Preflight
+// observed and performs NO I/O, so the TUI and the CLI can ask after Preflight
+// without another round trip to a remote host. Nil means nothing to report.
+type Advisor interface {
+	Advisories() []string
+}
+
+// Advisories returns p's advisories, or nil when p does not implement Advisor.
+func Advisories(p Provider) []string {
+	if a, ok := p.(Advisor); ok {
+		return a.Advisories()
+	}
+	return nil
+}
+
 // HostResources is the limactl host's own capacity, used for the board
 // header's denominators AND (DiskTotalBytes) the low-capacity warning feature's
 // free% arithmetic (see Provider.HostResources). A zero field means "unknown"

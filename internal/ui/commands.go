@@ -74,6 +74,10 @@ type (
 		// returning the fleet to one-view-per-controller. See
 		// member.provenanceWarned.
 		provenanceErr error
+		// advisories are the backend's non-fatal warnings (provider.Advisor),
+		// collected only on a refresh that ran Preflight. The handler logs them
+		// once per member; see member.advisoriesWarned.
+		advisories []string
 	}
 	// actionDoneMsg reports a lifecycle action (start/stop/restart/delete). name
 	// is the affected instance, so the model can update the managed registry.
@@ -158,10 +162,15 @@ func refreshCmd(sc registry.Scope, prov provider.Provider, hf lima.HostFiles, pr
 			// An error binding: nothing to list. Surfaced as an errored member.
 			return vmsLoadedMsg{scope: sc, err: errNoProvider}
 		}
+		// Advisories describe what Preflight just observed (for Lima, the
+		// version its --version probe read) and cost no I/O, so they ride on
+		// the connect that already happens rather than adding a round trip.
+		var advisories []string
 		if preflight {
 			if err := prov.Preflight(); err != nil {
 				return vmsLoadedMsg{scope: sc, err: err}
 			}
+			advisories = provider.Advisories(prov)
 		}
 		vms, err := prov.List()
 		if err == nil {
@@ -239,6 +248,7 @@ func refreshCmd(sc registry.Scope, prov provider.Provider, hf lima.HostFiles, pr
 			hostMem: mem, hostDiskFree: disk, hostCPUs: res.CPUs, hostUser: prov.HostUser(),
 			hostMemAvail: memAvail, hostDiskTotal: diskTotal,
 			provenance: provenance, provenanceErr: provenanceErr, updates: updates,
+			advisories: advisories,
 		}
 	}
 }

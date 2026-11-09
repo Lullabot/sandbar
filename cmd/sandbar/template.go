@@ -125,6 +125,7 @@ Flags:
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
+	warnAdvisories(os.Stderr, p)
 
 	reg, loadErr := registry.Load()
 	if reg == nil {

@@ -221,6 +221,7 @@ func resetParsed(fs *flag.FlagSet, o *resetOptions) error {
 	if err := p.Preflight(); err != nil {
 		return err
 	}
+	warnAdvisories(os.Stderr, p)
 
 	// Reconcile against the live listing first, exactly as `sandbar create` does, so
 	// a VM deleted outside sandbar is not still treated as managed (and resettable).

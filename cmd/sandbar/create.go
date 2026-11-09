@@ -208,6 +208,7 @@ Flags:
 	if err := p.Preflight(); err != nil {
 		return err
 	}
+	warnAdvisories(os.Stderr, p)
 
 	// Default the VM user to the provider's host user (the remote host for remote
 	// Lima, this machine for local), falling back to the local user if the host

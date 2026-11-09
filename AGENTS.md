@@ -620,6 +620,21 @@ every bullet, not the constraint itself.
   the user is watching and a screen full of failures about a VM that is coming up
   exactly as intended. If #5236 is fixed upstream, the error string stops
   appearing and the workaround stops firing on its own.
+- **A `limactl start` that dies of Lima 2.3.0's event-log race is waited out,
+  not failed** (`internal/lima/startrecover.go`; upstream fix
+  https://github.com/lima-vm/lima/pull/5742). limactl exits 1 but leaves the
+  host agent booting the VM, so `Client.runStart` waits for `Running` and then
+  for the guest's `/run/lima-boot-done` (or `/var/run/…`). Re-running
+  `limactl start` is not a substitute: on a running instance it returns at
+  once. Keep the detection narrow: a failed start whose output has BOTH
+  `as events.Event` and `unexpected end of JSON input`. Widening it to "any
+  start failure" would turn a real boot failure into a ten-minute wait and
+  then an error about the wrong cause. All four start paths (`Start`,
+  `Create`, and their streaming forms) go through `runStart`, which is what
+  gives remote Lima the recovery too. The Lima 2.3.0 warning
+  (`startRaceVersions`, surfaced via `provider.Advisor`) reuses Preflight's
+  `--version` read and costs no I/O. Remove both once a Lima release that
+  includes that fix is the minimum sandbar supports.
 - **`limactl copy`'s backend is pinned to `scp`, and the pin is load-bearing.**
   Under limactl 2.1.3 the backend decides **where the files land**, not just how
   fast: Lima's rsync backend appends a trailing slash to every path of a

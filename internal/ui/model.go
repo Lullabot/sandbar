@@ -1228,6 +1228,17 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.hostDiskTotal > 0 {
 			mem.host.diskTotal = msg.hostDiskTotal
 		}
+		// Backend advisories arrive with the refresh that ran Preflight, which
+		// succeeded even if the listing below did not. Said once per member.
+		if len(msg.advisories) > 0 && !mem.advisoriesWarned {
+			mem.advisoriesWarned = true
+			for _, a := range msg.advisories {
+				if isRemoteProfile(mem.profile) {
+					a = mem.profile.Name + ": " + a
+				}
+				m.logWarn(a)
+			}
+		}
 		if msg.err != nil {
 			// A list that failed ONLY because another instance is being cloned or
 			// deleted is not a failure — it is lima-vm/lima#5236, and it is the normal

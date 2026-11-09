@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/lullabot/sandbar/internal/profiles"
@@ -141,4 +142,15 @@ func bindingForProfileName(store *profiles.Store, name string) (provider.Provide
 		return nil, registry.Scope{}, profiles.Profile{}, err
 	}
 	return prov, scope, p, nil
+}
+
+// warnAdvisories prints p's non-fatal advisories to w, one "warning:" line
+// each. Call it right after a successful Preflight: that is what the
+// advisories describe (for Lima, the limactl version Preflight already read),
+// so asking costs no extra round trip. Used by the commands that run
+// `limactl start` — create, reset and template snapshot.
+func warnAdvisories(w io.Writer, p provider.Provider) {
+	for _, a := range provider.Advisories(p) {
+		fmt.Fprintln(w, "warning:", a)
+	}
 }

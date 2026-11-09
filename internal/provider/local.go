@@ -246,6 +246,12 @@ func (p *limaProvider) GuestPath(name, path string) string { return lima.GuestPa
 
 func (p *limaProvider) Preflight() error { return p.core.Preflight() }
 
+// Advisories reports Lima-version warnings learned by Preflight (no I/O). The
+// remote provider embeds limaProvider, so it reports the REMOTE host's Lima.
+func (p *limaProvider) Advisories() []string { return p.core.Advisories() }
+
+var _ Advisor = (*limaProvider)(nil)
+
 // ValidateName applies limactl's own instance-name rule. Inherited unchanged by
 // the remote provider: the name is handed to a limactl on the far side of an ssh
 // hop, which parses it exactly as the local one does. See Provider.ValidateName.

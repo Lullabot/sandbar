@@ -141,6 +141,12 @@ type fleetMember struct {
 	// once, and re-armed on the next success so a later regression speaks again.
 	provenanceWarned bool
 
+	// advisoriesWarned latches once this member's backend advisories (a
+	// known-affected Lima version, say) have been logged. Preflight reruns on
+	// every reconnect of an errored member, and its advisories with it; the
+	// latch keeps a flapping remote from repeating the same warning.
+	advisoriesWarned bool
+
 	// healing is the set of VM names in this member with an abandoned-marker
 	// repair IN FLIGHT (see healAbandonedMarkers, model.go). This handler runs on
 	// every refresh while the repair is a host round trip, so without it a single
