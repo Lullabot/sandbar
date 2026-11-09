@@ -35,8 +35,9 @@ env:
   # the latest release, and Lima v2.3.0 (2026-11-06) intermittently aborts
   # `limactl start` with `failed to unmarshal ... as events.Event: unexpected
   # end of JSON input`. It reads its host agent's event stream before a line is
-  # fully written. That failed VM jobs on unrelated PRs. Move this forward once
-  # a Lima release fixes it.
+  # fully written. That failed VM jobs on unrelated PRs. The fix is
+  # https://github.com/lima-vm/lima/pull/5742; move this forward once a Lima
+  # release includes it.
   LIMA_VERSION: v2.2.1
 
 jobs:
