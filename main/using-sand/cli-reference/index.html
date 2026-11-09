@@ -2582,6 +2582,11 @@ tilde path (<code>'~/src/app'</code>), or a home-relative path (<code>src/app</c
 so your workstation's shell does not expand it to your host home directory.
 Run <a href="#sandbar-land-name"><code>sandbar land NAME</code></a> to list cached checkout paths. Paths
 outside the guest home are rejected before the VM is deleted.</p>
+<p>Restored checkouts that already have sandbar-installed
+<a href="../review/#the-assistant-skills">self-review skills</a> get them refreshed to
+match the rebuilt VM's review server. Checkouts without them, and copies your
+repository tracks in Git, are left alone; a failed refresh is a warning, not
+a failed reset.</p>
 <p>Use <code>--preserve-home</code> to keep your files while updating a working VM. The
 home is copied back before the provisioning playbook runs. Sandbar replaces a
 provisioned home file only when it still matches the recorded baseline.
