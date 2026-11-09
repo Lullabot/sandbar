@@ -61,6 +61,7 @@ type Provider struct {
 	GuestPathFunc         func(name, path string) string
 
 	PreflightFunc     func() error
+	AdvisoriesFunc    func() []string
 	ValidateNameFunc  func(name string) error
 	HostResourcesFunc func() provider.HostResources
 	HostUserFunc      func() string
@@ -266,6 +267,14 @@ func (f *Provider) GuestPath(name, path string) string {
 func (f *Provider) Preflight() error {
 	if f.PreflightFunc != nil {
 		return f.PreflightFunc()
+	}
+	return nil
+}
+
+// Advisories implements the optional provider.Advisor; it defaults to none.
+func (f *Provider) Advisories() []string {
+	if f.AdvisoriesFunc != nil {
+		return f.AdvisoriesFunc()
 	}
 	return nil
 }

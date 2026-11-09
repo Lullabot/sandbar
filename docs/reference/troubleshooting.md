@@ -185,6 +185,32 @@ VM being cloned or deleted, it's transient — wait for the clone or delete to
 finish and the listing recovers on its own. `limactl shell`, `start`, and
 `stop` are unaffected; only enumeration (`limactl list`) is subject to this.
 
+## `limactl start` fails with "as events.Event: unexpected end of JSON input"
+
+**Symptom:** with Lima 2.3.0, a create, reset, or start occasionally stops
+with a fatal line like:
+
+```text
+level=fatal msg="failed to unmarshal `{\"time\":\"…\",\"status\":{\"sshLocalPort\":36889,` as events.Event: unexpected end of JSON input"
+```
+
+`sandbar` warns about this when it detects Lima 2.3.0: on stderr for
+`sandbar create`, `reset`, and `template snapshot`, and once in the TUI's
+Messages log.
+
+**Why:** `limactl start` follows the boot by reading Lima's own event log, and
+can read half of an event that is still being written. It then exits with an
+error, although the VM keeps booting. Lima 2.3.0 writes many more events
+during boot, so this happens much more often than before. The upstream fix is
+[lima-vm/lima#5742](https://github.com/lima-vm/lima/pull/5742).
+
+**Fix:** none needed. `sandbar` recognizes this exact failure, shows
+`==> Lima 2.3.0 bug: waiting for boot`, and waits up to 10 minutes for the VM
+to report `Running` and finish booting. Any other `limactl start` failure is
+reported unchanged. If the VM still hasn't booted by then, the error names
+this bug so you can tell it apart from an ordinary boot failure. To avoid it
+entirely, use Lima 2.2.x, or a release that includes the fix once one ships.
+
 ## A build failed and the tile is red
 
 A red tile means the last provision on that VM failed. Its Ansible log is
