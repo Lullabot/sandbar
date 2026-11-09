@@ -378,6 +378,12 @@ so your workstation's shell does not expand it to your host home directory.
 Run [`sandbar land NAME`](#sandbar-land-name) to list cached checkout paths. Paths
 outside the guest home are rejected before the VM is deleted.
 
+Restored checkouts that already have sandbar-installed
+[self-review skills](review.md#the-assistant-skills) get them refreshed to
+match the rebuilt VM's review server. Checkouts without them, and copies your
+repository tracks in Git, are left alone; a failed refresh is a warning, not
+a failed reset.
+
 Use `--preserve-home` to keep your files while updating a working VM. The
 home is copied back before the provisioning playbook runs. Sandbar replaces a
 provisioned home file only when it still matches the recorded baseline.

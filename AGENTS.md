@@ -187,7 +187,8 @@ it is not where prose belongs.
   refusal when a caller provides custom git diff arguments. The resumable-review
   probe is independent and runs regardless. Assistant skills are installed
   before an agent starts: the `project` role calls `self-review-install-skills`
-  for the initial clone. Landing must not install them as a review-start side
+  for the initial clone, and a reset refreshes copies already present in the
+  checkouts it restores. Landing must not install them as a review-start side
   effect. The same command accepts a repo path for checkouts cloned later,
   links the skills into `.claude/skills/` for Claude Code, and also configures
   the user's active global Git excludes file.
@@ -1186,6 +1187,14 @@ shared rules.
 - **Exclude `~/.ssh/authorized_keys` from whole-home preservation**
   (`homeExcludes`). Restoring the old file could remove the key needed to
   connect to the rebuilt VM halfway through its reset.
+- **Refresh restored checkouts' review skills, never install them**
+  (`RefreshReviewSkills`, `internal/provision/reviewskills.go`). A restored
+  checkout keeps the old VM's skills beside the new base's review server, and
+  their XSD can then reject `review.xml`. `RestoreAfterFinalize` reruns the
+  installer, as the guest user with `HOME` set, only where an untracked
+  `.agents/skills/self-review-*` copy exists, using a bounded, non-following
+  search under the restored roots. Paths are argv to a literal script. It is
+  the last step and only warns: the old VM is already gone.
 - **Read the reset form's checkouts from the cached registry**
   (`internal/ui/resetpreserve.go`), without contacting the guest. The VM
   may be stopped, and the form must open immediately. Show the cached age
