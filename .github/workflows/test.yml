@@ -36,8 +36,8 @@ env:
   # `limactl start` with `failed to unmarshal ... as events.Event: unexpected
   # end of JSON input`. It reads its host agent's event stream before a line is
   # fully written. That failed VM jobs on unrelated PRs. The fix is
-  # https://github.com/lima-vm/lima/pull/5742; move this forward once a Lima
-  # release includes it.
+  # https://github.com/lima-vm/lima/pull/5742. Renovate offers newer releases
+  # (renovate.json skips v2.3.0 and asks for review instead of automerging).
   LIMA_VERSION: v2.2.1
 
 jobs:

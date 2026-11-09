@@ -56,6 +56,16 @@
       "depNameTemplate": "node",
       "datasourceTemplate": "node-version",
       "versioningTemplate": "node"
+    },
+    {
+      "customType": "regex",
+      "description": "Track the Lima release the CI VM jobs install (LIMA_VERSION in the test workflow)",
+      "managerFilePatterns": ["/^\\.github/workflows/test\\.yml$/"],
+      "matchStrings": [
+        "LIMA_VERSION:\\s*[\"']?(?<currentValue>v[^\"'\\s]+)"
+      ],
+      "depNameTemplate": "lima-vm/lima",
+      "datasourceTemplate": "github-releases"
     }
   ],
   "packageRules": [
@@ -92,6 +102,12 @@
       "description": "The review tool is a pinned guest install, not a module dependency: a bump changes the base image's tool-set, so it is reviewed rather than automerged",
       "matchPackageNames": ["@self-review/**"],
       "groupName": "self-review",
+      "automerge": false
+    },
+    {
+      "description": "CI's Lima: skip v2.3.0, whose `limactl start` intermittently aborts while reading its event log (fixed by https://github.com/lima-vm/lima/pull/5742). The failure is intermittent, so one green run proves little: review bumps instead of automerging them",
+      "matchDepNames": ["lima-vm/lima"],
+      "allowedVersions": "!/^v?2\\.3\\.0$/",
       "automerge": false
     }
   ]
