@@ -32,7 +32,7 @@ USER_TASKS = {
     "Ensure sandbar's shell launcher directory exists",
     "Load sandbar's shell launchers in every interactive bash",
     "Remove launchers of coding agents this VM did not select",
-    "Retire home copies of sandbar's agent launchers",
+    "Retire home copies of files sandbar now installs outside the home",
     "Check for ~/.bashrc before removing retired launcher lines",
     "Stop ~/.bashrc loading the retired Claude launcher",
     "Stop ~/.bashrc loading the retired Codex launcher",

@@ -24,13 +24,13 @@ class BaseImageUserStateTest(unittest.TestCase):
         for relative in (
             ".local/bin/uv",
             ".local/bin/uvx",
-            ".tmux.conf",
             ".ssh/rc",
             ".config/direnv/direnv.toml",
         ):
             target = skel / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             target.touch()
+        (etc / "tmux.conf").touch()
 
     def check(self):
         return subprocess.run(
@@ -81,6 +81,18 @@ class BaseImageUserStateTest(unittest.TestCase):
         result = self.check()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(".local/bin/uv", result.stderr)
+
+    def test_missing_system_tmux_configuration_is_rejected(self):
+        (self.image_root / "etc/tmux.conf").unlink()
+        result = self.check()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("/etc/tmux.conf", result.stderr)
+
+    def test_skeleton_tmux_configuration_is_rejected(self):
+        (self.image_root / "etc/skel/.tmux.conf").touch()
+        result = self.check()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("skeleton ~/.tmux.conf", result.stderr)
 
     def test_transient_uv_install_prefix_is_rejected(self):
         receipt = self.image_root / "etc/skel/.config/uv/uv-receipt.json"

@@ -579,7 +579,7 @@ func (h *SSHHost) StagePlaybook(ctx context.Context, localDir, stamp string) (st
 // falls back to the configured SSH user, then "" when neither can be determined.
 // A new VM's user must default to THIS, not the laptop's user, or the playbook
 // provisions a different account than the shell lands in — leaving the guest
-// login user without its ~/.tmux.conf, git identity, or secrets.
+// login user without its home defaults, git identity, or secrets.
 func (h *SSHHost) HostUser() string {
 	// Resolved once and cached: the remote login user is constant for the process,
 	// but HostUser is called on every board refresh (listCmd) — an ssh round trip

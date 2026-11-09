@@ -9,7 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// The guest's ~/.tmux.conf carries two settings that decide
+// The guest's /etc/tmux.conf carries two settings that decide
 // whether a copy made inside a VM ever reaches the user's clipboard, and both
 // fail SILENTLY when absent — a selection is made, no error appears anywhere,
 // and nothing lands. Neither is covered by the molecule suite (which converges
@@ -43,15 +43,19 @@ func TestTmuxConfEnablesTheClipboard(t *testing.T) {
 	}
 }
 
-// TestTmuxConfDeployedInEveryPhase guards the `when:` that is NOT on the
-// "Deploy ~/.tmux.conf" task. Its identity-free neighbours in roles/user all
-// carry `when: provision_phase != 'finalize'` — copying that line onto this
-// task is a one-word edit that looks consistent and costs nothing visible,
-// because a VM cloned from a CURRENT base image still comes out right. What
-// breaks is a VM cloned from an OLDER base (up to 30 days, per base_apt_upgrade's
-// self-refresh): it silently keeps whatever ~/.tmux.conf that base was built
-// with. The same reasoning, and the same guard, as roles/base's timezone tasks
-// (molecule/base/converge.yml).
+// TestTmuxConfDeployedInEveryPhase guards the `when:` that is NOT on the task
+// rendering tmux.conf.j2 to /etc/tmux.conf. Its identity-free neighbours in
+// roles/user all carry `when: provision_phase != 'finalize'` — copying that
+// line onto this task is a one-word edit that looks consistent and costs
+// nothing visible, because a VM cloned from a CURRENT base image still comes out
+// right. What breaks is a VM cloned from an OLDER base (up to 30 days, per
+// base_apt_upgrade's self-refresh): it silently keeps whatever tmux config that
+// base was built with. The same reasoning, and the same guard, as roles/base's
+// timezone tasks (molecule/base/converge.yml).
+//
+// The task is found by its template, not its name, so a rename cannot hide it.
+// It must write outside the home: a preserved home brings back whatever file
+// it held, and the safe home writer then keeps a legacy copy forever.
 func TestTmuxConfDeployedInEveryPhase(t *testing.T) {
 	const tasksPath = "roles/user/tasks/main.yml"
 	raw, err := sandbar.PlaybookFS.ReadFile(tasksPath)
@@ -67,7 +71,7 @@ func TestTmuxConfDeployedInEveryPhase(t *testing.T) {
 	var found bool
 	for _, task := range tasks {
 		name, _ := task["name"].(string)
-		if !strings.Contains(name, ".tmux.conf") {
+		if !strings.Contains(fmt.Sprint(task), "tmux.conf.j2") {
 			continue
 		}
 		found = true
@@ -77,15 +81,28 @@ func TestTmuxConfDeployedInEveryPhase(t *testing.T) {
 				" silently, since a stale tmux config is wrong rather than broken. Rendering this template is cheap"+
 				" enough to re-pay per clone; that is why it is ungated.", name, tasksPath, when)
 		}
-		command, ok := task["ansible.builtin.command"].(map[string]any)
-		if !ok || !strings.Contains(fmt.Sprint(command["argv"]), "sandbar-safe-home-file") ||
-			!strings.Contains(fmt.Sprint(command["argv"]), ".tmux.conf") ||
-			!strings.Contains(fmt.Sprint(command["stdin"]), "tmux.conf.j2") {
-			t.Errorf("%q must pass the rendered tmux template to the safe home installer: %v", name, command)
+		args, ok := task["ansible.builtin.template"].(map[string]any)
+		if !ok || args["src"] != "tmux.conf.j2" || args["dest"] != "{{ sand_system_tmux_conf }}" {
+			t.Errorf("%q must render tmux.conf.j2 to sand_system_tmux_conf, outside the home: %v", name, task)
 		}
 	}
 	if !found {
-		t.Fatalf("no task deploying ~/.tmux.conf in %s. Task names:\n%s", tasksPath, taskNames(tasks))
+		t.Fatalf("no task rendering tmux.conf.j2 in %s. Task names:\n%s", tasksPath, taskNames(tasks))
+	}
+
+	const defaultsPath = "roles/user/defaults/main.yml"
+	raw, err = sandbar.PlaybookFS.ReadFile(defaultsPath)
+	if err != nil {
+		t.Fatalf("read %s from the embedded playbook: %v", defaultsPath, err)
+	}
+	var defaults map[string]any
+	if err := yaml.Unmarshal(raw, &defaults); err != nil {
+		t.Fatalf("parse %s: %v", defaultsPath, err)
+	}
+	// tmux's compiled-in system path on Debian, and the path the template's
+	// reload binding names.
+	if got := defaults["sand_system_tmux_conf"]; got != "/etc/tmux.conf" {
+		t.Errorf("sand_system_tmux_conf = %v, want /etc/tmux.conf", got)
 	}
 }
 

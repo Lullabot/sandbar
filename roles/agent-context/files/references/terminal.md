@@ -1,6 +1,6 @@
 # Terminal and tmux
 
-Sandbar ships `~/.tmux.conf` with **Ctrl-A** as the tmux prefix. Press Ctrl-A,
+Sandbar ships `/etc/tmux.conf` with **Ctrl-A** as the tmux prefix. Press Ctrl-A,
 release it, then an arrow key to move between panes. Ctrl-A then `|` splits
 side by side; Ctrl-A then capital `S` splits top and bottom. Both new panes
 start in the current pane's directory. Ctrl-A then `c` makes a new window;
@@ -9,8 +9,10 @@ detached session continues because systemd linger is enabled for the guest
 user. These are shipped defaults; a user may have changed the live server.
 
 Inspect the running tmux server with `tmux show -gv prefix` and
-`tmux list-keys -T prefix`. `tmux source-file ~/.tmux.conf` reloads the file;
-the shipped binding is Ctrl-A then `r`. If Sandbar was launched from a host
+`tmux list-keys -T prefix`. tmux reads `/etc/tmux.conf` and then the user's
+`~/.tmux.conf`, which overrides it; put user changes there.
+`tmux source-file -q /etc/tmux.conf ~/.tmux.conf` reloads both; the shipped
+binding is Ctrl-A then `r`. If Sandbar was launched from a host
 tmux, there may be an outer prefix to pass through before the guest sees
 Ctrl-A. Inspect that outer tmux separately.
 

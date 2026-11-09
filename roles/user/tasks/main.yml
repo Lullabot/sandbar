@@ -73,7 +73,7 @@
     group: root
     mode: "0755"
 
-# Ungated, like ~/.tmux.conf below: a clone of a base built before this block
+# Ungated, like /etc/tmux.conf below: a clone of a base built before this block
 # existed needs it written by finalize. The agent roles drop their launchers in
 # sand_bashrc_d. bash reads /etc/bash.bashrc before ~/.bashrc in every
 # interactive shell (login shells reach it through /etc/profile), and Debian's
@@ -153,11 +153,12 @@
     sand_profile_writable: "{{ sand_shell_ownership.results[1].rc == 0 }}"
   when: provision_phase | default('full') != 'base'
 
-# Earlier releases installed the agent launchers and Codex's boot unit in the
-# home. See sand_retired_home_files (vars/main.yml) for why a preserved copy
-# must go. A copy the user edited is kept, and keeps overriding the system
-# launcher, because ~/.bashrc still sources it.
-- name: Retire home copies of sandbar's agent launchers
+# Earlier releases installed the agent launchers, Codex's boot unit and the
+# tmux configuration in the home. See sand_retired_home_files (vars/main.yml)
+# for why a preserved copy must go. A copy the user edited is kept, and keeps
+# overriding the system one: ~/.bashrc still sources a launcher, and tmux reads
+# ~/.tmux.conf after /etc/tmux.conf.
+- name: Retire home copies of files sandbar now installs outside the home
   ansible.builtin.command:
     argv: "{{ ['python3', '/usr/local/libexec/sandbar-safe-home-file', user_home, item.path, user_name, '0644', '--retire'] + (['--remove'] if item.remove | bool else []) + (item.sha256 | map('regex_replace', '^', '--known-sha256=') | list) }}"
     stdin: "{{ item.stub }}"
@@ -306,17 +307,19 @@
 # small template is cheap enough to re-pay per clone, and paying it in finalize
 # too is what lets a change to tmux.conf.j2 reach a new VM WITHOUT rebuilding
 # the base image it was cloned from — a base can be up to 30 days old before its
-# self-refresh fires, and a stale ~/.tmux.conf is silently wrong rather than
+# self-refresh fires, and a stale tmux config is silently wrong rather than
 # broken (the template's clipboard block is what got noticed missing that way).
-# The writer compares against the bytes previously installed by sandbar. A reset
-# restoring an edited or legacy home keeps that file and offers the new default.
-- name: Deploy ~/.tmux.conf
-  ansible.builtin.command:
-    argv: "{{ ['python3', '/usr/local/libexec/sandbar-safe-home-file', user_home, '.tmux.conf', user_name, '0644'] + sand_home_file_flags }}"
-    stdin: "{{ lookup('ansible.builtin.template', 'tmux.conf.j2') }}"
-    stdin_add_newline: false
-  register: sand_tmux_install
-  changed_when: sand_tmux_install.stdout is search('^changed:')
+# It lives outside the home for the reason the launchers do (sand_bashrc_d in
+# site.yml): a reset rebuilds the root filesystem, so every clone and every
+# reset gets the current copy with no baseline to consult. tmux reads
+# /etc/tmux.conf first and then ~/.tmux.conf, so a user's own file still wins.
+- name: Deploy sandbar's tmux configuration
+  ansible.builtin.template:
+    src: tmux.conf.j2
+    dest: "{{ sand_system_tmux_conf }}"
+    owner: root
+    group: root
+    mode: "0644"
 
 - name: Deploy ~/.gitconfig
   ansible.builtin.command:

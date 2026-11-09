@@ -919,8 +919,8 @@ the network.
 other way — guest → host, a selection the user makes inside the VM's tmux
 reaching their own clipboard over OSC 52 — is a separate, deliberate feature
 (`internal/guestsh.terminalSetupCmds` plus `set -s set-clipboard on` in
-`roles/user/templates/tmux.conf.j2`), and enabling it does not weaken anything
-above. The password-leak surface is a host clipboard the guest can read at
+`roles/user/templates/tmux.conf.j2`, installed as `/etc/tmux.conf`), and
+enabling it does not weaken anything above. The password-leak surface is a host clipboard the guest can read at
 will; a copy the user performs inside the guest is neither.
 
 The same attach prefix applies Claude Code's passthrough and extended-key
@@ -1057,7 +1057,7 @@ comment at `roles/agent-clipboard/tasks/main.yml`.
   when the guest reports `/var/run/reboot-required`, and `Reset` warns instead
   of silently destroying a live tmux session before bouncing one.
 
-- **`roles/user`'s `~/.tmux.conf` deploy is deliberately UNGATED**, unlike its
+- **`roles/user`'s `/etc/tmux.conf` deploy is deliberately UNGATED**, unlike its
   identity-free neighbours that all carry `when: provision_phase != 'finalize'`.
   Adding that gate looks like a consistency fix and passes every manual test,
   because a VM cloned from a CURRENT base still comes out right. What it breaks
@@ -1066,21 +1066,27 @@ comment at `roles/agent-clipboard/tasks/main.yml`.
   config is wrong rather than broken — no error, just a dead clipboard or a
   missing binding. Re-rendering one small template per clone is the cheaper
   side of that trade. `TestTmuxConfDeployedInEveryPhase` guards it, the way
-  `molecule/base` guards the same property for the timezone tasks.
+  `molecule/base` guards the same property for the timezone tasks. The file
+  lives outside the home for the reason the next bullet gives; tmux reads it
+  before `~/.tmux.conf`, so a user's own file still overrides it.
 
-- **Sandbar's own launchers and user units live outside the home.** The
-  `claude`/`codex` shell launchers go in `sand_bashrc_d`
-  (`/usr/local/share/sandbar/bashrc.d`, loaded from `/etc/bash.bashrc`) and
-  Codex's boot unit in `/etc/systemd/user`. A reset preserves the home but
+- **Sandbar's own launchers, user units and tmux config live outside the
+  home.** The `claude`/`codex` shell launchers go in `sand_bashrc_d`
+  (`/usr/local/share/sandbar/bashrc.d`, loaded from `/etc/bash.bashrc`),
+  Codex's boot unit in `/etc/systemd/user`, and the tmux config in
+  `/etc/tmux.conf` (`sand_system_tmux_conf`). A reset preserves the home but
   never the root filesystem, so these need no baseline. Inside the home they
   were judged by the safe home writer, and a home from before baselines
-  existed kept the old launcher on every reset, forever. Keep code there; keep
-  the user's state (onboarding markers, settings, the unit's enable link) in
-  the home. Earlier releases' home copies are retired by the `user` role
-  against `sand_retired_home_files` (`roles/user/vars/main.yml`). That hash list is
-  **frozen**: these files never reach a home again, so editing a launcher
-  must not add an entry. Do not move them back into the home, where
-  `~/.bashrc` would source them after the system copy and win.
+  existed kept the old copy on every reset, forever. Keep code and sandbar's
+  defaults there; keep the user's state (onboarding markers, settings, the
+  unit's enable link) in the home. Earlier releases' home copies are retired
+  by the `user` role against `sand_retired_home_files`
+  (`roles/user/vars/main.yml`). That hash list is **frozen**: these files
+  never reach a home again, so editing a launcher or `tmux.conf.j2` must not
+  add an entry; only moving another file out of the home adds its history.
+  Do not move them back into the home, where `~/.bashrc` would source a
+  launcher after the system copy and tmux would read `~/.tmux.conf` after
+  `/etc/tmux.conf`, and the stale copy would win.
 
 - **Measure reset transfers on the host; show no backup percentage**
   (`internal/provision/stageprogress.go`). Count bytes in the archive being

@@ -74,7 +74,7 @@ func (p *remoteLimaProvider) GuestUser(v vm.VM) string { return lima.GuestUserVi
 // HostUser returns the REMOTE host's login user (over ssh) — the user Lima
 // creates the guest account for and that `limactl shell` logs into, so a new VM's
 // user defaults to it and the playbook provisions the account the shell actually
-// lands in (git identity, ~/.tmux.conf, secrets). Defaulting to the laptop's user
+// lands in (git identity, home defaults, secrets). Defaulting to the laptop's user
 // instead left the guest login user unprovisioned. See Provider.HostUser.
 func (p *remoteLimaProvider) HostUser() string { return p.host.HostUser() }
 

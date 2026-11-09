@@ -191,11 +191,11 @@ type Provider interface {
 	// HostUser is the login user of the host limactl runs on — the user Lima
 	// creates a matching guest account for, and therefore the account `limactl
 	// shell` logs into. A new VM's user must DEFAULT to this so the playbook
-	// provisions (git identity, ~/.tmux.conf, secrets) the same user the shell
+	// provisions (git identity, home defaults, secrets) the same user the shell
 	// lands in. For local Lima it is this machine's user; a remote provider
 	// returns the REMOTE host's user — NOT the laptop's, which would leave the
-	// guest login user unprovisioned (its ~/.tmux.conf missing, so tmux falls back
-	// to its default prefix). "" when it cannot be determined, so the caller falls
+	// guest login user unprovisioned (no git identity or secrets, and none of the
+	// home defaults). "" when it cannot be determined, so the caller falls
 	// back to the local default.
 	HostUser() string
 

@@ -26,7 +26,7 @@
 //
 // None of this can run against the ansible-free minimal overlay the other e2e
 // tests in this package use (secretsE2EOverlay / e2eMinimalOverlay): tmux and
-// its shipped ~/.tmux.conf come from the base-phase Ansible run
+// its shipped /etc/tmux.conf come from the base-phase Ansible run
 // (roles/base/defaults/main.yml, roles/user/templates/tmux.conf.j2), which
 // that overlay deliberately skips to boot fast. These tests instead reuse
 // ensureSharedBase's REAL, fully-provisioned shared base image (built once,
@@ -145,7 +145,7 @@ func (h *e2eHostTmux) waitForAttach(session string, timeout time.Duration) {
 
 // e2eCloneAndStart clones name off the shared e2e base and boots it, with no
 // per-clone Ansible finalize — the shared base's own build already carries
-// the installed tmux binary and the deployed ~/.tmux.conf on its disk, and
+// the installed tmux binary and the deployed /etc/tmux.conf on its disk, and
 // that is all these tests need. Far cheaper than a full CreateVM finalize
 // pass, which these tests have no use for.
 //
