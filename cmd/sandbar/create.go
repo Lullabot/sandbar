@@ -45,11 +45,15 @@ type headlessProvisioner interface {
 // every other entrypoint uses without disturbing that seam's existing tests.
 type providerProvisioner struct{ p provider.Provider }
 
+// Both hold the workstation awake for the build, as the TUI's create does (see
+// manage.StayAwake).
 func (a providerProvisioner) CreateVMWithOptions(ctx context.Context, cfg vm.CreateConfig, opts provision.CreateOptions, out io.Writer) error {
+	defer manage.StayAwake("Creating " + cfg.Name)()
 	return a.p.Create(ctx, cfg, opts, out)
 }
 
 func (a providerProvisioner) RecreateWithOptions(ctx context.Context, cfg vm.CreateConfig, opts provision.CreateOptions, out io.Writer) error {
+	defer manage.StayAwake("Recreating " + cfg.Name)()
 	return a.p.Recreate(ctx, cfg, opts, out)
 }
 
