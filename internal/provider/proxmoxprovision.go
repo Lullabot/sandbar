@@ -978,7 +978,7 @@ func (p *proxmoxProvider) resetInstance(ctx context.Context, cfg vm.CreateConfig
 	if plan.Project.RestoresCheckout {
 		finCfg.CloneURL = ""
 	}
-	if err := p.runPlaybookPhase(ctx, cfg.Name, finCfg, "finalize", cfg.EffectiveHostname(), out, provision.PreservationVars{FreshClone: opts.TemplateSource == "", Home: opts.PreserveHome, Agents: opts.PreserveAgents, OnSetupRevision: opts.OnSetupRevision}); err != nil {
+	if err := p.runPlaybookPhase(ctx, cfg.Name, finCfg, "finalize", cfg.EffectiveHostname(), out, provision.PreservationVars{FreshClone: opts.TemplateSource == "", Home: opts.PreserveHome || plan.WholeHome, Agents: opts.PreserveAgents || plan.Agents, OnSetupRevision: opts.OnSetupRevision}); err != nil {
 		return stage.Fail(err)
 	}
 

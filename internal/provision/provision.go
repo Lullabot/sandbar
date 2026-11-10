@@ -1397,7 +1397,11 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 	if plan.Project.RestoresCheckout {
 		finCfg.CloneURL = "" // omit project_clone_url so the role skips its clone
 	}
-	if err := p.runProvision(ctx, cfg.Name, "finalize", cfg.EffectiveHostname(), finCfg, false, out, PreservationVars{FreshClone: opts.TemplateSource == "", Home: opts.PreserveHome, Agents: opts.PreserveAgents, OnSetupRevision: opts.OnSetupRevision}); err != nil {
+	// What was restored, not only what was asked for, tells finalize a home or
+	// agent state came back: a resume (RestoreFrom) carries no preserve options —
+	// the backup's plan says what is in it — and without the plan here its
+	// finalize treated a restored home as a fresh one.
+	if err := p.runProvision(ctx, cfg.Name, "finalize", cfg.EffectiveHostname(), finCfg, false, out, PreservationVars{FreshClone: opts.TemplateSource == "", Home: opts.PreserveHome || plan.WholeHome, Agents: opts.PreserveAgents || plan.Agents, OnSetupRevision: opts.OnSetupRevision}); err != nil {
 		return stage.Fail(err)
 	}
 
