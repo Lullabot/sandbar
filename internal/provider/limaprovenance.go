@@ -126,8 +126,12 @@ func (p *limaProvider) MarkProgress(ctx context.Context, name string, progress P
 	progress.Provisioning = true
 	progress.SchemaVersion = MarkerSchemaVersion
 	progress.BaseRevision, progress.SetupRevision = "", ""
+	progress.RebuildID = ""
 	if ok {
 		progress.BaseRevision = stored.BaseRevision
+		// A progress update must not drop the token tying a reset's replacement
+		// to its backup; see Provenance.RebuildID.
+		progress.RebuildID = stored.RebuildID
 	}
 	return p.markManagedUnlocked(ctx, name, progress)
 }

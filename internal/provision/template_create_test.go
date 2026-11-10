@@ -103,7 +103,7 @@ func TestCreateVMWithOptions_TemplateSource_MissingTemplateFails(t *testing.T) {
 // base machinery exactly like the create path.
 func TestReset_TemplateProvenance_ClonesFromTemplateInstance(t *testing.T) {
 	const tmplInstance = "sandbar-tmpl-golden"
-	f := &fakeRunner{status: map[string][]byte{tmplInstance: templateListJSON(tmplInstance, "Stopped")}}
+	f := &fakeRunner{status: map[string][]byte{tmplInstance: templateListJSON(tmplInstance, "Stopped"), "claude": []byte("Stopped\n")}}
 	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
 
 	cfg := testConfig()

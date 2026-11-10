@@ -944,6 +944,10 @@ func (p *proxmoxProvider) resetInstance(ctx context.Context, cfg vm.CreateConfig
 	if err != nil {
 		return stage.Fail(err)
 	}
+	// Marked in flight now, with the token a resume uses to recognise this VM as
+	// the one it may replace — shared with the Lima reset (see
+	// provision.MarkRebuildCloned).
+	provision.MarkRebuildCloned(ctx, stage, opts, cfg.Name, out)
 
 	// 3. Bring the clone up to the point just before finalize, cleaning up the
 	// partial VM on any failure here (as provisionClone does for a plain create).

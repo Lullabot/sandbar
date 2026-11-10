@@ -1800,6 +1800,9 @@ func (p *proxmoxProvider) Recreate(ctx context.Context, cfg vm.CreateConfig, opt
 func (p *proxmoxProvider) Reset(ctx context.Context, cfg vm.CreateConfig, opts provision.ResetOptions, out io.Writer) error {
 	var rev revisionCapture
 	rev.wrap(&opts.OnSourceRevision, &opts.OnSetupRevision)
+	if opts.OnCloned == nil {
+		opts.OnCloned = resetInFlightMarker(p, cfg, &rev)
+	}
 	if err := p.resetInstance(ctx, cfg, opts, out); err != nil {
 		return err
 	}

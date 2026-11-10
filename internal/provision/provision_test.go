@@ -1410,7 +1410,7 @@ func findCall(t *testing.T, calls [][]string, from int, what string, match func(
 // configure -> start -> finalize -> stop -> start, and the finalize vars keep
 // project_clone_url (the role re-clones the repo).
 func TestReset_NoPreserve(t *testing.T) {
-	f := &fakeRunner{status: map[string][]byte{"sandbar-base": []byte("Stopped\n")}}
+	f := &fakeRunner{status: map[string][]byte{"sandbar-base": []byte("Stopped\n"), "claude": []byte("Stopped\n")}}
 	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
 
 	cfg := testConfig()
@@ -1422,6 +1422,7 @@ func TestReset_NoPreserve(t *testing.T) {
 
 	want := [][]string{
 		{"list", "sandbar-base", "--format", "{{.Status}}"}, // pre-check: base is usable BEFORE the VM is touched
+		{"list", "claude", "--format", "{{.Status}}"},       // the VM still exists, so it is deleted
 		{"delete", "claude", "-f"},                          // destroy
 		{"list", "sandbar-base", "--format", "{{.Status}}"}, // ensureBaseStopped (no-op on the base just checked)
 		{"clone", "sandbar-base", "claude"},                 // re-clone
@@ -1516,7 +1517,7 @@ func TestReset_WarnsButStillBouncesOverLiveTmuxSession(t *testing.T) {
 // the restored tree), restores the project AFTER finalize, re-approves its .env
 // via direnv, then bounces. Assertions focus on ordering and the clone-skip.
 func TestReset_BothPreserve(t *testing.T) {
-	f := &fakeRunner{status: map[string][]byte{"sandbar-base": []byte("Stopped\n")}}
+	f := &fakeRunner{status: map[string][]byte{"sandbar-base": []byte("Stopped\n"), "claude": []byte("Stopped\n")}}
 	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
 
 	cfg := testConfig()

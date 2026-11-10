@@ -215,11 +215,30 @@ func (g *StageGuard) Fail(err error) error {
 		removeStageDir(g.dir)
 		return err
 	}
-	if g.name != "" {
-		return fmt.Errorf("reset failed after staging; your data is preserved at %s: %w\n\nTo finish this reset once the cause is fixed: sandbar reset %s --from-backup %s", g.dir, err, g.name, g.dir)
-	}
-	return fmt.Errorf("reset failed after staging; your data is preserved at %s: %w", g.dir, err)
+	return &StagedResetError{Dir: g.dir, Name: g.name, Err: err}
 }
+
+// StagedResetError is a reset that failed after its guest was deleted, leaving
+// the staged archives in Dir as the only copy of what the guest held. It is a
+// type rather than a formatted string so a caller can act on it — manage.Reset
+// resumes from Dir itself when the failure was only a dropped connection —
+// instead of parsing the path back out of a message.
+type StagedResetError struct {
+	Dir string
+	// Name is the VM the backup belongs to, known once a manifest was written
+	// (or read back by a resume). It only feeds the recovery hint.
+	Name string
+	Err  error
+}
+
+func (e *StagedResetError) Error() string {
+	if e.Name != "" {
+		return fmt.Sprintf("reset failed after staging; your data is preserved at %s: %v\n\nTo finish this reset once the cause is fixed: sandbar reset %s --from-backup %s", e.Dir, e.Err, e.Name, e.Dir)
+	}
+	return fmt.Sprintf("reset failed after staging; your data is preserved at %s: %v", e.Dir, e.Err)
+}
+
+func (e *StagedResetError) Unwrap() error { return e.Err }
 
 // Done drops the staging directory after a fully successful reset.
 func (g *StageGuard) Done() {

@@ -84,3 +84,21 @@ func (c *revisionCapture) wrap(onSource, onSetup *func(string)) {
 		}
 	}
 }
+
+// resetInFlightMarker is the ResetOptions.OnCloned hook both backends' Reset
+// install: the moment the replacement is cloned it gets an in-flight marker,
+// as a create's clone does, carrying the RebuildID that ties it to the
+// backup (see Provenance.RebuildID). The marker's base revision is the one
+// the clone actually came from, captured by rev during the clone.
+//
+// Without it a reset's replacement had no marker at all while it built. If the
+// reset then failed, the registry still listed the VM as managed, so the next
+// sandbar command's one-time adoption stamped the half-built VM READY.
+func resetInFlightMarker(prov Provenancer, cfg vm.CreateConfig, rev *revisionCapture) func(ctx context.Context, rebuildID string) error {
+	return func(ctx context.Context, rebuildID string) error {
+		pv := NewProvenance(cfg, true)
+		pv.BaseRevision = rev.source
+		pv.RebuildID = rebuildID
+		return prov.MarkManaged(ctx, cfg.Name, pv)
+	}
+}

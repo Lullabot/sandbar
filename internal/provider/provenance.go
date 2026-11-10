@@ -53,7 +53,10 @@ var ErrNoInstance = errors.New("instance does not exist")
 // as an empty bar — exactly what an observer showed for a v2 marker anyway.
 // v4 added independent base/setup revisions. Older markers leave both empty,
 // which update checks report as unknown rather than inventing history.
-const MarkerSchemaVersion = 4
+// v5 added RebuildID, the token tying a reset's half-built replacement to the
+// backup it was being restored from. Older markers have none, so no backup
+// can claim them — the safe direction.
+const MarkerSchemaVersion = 5
 
 // Provenance is the marker payload a provider attaches to an instance it
 // created, mirroring the provenance-relevant subset of registry.Entry (Base,
@@ -103,6 +106,15 @@ type Provenance struct {
 	// mean unknown, including all markers written before schema v4.
 	BaseRevision  string `json:"base_revision,omitempty"`
 	SetupRevision string `json:"setup_revision,omitempty"`
+	// RebuildID is set only on the replacement a reset clones, and only when
+	// that reset staged a backup: the same random token is written beside the
+	// backup (provision.MarkRebuildCloned). It is how `sandbar reset
+	// --from-backup`, and a reset retrying itself, recognise a half-built VM
+	// left by THAT reset as theirs to delete rather than something a person
+	// made under the same name. It is carried across progress republishes and
+	// the board's abandoned-build healing, which is why it is a field of its own
+	// rather than a timestamp either of those rewrites.
+	RebuildID string `json:"rebuild_id,omitempty"`
 }
 
 // BuildProgress is a coarse position within an in-flight build: which role is
