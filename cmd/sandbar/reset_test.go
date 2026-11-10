@@ -435,7 +435,7 @@ func TestResumeResetUsesTheBackupsRecordedConfig(t *testing.T) {
 	dir := backupDir(t, m, "home.tar")
 	o, explicit := resumeFlags(dir)
 
-	cfg, opts, err := resumeReset(registry.NewEmpty(), "web", registry.LocalScope, o, explicit, "ada", nil)
+	cfg, opts, _, err := resumeReset(registry.NewEmpty(), "web", registry.LocalScope, o, explicit, "ada", nil, false)
 	if err != nil {
 		t.Fatalf("resumeReset: %v", err)
 	}
@@ -453,7 +453,7 @@ func TestResumeResetFlagsOverrideTheRecord(t *testing.T) {
 	o, explicit := resumeFlags(dir, "--memory", "2GiB")
 	o.values.memory = "2GiB"
 
-	cfg, _, err := resumeReset(registry.NewEmpty(), "web", registry.LocalScope, o, explicit, "ada", nil)
+	cfg, _, _, err := resumeReset(registry.NewEmpty(), "web", registry.LocalScope, o, explicit, "ada", nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -468,7 +468,7 @@ func TestResumeResetLegacyBackupFallsBackToTheIndex(t *testing.T) {
 	dir := backupDir(t, nil, "home.tar")
 	o, explicit := resumeFlags(dir)
 
-	cfg, opts, err := resumeReset(seededRegistry(t), "web", registry.LocalScope, o, explicit, "ada", nil)
+	cfg, opts, _, err := resumeReset(seededRegistry(t), "web", registry.LocalScope, o, explicit, "ada", nil, false)
 	if err != nil {
 		t.Fatalf("resumeReset: %v", err)
 	}
@@ -501,7 +501,7 @@ func TestResumeResetRefusals(t *testing.T) {
 			if tc.mod != nil {
 				tc.mod(o)
 			}
-			_, _, err := resumeReset(registry.NewEmpty(), tc.vmN, registry.LocalScope, o, explicit, "ada", tc.live)
+			_, _, _, err := resumeReset(registry.NewEmpty(), tc.vmN, registry.LocalScope, o, explicit, "ada", tc.live, false)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("err = %v, want it to contain %q", err, tc.want)
 			}
@@ -511,7 +511,7 @@ func TestResumeResetRefusals(t *testing.T) {
 
 func TestResumeResetRejectsAnUnreadableBackup(t *testing.T) {
 	o, explicit := resumeFlags(filepath.Join(t.TempDir(), "gone"))
-	if _, _, err := resumeReset(registry.NewEmpty(), "web", registry.LocalScope, o, explicit, "ada", nil); err == nil {
+	if _, _, _, err := resumeReset(registry.NewEmpty(), "web", registry.LocalScope, o, explicit, "ada", nil, false); err == nil {
 		t.Fatal("a missing backup directory must be refused")
 	}
 }

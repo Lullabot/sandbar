@@ -160,10 +160,10 @@ your backup. Finish the job with:
 
   sandbar reset NAME --from-backup DIR
 
-That rebuilds NAME with the settings the failed reset recorded, restores the
-backup in the usual order, and removes DIR once everything is back. The VM must
-not exist (the failed reset already deleted it). Pass --profile if NAME's
-connection profile is not the only enabled one.
+That rebuilds NAME on the connection profile and with the settings the failed
+reset recorded, restores the backup in the usual order, and removes DIR once
+everything is back. The half-built VM a failed reset leaves behind is replaced;
+any other VM of that name is refused.
 
 Examples:
   sandbar reset web                                  # clean rebuild, same settings
@@ -259,9 +259,23 @@ func resetParsed(fs *flag.FlagSet, o *resetOptions) error {
 		// Finishing a failed reset: the VM is gone by definition, so the
 		// managed-VM gate below cannot apply (it would refuse every such VM) and
 		// the recorded config has to come from the backup's own manifest.
-		cfg, opts, err = resumeReset(reg, name, scope, o, explicit, p.HostUser(), live)
+		//
+		// The one VM that may stand under the name is the replacement the failed
+		// reset was building. It is removed — but only after every other check
+		// has passed, and only when its marker carries this backup's RebuildID.
+		own, oerr := manage.OwnRebuild(ctx, provenancer, o.fromBackup, name)
+		if oerr != nil {
+			fmt.Fprintln(os.Stderr, "warning:", oerr)
+		}
+		var replace bool
+		cfg, opts, replace, err = resumeReset(reg, name, scope, o, explicit, p.HostUser(), live, own)
 		if err != nil {
 			return fmt.Errorf("sandbar reset: %w", err)
+		}
+		if replace {
+			if err := manage.RemoveOwnRebuild(p, name, os.Stdout); err != nil {
+				return fmt.Errorf("sandbar reset: %w", err)
+			}
 		}
 	} else {
 		base, ok := manage.RecreateBase(reg, name, scope, provenancer)
@@ -314,23 +328,32 @@ func resumeProfile(store *profiles.Store, o *resetOptions) (profiles.Profile, er
 // resumeReset prepares `sandbar reset NAME --from-backup DIR`: it reads the
 // backup's manifest, checks the request makes sense, and returns the config and
 // options to hand to Reset. Everything it refuses, it refuses before any VM is
-// built.
-func resumeReset(reg *registry.Registry, name string, scope registry.Scope, o *resetOptions, explicit map[string]bool, hostUser string, live []vm.VM) (vm.CreateConfig, provision.ResetOptions, error) {
+// built — or deleted.
+//
+// ownRebuild says whether the instance now called name, if there is one, is
+// the half-built replacement this backup's reset created (manage.OwnRebuild).
+// replace reports that such an instance is in the way and must be removed
+// before the rebuild; any other live instance under the name is refused.
+func resumeReset(reg *registry.Registry, name string, scope registry.Scope, o *resetOptions, explicit map[string]bool, hostUser string, live []vm.VM, ownRebuild bool) (cfg vm.CreateConfig, opts provision.ResetOptions, replace bool, err error) {
 	var zero vm.CreateConfig
 	if o.preserveAgents || o.preserveProject || o.preserveHome || len(o.preservePaths) > 0 {
-		return zero, provision.ResetOptions{}, errors.New("--from-backup restores what the backup recorded; drop the --preserve flags")
+		return zero, provision.ResetOptions{}, false, errors.New("--from-backup restores what the backup recorded; drop the --preserve flags")
 	}
 	for _, v := range live {
-		if v.Name == name {
-			return zero, provision.ResetOptions{}, fmt.Errorf("%q already exists; delete it first (--from-backup restores into a freshly built VM and never overwrites a live one)", name)
+		if v.Name != name {
+			continue
 		}
+		if !ownRebuild {
+			return zero, provision.ResetOptions{}, false, fmt.Errorf("%q already exists, and nothing shows it is the half-built VM the failed reset left behind; delete it first if it is (--from-backup restores into a freshly built VM and never overwrites one it cannot prove is disposable)", name)
+		}
+		replace = true
 	}
 	_, m, legacy, err := provision.ResumeStage(o.fromBackup)
 	if err != nil {
-		return zero, provision.ResetOptions{}, err
+		return zero, provision.ResetOptions{}, false, err
 	}
 	if m.Config.Name != "" && m.Config.Name != name {
-		return zero, provision.ResetOptions{}, fmt.Errorf("%s is the backup of %q, not %q", o.fromBackup, m.Config.Name, name)
+		return zero, provision.ResetOptions{}, false, fmt.Errorf("%s is the backup of %q, not %q", o.fromBackup, m.Config.Name, name)
 	}
 
 	// The index may still remember the VM (a failure before the next reconcile),
@@ -344,14 +367,14 @@ func resumeReset(reg *registry.Registry, name string, scope registry.Scope, o *r
 	if base == "" {
 		base = vm.DefaultCreateConfig().BaseName
 	}
-	cfg, err := resetConfigFromRecord(rec, found, name, base, explicit, o.values, hostUser)
+	cfg, err = resetConfigFromRecord(rec, found, name, base, explicit, o.values, hostUser)
 	if err != nil {
-		return zero, provision.ResetOptions{}, err
+		return zero, provision.ResetOptions{}, false, err
 	}
 	if legacy {
 		fmt.Fprintf(os.Stderr, "sandbar: %s predates backup manifests; rebuilding %s from its recorded settings (or defaults) and restoring the archive.\n", o.fromBackup, name)
 	}
-	return cfg, provision.ResetOptions{RestoreFrom: o.fromBackup, TemplateSource: m.TemplateSource}, nil
+	return cfg, provision.ResetOptions{RestoreFrom: o.fromBackup, TemplateSource: m.TemplateSource}, replace, nil
 }
 
 // resetFlagValues is the raw flag surface resetConfigFor applies over a VM's
