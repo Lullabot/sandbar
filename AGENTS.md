@@ -1193,14 +1193,20 @@ shared rules.
   prints the resume command: keep it accurate when the flag changes. A
   resume's finalize derives `sand_preserved_home`/`_agents` from the restored
   plan as well as the options, because a resume has no preserve options of
-  its own.
+  its own. `reset.json` also records the connection profile
+  (`ResetOptions.Profile`), because nothing else can name it once the VM is
+  gone. Without that, a user with several enabled profiles got "no such VM".
+  Both CLI and TUI resets must set it.
 - **A reset's replacement carries a `rebuild_id` tied to its backup.**
   Both resets call `provision.MarkRebuildCloned` the moment the replacement is
   cloned. It writes an in-flight marker carrying a fresh `rebuild_id` through
   `ResetOptions.OnCloned`, which `resetInFlightMarker` installs. Only after
   that write succeeds does it write `rebuild.json` beside the backup. Before
   this change a reset's clone carried no marker at all, so after a failure
-  `AdoptOnce` stamped the half-built VM *ready*. The Lima reset removes a
+  `AdoptOnce` stamped the half-built VM *ready*. A resume may delete exactly
+  one VM, its own half-built replacement: `manage.OwnRebuild` compares the
+  two tokens, and a missing record, a missing marker or a different token
+  means "refuse", never "delete". The Lima reset removes a
   replacement whose clone or first boot failed, as `createVM` does. That is
   safe only because the name was proven free first: deleted, or
   `lima.Client.Exists` reported a definite absence. Do not weaken either check
