@@ -12,6 +12,7 @@ import (
 	"syscall"
 
 	"github.com/lullabot/sandbar/internal/manage"
+	"github.com/lullabot/sandbar/internal/profiles"
 	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/registry"
@@ -207,7 +208,14 @@ func resetParsed(fs *flag.FlagSet, o *resetOptions) error {
 	// it (marker first, then the registry, then a live listing) rather than
 	// create's "the profile you last used": a reset acts on a VM that already
 	// exists, so the VM decides, not a default.
-	target, err := resolveVMProfile(store, reg, name, o.profile)
+	//
+	// A resume is the exception: its VM is gone, so nothing on any profile can
+	// say where it lived. The backup can — the failed reset recorded its profile
+	// in the manifest — and an explicit --profile still wins over it.
+	target, err := resumeProfile(store, o)
+	if err == nil && target.ID == "" {
+		target, err = resolveVMProfile(store, reg, name, o.profile)
+	}
 	if err != nil {
 		if o.fromBackup != "" {
 			return fmt.Errorf("sandbar reset: %w (with --from-backup the VM no longer exists, so name its connection profile with --profile)", err)
@@ -266,6 +274,7 @@ func resetParsed(fs *flag.FlagSet, o *resetOptions) error {
 		}
 	}
 
+	opts.Profile = provision.ProfileRef{ID: target.ID, Name: target.Name}
 	if err := doReset(ctx, reg, p, cfg, scope, opts, os.Stdout, provenancer); err != nil {
 		return err
 	}
@@ -274,6 +283,32 @@ func resetParsed(fs *flag.FlagSet, o *resetOptions) error {
 	// the old one had until someone started it from the TUI. See settleSecrets.
 	settleSecrets(ctx, p, scope, cfg, os.Stdout)
 	return nil
+}
+
+// resumeProfile is the connection profile a `--from-backup` resume rebuilds on
+// when the user did not name one: the profile the backup's manifest recorded.
+// It returns the zero Profile — "resolve it the usual way" — for anything that
+// is not a resume, when --profile was passed, or for a backup that recorded no
+// profile (one made before manifests carried it). A recorded profile that no
+// longer exists, or is disabled, is an error naming it, since rebuilding the
+// VM on some other profile would not be "give me this VM back".
+func resumeProfile(store *profiles.Store, o *resetOptions) (profiles.Profile, error) {
+	if o.fromBackup == "" || o.profile != "" {
+		return profiles.Profile{}, nil
+	}
+	m, ok, err := provision.ReadResetManifest(o.fromBackup)
+	if err != nil || !ok || m.ProfileID == "" {
+		// An unreadable manifest is reported, with its path, by resumeReset.
+		return profiles.Profile{}, nil
+	}
+	p, found := store.Get(m.ProfileID)
+	if !found {
+		return profiles.Profile{}, fmt.Errorf("the backup in %s was taken on connection profile %q, which no longer exists; pass --profile to restore it somewhere else", o.fromBackup, m.ProfileName)
+	}
+	if !p.Enabled {
+		return profiles.Profile{}, fmt.Errorf("the backup in %s was taken on connection profile %q, which is disabled; enable it, or pass --profile to restore it somewhere else", o.fromBackup, p.Name)
+	}
+	return p, nil
 }
 
 // resumeReset prepares `sandbar reset NAME --from-backup DIR`: it reads the
