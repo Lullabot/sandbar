@@ -1262,19 +1262,6 @@ func (p *proxmoxProvider) guestArgv(ctx context.Context, name string, tty bool, 
 	return h.SSHArgvCtx(ctx, tty, argv...), h, nil
 }
 
-// sshExitTransport is the status ssh exits with when the CONNECTION failed
-// rather than the remote command: it could not be established, it was torn down
-// mid-session, or the remote command was killed by a signal (OpenSSH maps the
-// protocol's exit-signal onto 255, and prints nothing about it at the default
-// log level).
-//
-// It is technically ambiguous — a remote command that itself exits 255 is
-// reported identically, since the protocol has one field for both. In this
-// backend it is not ambiguous in practice: every remote command sand runs is a
-// `set -e` bash script wrapping ansible-playbook, whose own failure statuses are
-// 2 (failed task), 4 (unreachable) and 250 (unexpected), never 255.
-const sshExitTransport = 255
-
 // transportError annotates ssh's own 255 so a transport failure stops reading as
 // a guest failure.
 //
@@ -1285,8 +1272,7 @@ const sshExitTransport = 255
 // failed, and names the two env vars that make the NEXT occurrence
 // self-diagnosing instead of leaving the same two-line trace.
 func transportError(err error, h *sshx.Conn) error {
-	var ee *exec.ExitError
-	if err == nil || !errors.As(err, &ee) || ee.ExitCode() != sshExitTransport {
+	if !sshx.IsTransportFailure(err) {
 		return err
 	}
 	detail := "the ssh transport failed, not the guest command: the connection to the guest dropped, or the remote command was killed by a signal. " +

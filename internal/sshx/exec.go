@@ -55,3 +55,25 @@ func SuccessDespiteHeldPipes(err error) error {
 	}
 	return err
 }
+
+// ExitTransport is the status ssh exits with when the CONNECTION failed rather
+// than the remote command: it could not be established (authentication with a
+// locked agent among the causes), it was torn down mid-session, or the remote
+// command was killed by a signal (OpenSSH maps the protocol's exit-signal onto
+// 255, and prints nothing about it at the default log level).
+//
+// It is technically ambiguous — a remote command that itself exits 255 is
+// reported identically, since the protocol has one field for both. It is not
+// ambiguous in practice: every remote command sandbar runs is a `set -e` bash
+// script or an ansible-playbook run, whose own failure statuses are 2 (failed
+// task), 4 (unreachable) and 250 (unexpected), never 255.
+const ExitTransport = 255
+
+// IsTransportFailure reports whether err is a command that exited with
+// ExitTransport — the class of failure worth waiting out and retrying, because
+// nothing the guest did caused it. `limactl shell` passes its ssh child's
+// status through, so this holds for every backend's guest commands.
+func IsTransportFailure(err error) bool {
+	var ee *exec.ExitError
+	return errors.As(err, &ee) && ee.ExitCode() == ExitTransport
+}
