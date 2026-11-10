@@ -416,6 +416,24 @@ See [Security Model](../reference/security-model.md).
 Files outside the directories you preserve are deleted. Nothing outside the
 guest home, such as `/srv` or `/opt`, can be preserved by these options.
 
+### If the connection drops during a reset
+
+A reset runs over SSH for several minutes, so a dropped connection is the
+most likely way for one to fail. A common cause is locking your workstation:
+SSH agents such as 1Password's lock with the screen, and any new SSH
+connection then fails to authenticate.
+
+`sandbar` waits instead of failing. When SSH itself fails (exit status 255,
+never a failure inside the VM), the reset prints a message and checks the
+connection every 30 seconds for up to two hours. When the connection works
+again, the reset continues automatically:
+
+- If the VM was already deleted and a backup staged, it resumes from the
+  backup, as `--from-backup` does.
+- Otherwise it runs the same reset again.
+
+Press Ctrl-C to stop waiting. The usual error and recovery command follow.
+
 ### If a reset fails after the VM was deleted
 
 When a reset fails after it deleted the VM, for example because the clone ran
@@ -567,6 +585,9 @@ There is no --clone-url: a reset rebuilds the project this VM already has. To
 work on a different repo, create another VM with 'sandbar create'.
 A blank --clone-token reuses the saved GitHub or scoped GitLab token for cloning.
 An explicit token replaces the saved token after a successful reset.
+
+A reset that loses its SSH connection (a locked SSH agent, a dropped network)
+waits up to two hours for it to come back, then finishes on its own.
 
 If a reset fails after the VM was deleted, the error names a directory holding
 your backup. Finish the job with:

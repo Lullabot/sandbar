@@ -277,6 +277,9 @@ attempting to delete the VM, it keeps the archives and prints their path
 for recovery, along with the `sandbar reset NAME --from-backup DIR` command that
 finishes the reset from a terminal. See
 [`sandbar reset`](cli-reference.md#if-a-reset-fails-after-the-vm-was-deleted).
+A reset that only lost its SSH connection, for example because your SSH agent
+locked with the screen, waits for the connection and finishes on its own. See
+[If the connection drops during a reset](cli-reference.md#if-the-connection-drops-during-a-reset).
 
 **Do not preserve data if you suspect the VM is compromised.** It can
 include credentials and files written by an agent. See

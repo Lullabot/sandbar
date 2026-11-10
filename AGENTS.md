@@ -1211,6 +1211,14 @@ shared rules.
   safe only because the name was proven free first: deleted, or
   `lima.Client.Exists` reported a definite absence. Do not weaken either check
   to `Status`'s "empty or error".
+- **A reset that loses its SSH transport waits and finishes** (`manage.Reset`,
+  used by both `sandbar reset` and the TUI's `R`; call it, never
+  `Provider.Reset` directly). It retries only `sshx.IsTransportFailure`
+  (ssh's own exit 255). A guest failure, or a cancelled context, is returned
+  at once. It polls the connection (`probeTransport`) for up to
+  `resetRetryBudget`. A failure after the delete resumes from the backup,
+  with the preserve flags cleared, as `--from-backup` clears them. Any other
+  failure reruns the same reset.
 - **Validate preserve paths before deleting the VM.** Guest-supplied
   `PreservePaths` reach `tar -C <home> <rel>` and root's recursive `chown`
   during restore. `preservePathRel` must reject paths outside the guest home
