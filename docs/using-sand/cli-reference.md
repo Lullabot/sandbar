@@ -434,18 +434,21 @@ does, and removes the directory once everything is back. If it fails again, the
 directory is kept and you can retry.
 
 - The backup directory contains `reset.json` beside the archives. It records
-  the VM's settings and what was backed up. It never contains the clone token,
-  so cloning reuses the saved host token. Pass `--clone-token` if no token is
-  saved or to override it.
-- The VM must not exist. `--from-backup` completes a reset; it never
-  overwrites a running VM. If you already created a replacement, delete it
-  first.
+  the VM's settings, what was backed up, and the connection profile the VM
+  was on. It never contains the clone token, so cloning reuses the saved host
+  token. Pass `--clone-token` if no token is saved or to override it.
+- A failed reset usually leaves a half-built replacement under the VM's name.
+  `--from-backup` deletes it and rebuilds. It only does this when the VM's
+  provenance marker carries the ID recorded in the backup's `rebuild.json`.
+  Any other VM with that name is refused, and you must delete it yourself.
+  `--from-backup` never overwrites a VM it can't prove is disposable.
 - Don't combine `--from-backup` with the `--preserve` flags. The backup says
   what it holds.
 - Other flags, such as `--memory`, override the recorded settings, as they do
   in a normal reset.
-- The VM no longer exists, so `sandbar` can't discover its connection profile.
-  Pass `--profile` when more than one profile is enabled.
+- The VM is rebuilt on the connection profile recorded in the backup. Pass
+  `--profile` to choose another. A backup made before profiles were recorded
+  needs `--profile` when more than one profile is enabled.
 - A backup made by an older `sandbar` has no `reset.json`. A whole-home or
   agent-state backup still restores, using the VM's entry in the managed index
   or defaults for its settings. A backup that holds a project or checkout
@@ -499,7 +502,7 @@ before creating a VM.
 | `--docker-proxy-host` | string | *this VM's* | Docker registry pull-through proxy host. |
 | `--clone-token` | string | *(empty)* | GitHub or GitLab token for this VM's recorded repo. Blank reuses the saved global GitHub or matching scoped GitLab token. An explicit token replaces the saved token after success. A restored checkout skips cloning. |
 | `--from-backup` | string (directory) | *(none)* | Finish a reset that failed after the VM was deleted: rebuild `NAME` and restore the backup in this directory. See [If a reset fails after the VM was deleted](#if-a-reset-fails-after-the-vm-was-deleted). |
-| `--profile` | string | *the profile that owns NAME* | Which [Connection Profile](connection-profiles.md) `NAME` lives on. Only needed when the same name exists under more than one enabled profile. |
+| `--profile` | string | *the profile that owns NAME* | Which [Connection Profile](connection-profiles.md) `NAME` lives on. Only needed when the same name exists under more than one enabled profile. With `--from-backup`, the default is the profile recorded in the backup. |
 
 `NAME` is required (exactly one positional argument), and flags may appear
 before or after it.
@@ -570,10 +573,10 @@ your backup. Finish the job with:
 
   sandbar reset NAME --from-backup DIR
 
-That rebuilds NAME with the settings the failed reset recorded, restores the
-backup in the usual order, and removes DIR once everything is back. The VM must
-not exist (the failed reset already deleted it). Pass --profile if NAME's
-connection profile is not the only enabled one.
+That rebuilds NAME on the connection profile and with the settings the failed
+reset recorded, restores the backup in the usual order, and removes DIR once
+everything is back. The half-built VM a failed reset leaves behind is replaced;
+any other VM of that name is refused.
 
 Examples:
   sandbar reset web                                  # clean rebuild, same settings

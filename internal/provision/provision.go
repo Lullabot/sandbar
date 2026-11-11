@@ -1252,12 +1252,24 @@ type ResetOptions struct {
 	// was staged.
 	RestoreFrom string
 
+	// Profile is the connection profile the VM lives on, recorded in the reset
+	// manifest so a resume finds it without --profile (see
+	// ResetManifest.ProfileID). The zero value records nothing.
+	Profile ProfileRef
+
 	// OnCloned is called once the replacement VM exists, with the RebuildID to
 	// stamp into its in-flight provenance marker ("" when nothing was staged).
 	// The provider wires it; see MarkRebuildCloned for what it is for. Like
 	// CreateOptions.OnCloned it is a callback because this package does not
 	// import internal/provider.
 	OnCloned func(ctx context.Context, rebuildID string) error
+}
+
+// ProfileRef identifies a connection profile without importing
+// internal/profiles, which knows nothing about resets.
+type ProfileRef struct {
+	ID   string
+	Name string
 }
 
 // Any reports whether the options ask for anything at all to survive the

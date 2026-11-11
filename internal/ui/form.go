@@ -1348,6 +1348,12 @@ func (m model) submitReset(cfg vm.CreateConfig) (tea.Model, tea.Cmd) {
 	// Capture the provider by value (see submitForm): the run closure runs on
 	// beginStream's goroutine and must not read the mutable m.members slice.
 	prov := m.formProvider()
+	// The profile goes into the backup's manifest, so that if this reset fails
+	// after deleting the VM, `sandbar reset --from-backup` can find where to
+	// rebuild it without being told.
+	if mem, ok := m.memberByScope(m.formScope); ok {
+		opts.Profile = provision.ProfileRef{ID: mem.profile.ID, Name: mem.profile.Name}
+	}
 	run := func(ctx context.Context, c vm.CreateConfig, out io.Writer) error {
 		if _, err := agentprefs.LoadOrMigrate(prov.HostFiles(), c.BaseName); err != nil {
 			return err

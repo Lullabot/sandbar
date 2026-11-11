@@ -47,6 +47,17 @@ type ResetManifest struct {
 	// TemplateSource is non-empty when the reset rebuilds from a golden template
 	// rather than the base image; see ResetOptions.TemplateSource.
 	TemplateSource string `json:"template_source,omitempty"`
+	// ProfileID and ProfileName are the connection profile the VM lived on (see
+	// ResetOptions.Profile). A resume has to know where to rebuild, and by the
+	// time anyone runs one the VM is gone: no marker, and soon no index entry, is
+	// left to say which profile owned it. Without this, a user with more than one
+	// enabled profile is told "no such VM" and has to remember --profile. The ID
+	// is what is looked up, because it survives a rename; the name is only for
+	// the message when that profile no longer exists. Both are absent from a
+	// manifest written before they existed, which resolves as it always did.
+	// Additive, so resetManifestSchema stays 1: an older binary ignores them.
+	ProfileID   string `json:"profile_id,omitempty"`
+	ProfileName string `json:"profile_name,omitempty"`
 }
 
 // NewResetManifest builds the manifest for a reset about to delete its guest.
@@ -59,7 +70,27 @@ func NewResetManifest(cfg vm.CreateConfig, plan PreservePlan, opts ResetOptions)
 		Config:         cfg,
 		Plan:           plan,
 		TemplateSource: opts.TemplateSource,
+		ProfileID:      opts.Profile.ID,
+		ProfileName:    opts.Profile.Name,
 	}
+}
+
+// ReadResetManifest returns the manifest in a staging directory without
+// opening it for a resume, for a caller that needs to know where the backup
+// belongs (its profile) before it can build anything. ok is false for a
+// directory with no manifest.
+func ReadResetManifest(dir string) (m ResetManifest, ok bool, err error) {
+	data, err := os.ReadFile(filepath.Join(dir, resetManifestName))
+	if errors.Is(err, os.ErrNotExist) {
+		return m, false, nil
+	}
+	if err != nil {
+		return m, false, fmt.Errorf("read %s: %w", resetManifestName, err)
+	}
+	if err := json.Unmarshal(data, &m); err != nil {
+		return m, false, fmt.Errorf("read %s: %w", resetManifestName, err)
+	}
+	return m, true, nil
 }
 
 // rebuildRecordName is the file a reset writes beside its archives once the
