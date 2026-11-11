@@ -284,14 +284,13 @@ jobs:
               ansible-playbook -i localhost, --connection=local "$play"
           '
 
-      # The size check is the dependency substitution's own regression test.
+      # The absence and size checks keep React's unused tree out of the base.
       #
-      # roles/self-review replaces @self-review/serve's declared (but unused)
-      # @self-review/react dependency with @self-review/types, which is the
-      # difference between a ~17MB install and a ~310MB one. A threshold
-      # between the two catches a silently reverted override — including an
-      # upstream release that starts needing React for real, which must fail
-      # here rather than in someone's review session.
+      # @self-review/serve serves a prebuilt client; @self-review/react is a
+      # dev dependency since 2.0.4, and installing it is the difference
+      # between a ~17MB install and a ~310MB one. If a release declares it
+      # as a runtime dependency again, fail here so the role can restore its
+      # npm override, rather than shipping the tree in every base.
       - name: Assert the review tool is installed, lean, and runnable
         run: |
           set -euo pipefail
@@ -306,10 +305,10 @@ jobs:
             set -e
             test -x /opt/sandbar/self-review/node_modules/.bin/self-review-serve
             self-review-serve --version
-            name=$(node -p "require(\"/opt/sandbar/self-review/node_modules/@self-review/react/package.json\").name")
-            echo "@self-review/react resolves to: $name"
-            [ "$name" = "@self-review/types" ] || {
-              echo "::error::the dependency override is not in effect"; exit 1; }
+            if [ -e /opt/sandbar/self-review/node_modules/@self-review/react ]; then
+              echo "::error::@self-review/react was installed; upstream made it a runtime dependency again"
+              exit 1
+            fi
           '
           GUEST_HOME=$(limactl shell claude-ci bash -lc 'printf %s "$HOME"')
           limactl shell claude-ci test -f "$GUEST_HOME/github.com/Lullabot/sandbar/.agents/skills/self-review-apply/SKILL.md" \
