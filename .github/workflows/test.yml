@@ -89,7 +89,7 @@ jobs:
       # the total with no test change.
       - name: Go tests (race) + coverage gate
         env:
-          COVERAGE_FLOOR: "90.0"
+          COVERAGE_FLOOR: "90.2"
         run: |
           go test ./... -race -covermode=atomic \
             -coverpkg=./internal/... -coverprofile=coverage.out

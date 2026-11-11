@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/lullabot/sandbar/internal/lima"
+	"github.com/lullabot/sandbar/internal/vm"
 )
 
 // TestMemoryCapabilities pins support to the concrete backend that can actually
@@ -170,24 +171,41 @@ func TestProxmoxReclaimMemoryReportsGuestFailure(t *testing.T) {
 	}
 }
 
-// TestProxmoxVMHostMemory reads status/current's mem field. That field is the
-// QEMU process's host/hypervisor accounting and must stay separate from the
-// guest's MemAvailable-derived utilization sample.
+// TestProxmoxVMHostMemory reads PVE's own accounting of the guest's memory —
+// kept separate from the guest's MemAvailable-derived utilization sample — from
+// the fleet-wide cluster listing, NEVER from a per-VM status/current. The
+// heartbeat asks for this every couple of seconds for every running VM; a
+// per-VM read there was one request per VM per sample.
 func TestProxmoxVMHostMemory(t *testing.T) {
-	m, p := withGuest(t)
+	m := newPVEMock(t)
 	const want int64 = 30 << 30
-	m.data("/nodes/pve1/qemu/100/status/current",
-		`{"vmid":100,"name":"web","status":"running","mem":32212254720,"maxmem":34359738368}`)
-	m.reset()
+	m.data("/cluster/resources", `[
+  {"vmid":100,"name":"web","node":"pve1","pool":"sandbar","status":"running","type":"qemu","mem":32212254720,"maxmem":34359738368}
+]`)
+	p := newProxmoxForTest(t, m)
 
 	got, err := any(p).(VMHostMemoryProvider).VMHostMemory(context.Background(), "web")
 	if err != nil {
 		t.Fatalf("VMHostMemory: %v", err)
 	}
 	if got != want {
-		t.Fatalf("VMHostMemory = %d; want PVE status/current mem %d", got, want)
+		t.Fatalf("VMHostMemory = %d; want the cluster listing's mem %d", got, want)
 	}
-	if !m.sawPath("/nodes/pve1/qemu/100/status/current") {
-		t.Fatalf("VMHostMemory did not read status/current; requests: %v", m.seen())
+	if m.sawPath("/nodes/pve1/qemu/100/status/current") {
+		t.Fatalf("VMHostMemory read status/current; it must use the shared listing: %v", m.seen())
+	}
+
+	// Repeated readings within hostMemMaxAge ride the same listing.
+	for range 10 {
+		if _, err := any(p).(VMHostMemoryProvider).VMHostMemory(context.Background(), "web"); err != nil {
+			t.Fatalf("VMHostMemory: %v", err)
+		}
+	}
+	if n := m.count("/cluster/resources"); n != 1 {
+		t.Fatalf("11 readings fetched the listing %d times, want 1", n)
+	}
+
+	if _, err := any(p).(VMHostMemoryProvider).VMHostMemory(context.Background(), "nope"); !errors.Is(err, vm.ErrNotFound) {
+		t.Fatalf("an unknown VM must report vm.ErrNotFound, got %v", err)
 	}
 }

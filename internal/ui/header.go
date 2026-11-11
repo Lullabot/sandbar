@@ -18,6 +18,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/lullabot/sandbar/internal/provider"
+
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -359,12 +361,23 @@ func (m model) memberStatusLine(mem fleetMember) (string, bool) {
 		return mem.profile.Name + ": disabled", true
 	case connErrored:
 		if mem.lastErr != nil {
-			return mem.profile.Name + ": error: " + mem.lastErr.Error(), true
+			return mem.profile.Name + ": " + memberErrorLabel(mem.lastErr) + ": " + mem.lastErr.Error(), true
 		}
 		return mem.profile.Name + ": error", true
 	default:
 		return "", false
 	}
+}
+
+// memberErrorLabel names an errored member's condition. "degraded" is a
+// backend whose API is not answering (provider.IsDegraded) — the client is
+// already backing off and the member's refresh is already slowed, so the
+// right reading is "wait", not "fix your profile", which is what "error" says.
+func memberErrorLabel(err error) string {
+	if provider.IsDegraded(err) {
+		return "degraded, retrying with backoff"
+	}
+	return "error"
 }
 
 // headerBandLines renders the per-profile rows: one line per connected

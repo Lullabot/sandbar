@@ -40,6 +40,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/lullabot/sandbar/internal/pve"
 	"github.com/lullabot/sandbar/internal/vm"
@@ -191,8 +192,9 @@ func removeTag(tags, tag string) string {
 // momentary blip into connection churn across the ENTIRE batch rather than a
 // single retry-able failure. 4-8 keeps the batch fast on the common case (a
 // handful of managed VMs) while never asking a PVE node to answer more than a
-// handful of connections at once.
-const provenanceFetchConcurrency = 6
+// handful of connections at once. It matches the client's own per-host cap
+// (internal/pve's hostgate.go), which bounds it regardless.
+const provenanceFetchConcurrency = 4
 
 // provenanceCandidate is one VM Provenance decided is worth a config fetch:
 // it carries the sandbar tag on the listing the tag filter already paid for.
@@ -223,8 +225,16 @@ type provenanceCandidate struct {
 // would hide its (valid) peers. The same tolerance extends to a per-VM
 // GetConfig failure: one VM's config being momentarily unreachable must not
 // sink the whole batch.
+//
+// Both halves are cached (proxmoxcache.go), because the board calls this on
+// every refresh and a marker almost never changes: the listing is the one List
+// just fetched, and each marker is re-read only when it is missing, its TTL has
+// lapsed (a few per call, oldest first, serving the cached value meanwhile), or
+// it says a build is in flight. This provider's own marker writes update the
+// cache directly. A steady-state refresh therefore costs no config reads at
+// all, however many managed VMs the pool holds.
 func (p *proxmoxProvider) Provenance(ctx context.Context) (map[string]Provenance, error) {
-	resources, err := p.client.ListVMs(ctx, p.pool)
+	resources, err := p.listing(ctx, listingMaxAge)
 	if err != nil {
 		return nil, fmt.Errorf("proxmox: listing pool %q for provenance: %w", p.pool, err)
 	}
@@ -246,8 +256,8 @@ func (p *proxmoxProvider) Provenance(ctx context.Context) (map[string]Provenance
 		}
 	}
 
-	out := make(map[string]Provenance, len(candidates))
-	if len(candidates) == 0 {
+	fetch, out := p.provenanceWork(candidates, time.Now())
+	if len(fetch) == 0 {
 		return out, nil
 	}
 
@@ -256,7 +266,7 @@ func (p *proxmoxProvider) Provenance(ctx context.Context) (map[string]Provenance
 		wg  sync.WaitGroup
 		sem = make(chan struct{}, provenanceFetchConcurrency)
 	)
-	for _, c := range candidates {
+	for _, c := range fetch {
 		wg.Add(1)
 		sem <- struct{}{}
 		go func(c provenanceCandidate) {
@@ -266,15 +276,21 @@ func (p *proxmoxProvider) Provenance(ctx context.Context) (map[string]Provenance
 			cfg, err := p.client.GetConfig(ctx, c.vmid)
 			if err != nil {
 				// A single VM's config being unreachable must not hide every
-				// other (perfectly readable) marker in the batch.
+				// other (perfectly readable) marker in the batch. An entry
+				// that was only being revalidated keeps the cached value
+				// provenanceWork already put in out; nothing new is cached.
 				return
 			}
 			desc, _ := cfg["description"].(string)
-			if pv, ok := decodeProvenanceBlock(desc); ok {
-				mu.Lock()
+			pv, ok := decodeProvenanceBlock(desc)
+			p.storeProvenance(c.vmid, c.name, pv, ok)
+			mu.Lock()
+			if ok {
 				out[c.name] = pv
-				mu.Unlock()
+			} else {
+				delete(out, c.name) // the block is gone: drop the stale one
 			}
+			mu.Unlock()
 		}(c)
 	}
 	wg.Wait()
@@ -346,12 +362,23 @@ func (p *proxmoxProvider) markManagedUnlocked(ctx context.Context, name string, 
 	// Description text travels as a normal form value; url.Values.Encode
 	// (inside SetConfigSync's request body) is the only escaping it ever
 	// gets — hand-escaping it here would double-encode it on the wire.
+	merged := mergeTag(tags, sandbarTag)
 	form := url.Values{
 		"description": {spliceDescriptionBlock(desc, payload)},
-		"tags":        {mergeTag(tags, sandbarTag)},
+		"tags":        {merged},
 	}
 	if err := p.client.SetConfigSync(ctx, vmid, form); err != nil {
 		return fmt.Errorf("proxmox: writing provenance for %s: %w", name, err)
+	}
+	// The board's cached view follows the write at once: the marker it just
+	// wrote, and a listing that will show the tag. A tag newly added is a VM
+	// just cloned (or adopted), whose disk the cached allocation and free
+	// space do not include yet; a build's progress writes leave both alone.
+	p.storeProvenance(vmid, name, pv, true)
+	if merged != tags {
+		p.invalidateFleet()
+	} else {
+		p.invalidateListing()
 	}
 	return nil
 }
@@ -407,6 +434,8 @@ func (p *proxmoxProvider) Unmark(ctx context.Context, name string) error {
 	if err := p.client.SetConfigSync(ctx, vmid, form); err != nil {
 		return fmt.Errorf("proxmox: clearing provenance for %s: %w", name, err)
 	}
+	p.dropProvenance(vmid)
+	p.invalidateListing()
 	return nil
 }
 

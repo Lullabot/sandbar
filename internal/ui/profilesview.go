@@ -436,9 +436,11 @@ func (m *model) rebuildMember(p profiles.Profile) tea.Cmd {
 		}
 	}
 
-	if i, exists := m.memberIndexByProfileID(p.ID); exists {
+	i, exists := m.memberIndexByProfileID(p.ID)
+	if exists {
 		m.members[i] = mem
 	} else {
+		i = len(m.members)
 		m.members = append(m.members, mem)
 	}
 	// The heartbeat resolver's snapshot must reflect the fleet as it stands
@@ -449,7 +451,7 @@ func (m *model) rebuildMember(p profiles.Profile) tea.Cmd {
 	if mem.prov == nil {
 		return nil
 	}
-	return refreshCmd(scope, mem.prov, mem.hostFiles, true)
+	return m.requestRefresh(i, true, true)
 }
 
 // enableProfile persists id as enabled and spins its binding up live (see
@@ -1245,7 +1247,7 @@ func profileRowText(p profiles.Profile, mem fleetMember, hasMember bool) string 
 		case connErrored:
 			live := "error"
 			if mem.lastErr != nil {
-				live += ": " + mem.lastErr.Error()
+				live = memberErrorLabel(mem.lastErr) + ": " + mem.lastErr.Error()
 			}
 			parts = append(parts, live)
 		case connDisabled:

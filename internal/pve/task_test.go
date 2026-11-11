@@ -12,14 +12,16 @@ import (
 	"time"
 )
 
-// withFastPolling shrinks WaitTask's poll interval for the duration of a test
-// so a test that needs a few loop iterations does not burn real wall-clock
-// seconds, restoring the real values on cleanup.
+// withFastPolling shrinks WaitTask's poll interval — and the host gate's
+// backoff, which WaitTask now waits out after a proxy 5xx — for the duration of
+// a test so a test that needs a few loop iterations does not burn real
+// wall-clock seconds, restoring the real values on cleanup.
 func withFastPolling(t *testing.T) {
 	t.Helper()
 	origInterval, origMax := waitTaskPollInterval, waitTaskMaxPollInterval
 	waitTaskPollInterval = time.Millisecond
 	waitTaskMaxPollInterval = 5 * time.Millisecond
+	withFastBackoff(t)
 	t.Cleanup(func() {
 		waitTaskPollInterval, waitTaskMaxPollInterval = origInterval, origMax
 	})

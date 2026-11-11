@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/paste"
@@ -31,8 +32,11 @@ type (
 	// a bare vmsLoadedMsg{...}.
 	vmsLoadedMsg struct {
 		scope registry.Scope
-		vms   []vm.VM
-		err   error
+		// seq is the refresh this result answers (requestRefresh/stampRefresh,
+		// refresh.go); zero for a hand-built message.
+		seq uint64
+		vms []vm.VM
+		err error
 		// The host's own capacity, sampled in the same command for the same reason as
 		// the per-VM stats: hostMemBytes reads /proc/meminfo and hostDiskFree statfs's
 		// the Lima volume, and the header called BOTH on every render. Zero means "not
@@ -224,7 +228,12 @@ func refreshCmd(sc registry.Scope, prov provider.Provider, hf lima.HostFiles, pr
 		var provenance map[string]provider.Provenance
 		var provenanceErr error
 		if pv, ok := prov.(provider.Provenancer); ok {
-			mp, pErr := pv.Provenance(context.Background())
+			// Bounded, like every other call this refresh makes: the member
+			// allows one refresh in flight at a time (requestRefresh), so a
+			// provenance read that never returned would freeze its board.
+			pctx, cancel := context.WithTimeout(context.Background(), provenanceTimeout)
+			mp, pErr := pv.Provenance(pctx)
+			cancel()
 			if pErr == nil {
 				provenance = mp
 			} else {
@@ -252,6 +261,9 @@ func refreshCmd(sc registry.Scope, prov provider.Provider, hf lima.HostFiles, pr
 		}
 	}
 }
+
+// provenanceTimeout bounds the batched provenance read inside a refresh.
+const provenanceTimeout = 30 * time.Second
 
 // errNoProvider is what an error binding's member reports as its list error: its
 // provider failed to construct, so there is nothing to list. It is surfaced as

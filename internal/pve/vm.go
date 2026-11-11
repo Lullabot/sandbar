@@ -26,6 +26,10 @@ type VMResource struct {
 	Type    string `json:"type"`
 	MaxMem  int64  `json:"maxmem"`
 	MaxDisk int64  `json:"maxdisk"`
+	// Mem is the guest's current memory use as PVE accounts it, carried for
+	// every guest in this one fleet-wide listing — which is why the provider
+	// reads it here instead of making one status/current call per VM.
+	Mem int64 `json:"mem"`
 	// The cluster listing calls the allocated CPU count maxcpu; only the
 	// per-VM status endpoint calls it cpus. A missing count zeros the header's
 	// guest-to-host CPU utilization calculation even when the guest is busy.
