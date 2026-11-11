@@ -182,12 +182,21 @@ func refreshCmd(sc registry.Scope, prov provider.Provider, hf lima.HostFiles, pr
 				if n := diskUsedBytes(hf, vms[i].Dir); n > 0 {
 					vms[i].DiskUsed = strconv.FormatInt(n, 10)
 				}
-				if vms[i].Status == limaRunning {
+				// A provider that already answered from its own API (Proxmox)
+				// keeps its answer: its Dir holds none of Lima's files, so the
+				// file probe could only erase or contradict it.
+				switch {
+				case vms[i].Status == limaRunning:
+					if !vms[i].UpSince.IsZero() {
+						break
+					}
 					if t, ok := upSince(hf, vms[i].Dir); ok {
 						vms[i].UpSince = t
 					}
-				} else if t, ok := lastUsed(hf, vms[i].Dir); ok {
-					vms[i].LastUsed = t
+				case vms[i].LastUsed.IsZero() && !vms[i].LastUsedUnknown:
+					if t, ok := lastUsed(hf, vms[i].Dir); ok {
+						vms[i].LastUsed = t
+					}
 				}
 			}
 		}

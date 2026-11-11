@@ -1003,3 +1003,39 @@ func TestResizeDiskFractionalSizeIsExactBytes(t *testing.T) {
 		t.Errorf("size = %q; want the exact byte count %q (bare number = bytes to PVE)", got, want)
 	}
 }
+
+// rrddata leaves unknown values out of a row rather than sending null or 0,
+// and pvestatd records a stopped VM's cpu as unknown. CPU must therefore
+// decode as nil for such a row, which is what tells a stopped interval apart
+// from an idle one.
+func TestRRDDataRequestAndOmittedCPU(t *testing.T) {
+	c, rec := vmTestClient(t, func(w http.ResponseWriter, _ *http.Request, _ *recordedRequest) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"time":100,"cpu":0.25,"maxcpu":2},{"time":160,"maxcpu":2},{"time":220,"cpu":0}]}`))
+	})
+	rows, err := c.RRDData(context.Background(), 101, "day")
+	if err != nil {
+		t.Fatalf("RRDData: %v", err)
+	}
+	if rec.method != http.MethodGet || rec.path != "/api2/json/nodes/node1/qemu/101/rrddata" {
+		t.Fatalf("request = %s %s", rec.method, rec.path)
+	}
+	if rec.query.Get("timeframe") != "day" || rec.query.Get("cf") != "AVERAGE" {
+		t.Fatalf("query = %v, want timeframe=day cf=AVERAGE", rec.query)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("rows = %d, want 3", len(rows))
+	}
+	if rows[0].CPU == nil || *rows[0].CPU != 0.25 {
+		t.Errorf("row 0 CPU = %v, want 0.25", rows[0].CPU)
+	}
+	if rows[1].CPU != nil {
+		t.Errorf("row 1 CPU = %v, want nil for an omitted reading", *rows[1].CPU)
+	}
+	if rows[2].CPU == nil || *rows[2].CPU != 0 {
+		t.Errorf("row 2 CPU = %v, want a present zero (idle, not stopped)", rows[2].CPU)
+	}
+	if rows[1].Time != 160 {
+		t.Errorf("row 1 Time = %d, want 160", rows[1].Time)
+	}
+}

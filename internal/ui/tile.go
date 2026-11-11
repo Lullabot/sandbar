@@ -894,7 +894,8 @@ func tileFooterLine(v vm.VM, now time.Time, badge string, width int) string {
 }
 
 // tileUptimeClause is the footer's left half: the `up <duration>` / `last used
-// <duration> ago` / `never used` text, with no badge and no padding.
+// <duration> ago` / `last used —` / `never used` text, with no badge and no
+// padding.
 func tileUptimeClause(v vm.VM, now time.Time) string {
 	// These times are SAMPLED IN listCmd (commands.go), off the Bubble Tea goroutine,
 	// and only read here. They used to be stat'd right in this function — up to three
@@ -910,6 +911,11 @@ func tileUptimeClause(v vm.VM, now time.Time) string {
 	}
 	if !v.LastUsed.IsZero() {
 		return tileChromeStyle.Render("last used " + formatAgo(now.Sub(v.LastUsed)))
+	}
+	if v.LastUsedUnknown {
+		// Not looked up yet, or the lookup failed: an em dash, like every
+		// other reading the board does not have, never a claim of "never".
+		return tileChromeStyle.Render("last used —")
 	}
 	return tileChromeStyle.Render("never used")
 }
