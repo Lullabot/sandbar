@@ -350,7 +350,7 @@ func (p *proxmoxProvider) forget(name string) {
 	delete(p.vmids, name)
 	delete(p.ips, name)
 	p.mu.Unlock()
-	p.invalidateListing()
+	p.invalidateFleet()
 	p.clearAgentFailure(name)
 }
 
@@ -533,19 +533,21 @@ func (p *proxmoxProvider) VMHostMemory(ctx context.Context, name string) (int64,
 	if err != nil {
 		return 0, err
 	}
-	vmid, ok := p.indexOf(resources)[name]
-	if !ok {
-		return 0, fmt.Errorf("%w: %s", vm.ErrNotFound, name)
-	}
-	for _, r := range resources {
-		if r.VMID == vmid {
-			if r.Mem < 0 {
-				return 0, nil
-			}
-			return r.Mem, nil
+	// One pass applying indexOf's rule (this node, lowest VMID wins a shared
+	// name) to the one name asked about. The heartbeat calls this per running
+	// VM per sample, so building the whole fleet's index here would be
+	// quadratic in the fleet on the polling path.
+	var match *pve.VMResource
+	for i := range resources {
+		r := &resources[i]
+		if r.Name == name && r.Node == p.node && (match == nil || r.VMID < match.VMID) {
+			match = r
 		}
 	}
-	return 0, fmt.Errorf("%w: %s", vm.ErrNotFound, name)
+	if match == nil {
+		return 0, fmt.Errorf("%w: %s", vm.ErrNotFound, name)
+	}
+	return max(match.Mem, 0), nil
 }
 
 // lookupVMID refreshes the index from the pool listing and returns name's id.
@@ -554,9 +556,12 @@ func (p *proxmoxProvider) VMHostMemory(ctx context.Context, name string) (int64,
 // lifecycle path's cache miss — typically right after a clone, asking about
 // the VM that clone just made — and a listing taken a second earlier does not
 // contain it yet. It is not polled, so it costs the node nothing in steady
-// state.
+// state. It goes through the shared listing (invalidated first, so neither a
+// cached listing nor a fetch already in flight can answer), which leaves the
+// fresh listing cached for the next refresh instead of discarding it.
 func (p *proxmoxProvider) lookupVMID(ctx context.Context, name string) (int, error) {
-	resources, err := p.client.ListVMs(ctx, p.pool)
+	p.invalidateListing()
+	resources, err := p.listing(ctx, 0)
 	if err != nil {
 		return 0, fmt.Errorf("proxmox: looking up %q in pool %q: %w", name, p.pool, err)
 	}
@@ -654,9 +659,29 @@ func (p *proxmoxProvider) statusVM(name string, st pve.VMStatus, diskUsed map[in
 // without Datastore.Audit) degrades to the last good index, or a nil map
 // before there is one — every VM's DiskUsed then falls back to byteString's ""
 // ("unknown") — rather than failing the whole List/Get over a reading the UI
-// already treats as optional. Cached for diskUsedTTL (cachedDiskUsed).
+// already treats as optional; nothing new is cached on failure. A good index is
+// cached for diskUsedTTL (proxmoxcache.go).
 func (p *proxmoxProvider) diskUsedIndex(ctx context.Context) map[int]int64 {
-	return p.cachedDiskUsed(ctx)
+	if p.storage == "" {
+		return nil
+	}
+	c := &p.cache
+	c.mu.Lock()
+	prev, gen, fresh := c.disk.v, c.disk.gen, c.disk.fresh(diskUsedTTL)
+	c.mu.Unlock()
+	if fresh {
+		return prev
+	}
+
+	items, err := p.client.StorageContent(ctx, p.storage)
+	if err != nil {
+		return prev
+	}
+	d := diskUsedByVMID(items)
+	c.mu.Lock()
+	c.disk.install(d, gen)
+	c.mu.Unlock()
+	return d
 }
 
 // diskUsedByVMID sums each owning VMID's "images"-content volumes (the boot
@@ -974,16 +999,23 @@ func (p *proxmoxProvider) waitGuestIP(ctx context.Context, vmid int, name string
 // refuses to hand out an address another VM in the pool is ALSO claiming
 // (guardSharedAddress).
 //
-// A VM whose guest agent just failed is not asked again until its backoff
-// expires (agentBackoff, proxmoxcache.go). This is the path every heartbeat
-// and checkout sweep takes to reach a guest, so without it an agent-less VM
-// would cost a status read, a config read and a failing agent call every time
-// either one retried its connection.
+// A background poll (AsPoll: the heartbeat and the checkout sweep) is not let
+// through to a VM whose guest agent just failed until its backoff expires
+// (agentBackoff, proxmoxcache.go); without that an agent-less VM would cost a
+// status read, a config read and a failing agent call every time either one
+// retried its connection. Everything else — a shell, paste, copy or port
+// forward the user asked for — ignores the backoff: a VM started from outside
+// this process (the PVE web UI, another controller) keeps the backoff the
+// polling ran up while it booted, so honouring it there would refuse the
+// user's shell for up to agentBackoffMax after the agent had come up. Every
+// lookup's result still feeds the backoff.
 func (p *proxmoxProvider) guestIP(ctx context.Context, name string) (string, error) {
 	ip, ok := p.cachedGuestIP(name)
 	if !ok {
-		if err := p.agentBackoffErr(name); err != nil {
-			return "", err
+		if isPoll(ctx) {
+			if err := p.agentBackoffErr(name); err != nil {
+				return "", err
+			}
 		}
 		vmid, _, err := p.resolve(ctx, name)
 		if err != nil {
@@ -1578,9 +1610,25 @@ func (p *proxmoxProvider) HostUser() string { return p.ciUser }
 // propagating. This runs on the TUI's refresh timer, so it does not log on
 // every call — and it is served from cache for hostResourcesTTL, since node
 // capacity is static and free disk moves slowly; refetching both every refresh
-// was two requests per tick for numbers that had not changed.
+// was two requests per tick for numbers that had not changed. Only a reading
+// with real numbers is cached, so a failed sample is retried on the next
+// refresh rather than pinned as zeros.
 func (p *proxmoxProvider) HostResources() HostResources {
-	return p.cachedHostResources(p.fetchHostResources)
+	c := &p.cache
+	c.mu.Lock()
+	cached, gen, fresh := c.host.v, c.host.gen, c.host.fresh(hostResourcesTTL)
+	c.mu.Unlock()
+	if fresh {
+		return cached
+	}
+
+	hr := p.fetchHostResources()
+	if hr.CPUs > 0 || hr.MemBytes > 0 || hr.DiskTotalBytes > 0 {
+		c.mu.Lock()
+		c.host.install(hr, gen)
+		c.mu.Unlock()
+	}
+	return hr
 }
 
 func (p *proxmoxProvider) fetchHostResources() HostResources {

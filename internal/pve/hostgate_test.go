@@ -137,6 +137,25 @@ func TestConnectionsAreReusedIncludingErrorResponses(t *testing.T) {
 	}
 }
 
+// A transport failure is the host not answering, exactly like the refusals
+// that follow it. The FIRST one must already classify as unavailable, or a
+// task wait abandons a task still running on the node over one dropped
+// connection.
+func TestTransportFailureClassifiesAsUnavailable(t *testing.T) {
+	withFastBackoff(t)
+	cs := newCountingServer(t, okJSON)
+	c := cs.client(t)
+	cs.ts.Close() // nothing listens on the port any more
+
+	_, err := c.GetConfig(context.Background(), 100)
+	if err == nil {
+		t.Fatal("GetConfig against a closed server succeeded")
+	}
+	if !IsUnavailable(err) {
+		t.Fatalf("a transport failure must classify as unavailable, got %v", err)
+	}
+}
+
 // A gateway 5xx is the host not answering. After one, further requests must be
 // refused LOCALLY — they never reach the network — with an error that says so
 // and how long to wait; once the window passes, a request goes through again,
@@ -268,7 +287,7 @@ func TestQueuedRequestsHonourDeadlinesAndAGateThatClosedMeanwhile(t *testing.T) 
 	queued := make(chan error, 1)
 	go func() { queued <- g.acquire(context.Background()) }()
 	time.Sleep(10 * time.Millisecond) // let it queue behind the full semaphore
-	g.record(false, errors.New("502"))
+	_ = g.fail(errors.New("502"))
 	g.release()
 	if err := <-queued; !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("a request queued across the host failing must be refused, got %v", err)

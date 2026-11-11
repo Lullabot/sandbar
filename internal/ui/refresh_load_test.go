@@ -51,7 +51,7 @@ func TestStaleRefreshTicksDoNotStackLoopsAcrossBoardRoundTrips(t *testing.T) {
 		if cmd != nil {
 			t.Fatalf("stale tick (gen %d) started a refresh; only the current loop may", gen)
 		}
-		if !m.members[0].arming {
+		if !m.members[0].arming() {
 			t.Fatal("a stale tick must leave the current loop's arming flag alone")
 		}
 		if again := m.tickRefresh(); again != nil {
@@ -128,7 +128,7 @@ func TestOnlyOneRefreshIsEverInFlightPerMember(t *testing.T) {
 
 	next, _ := m.Update(second)
 	nm := next.(model)
-	if nm.members[0].refreshing {
+	if nm.members[0].refreshing() {
 		t.Fatal("Update must close the in-flight slot when the refresh lands")
 	}
 	if got := calls.Load(); got != 2 {
@@ -159,7 +159,7 @@ func TestAWedgedRefreshIsSupersededAndItsLateResultIgnored(t *testing.T) {
 	if cmd := m.requestRefresh(0, false, false); cmd == nil {
 		t.Fatal("a refresh past refreshStuckAfter must be superseded")
 	}
-	if cmd := m.refreshLanded(sc, wedged); cmd != nil || !m.members[0].refreshing {
+	if cmd := m.refreshLanded(sc, wedged); cmd != nil || !m.members[0].refreshing() {
 		t.Fatal("the superseded refresh's late result must not close the new one's slot")
 	}
 }

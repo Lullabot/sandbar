@@ -16,6 +16,8 @@ import (
 	"fmt"
 
 	"charm.land/lipgloss/v2"
+
+	"github.com/lullabot/sandbar/internal/provider"
 )
 
 // fleetConnectingBanner is the hint shown in the grid area while the whole fleet
@@ -37,8 +39,8 @@ func (m model) fleetConnectingBanner() string {
 	for i := range m.members {
 		if err := m.members[i].lastErr; m.members[i].state == connErrored && err != nil {
 			errLine = err.Error()
-			if label := memberErrorLabel(err); label != "error" {
-				errLine = label + ": " + errLine
+			if provider.IsDegraded(err) {
+				errLine = memberErrorLabel(err) + ": " + errLine
 			}
 			break
 		}

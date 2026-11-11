@@ -13,7 +13,7 @@ func TestTickRefreshStartsOnceAndStopsWhenNotOnBoard(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("tickRefresh should start the loop while shouldTick holds")
 	}
-	if !m.members[0].arming {
+	if !m.members[0].arming() {
 		t.Fatal("tickRefresh should mark the member's loop in flight")
 	}
 
@@ -31,7 +31,7 @@ func TestTickRefreshStartsOnceAndStopsWhenNotOnBoard(t *testing.T) {
 	if cmd := m.tickRefresh(); cmd != nil {
 		t.Fatal("tickRefresh must not re-arm once the board is not the active screen")
 	}
-	if m.members[0].arming {
+	if m.members[0].arming() {
 		t.Fatal("tickRefresh should clear the arming flag once the gate closes")
 	}
 }

@@ -146,8 +146,8 @@ func (c *Client) do(ctx context.Context, method, path string, query, body url.Va
 
 	resp, err := c.http.Do(req)
 	if err != nil {
-		if _, ok := classify(ctx, err, 0); ok {
-			c.gate.record(false, err)
+		if !callerCanceled(ctx) {
+			err = c.gate.fail(err)
 		}
 		return fmt.Errorf("pve: %s %s: %w", method, path, err)
 	}
@@ -157,13 +157,17 @@ func (c *Client) do(ctx context.Context, method, path string, query, body url.Va
 	// to the idle pool instead of being torn down and redialled.
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		if _, ok := classify(ctx, err, 0); ok {
-			c.gate.record(false, err)
+		if !callerCanceled(ctx) {
+			err = c.gate.fail(err)
 		}
 		return fmt.Errorf("pve: reading %s %s response: %w", method, path, err)
 	}
-	if answered, ok := classify(ctx, nil, resp.StatusCode); ok {
-		c.gate.record(answered, fmt.Errorf("HTTP %s", resp.Status))
+	// A gateway failure's own *APIError is what the caller gets (IsUnavailable
+	// matches its status), so fail's *UnavailableError is not needed here.
+	if unavailableStatus(resp.StatusCode) {
+		_ = c.gate.fail(fmt.Errorf("HTTP %s", resp.Status))
+	} else {
+		c.gate.succeed()
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {

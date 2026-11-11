@@ -184,29 +184,24 @@ type fleetMember struct {
 	// drives refreshDelay's self-heal cadence and resets to 0 on any success.
 	backoff int
 
-	// arming is true while exactly one refresh-tick loop is in flight for this
-	// member — the per-member equivalent of the old model-wide m.refreshing
-	// guard, so tickRefresh cannot stack duplicate ticks for one member while
-	// still arming the others.
-	arming bool
-
 	// tickGen identifies the ONE refresh tick this member's loop is waiting
-	// on. The flag above cannot do that alone: leaving the board clears it,
-	// but the tea.Tick already scheduled still fires later, and if the user
-	// came back in the meantime a second tick had been armed beside it — two
-	// loops, each re-arming itself forever, one more per quick round trip off
-	// the board. A tick whose generation is not this one is dropped (see
-	// refreshTickMsg in model.go). Drawn from a process-wide counter, so a
-	// member rebuilt in place can never collide with its predecessor's ticks.
+	// on, and is 0 while no loop is armed (see arming). A plain "armed" flag
+	// cannot do this alone: leaving the board clears it, but the tea.Tick
+	// already scheduled still fires later, and if the user came back in the
+	// meantime a second tick had been armed beside it — two loops, each
+	// re-arming itself forever, one more per quick round trip off the board. A
+	// tick whose generation is not this one is dropped (see refreshTickMsg in
+	// model.go). Drawn from a process-wide counter, so it is never 0 once armed
+	// and a member rebuilt in place can never collide with its predecessor's
+	// ticks.
 	tickGen uint64
 
-	// refreshing is true while a refreshCmd for this member is in flight, and
-	// refreshSeq identifies it. A tick that finds one in flight is SKIPPED, so
-	// a slow API is never asked to serve overlapping refreshes; an
+	// refreshSeq identifies the refreshCmd in flight for this member, or is 0
+	// when there is none (see refreshing). A tick that finds one in flight is
+	// SKIPPED, so a slow API is never asked to serve overlapping refreshes; an
 	// action-triggered refresh is QUEUED (refreshQueued) and runs once the
 	// in-flight one lands, so a stop or start is never missing from the board.
 	// refreshSince lets a refresh that never reports back be superseded.
-	refreshing             bool
 	refreshSeq             uint64
 	refreshSince           time.Time
 	refreshQueued          bool

@@ -37,6 +37,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/lullabot/sandbar/internal/backoff"
 )
 
 // maxConcurrentPerHost caps simultaneous requests to one PVE host across every
@@ -222,27 +224,35 @@ func (g *hostGate) refusal() error {
 	return nil
 }
 
-// record folds one request's outcome into the gate. answered is true when the
-// host produced a response that is not a gateway failure — any such response,
-// including a 4xx or an application 500, proves the host is up and resets the
-// backoff. A failure extends the window from the CURRENT failure count, so a
-// burst of requests that were all in flight when the host went down advances
-// the schedule rather than each restarting it.
-func (g *hostGate) record(answered bool, cause error) {
+// succeed records that the host produced a response that is not a gateway
+// failure. Any such response, including a 4xx or an application 500, proves the
+// host is up and resets the backoff.
+func (g *hostGate) succeed() {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	if answered {
-		g.failures = 0
-		g.openUntil = time.Time{}
-		g.cause = nil
-		return
-	}
+	g.failures = 0
+	g.openUntil = time.Time{}
+	g.cause = nil
+}
+
+// fail records that the host did not answer and returns the failure as an
+// *UnavailableError, so it classifies (IsUnavailable) exactly like the refusals
+// that follow it. Without that, the FIRST failure of an outage looked like an
+// ordinary error: waitTask abandoned a task still running on the node, and the
+// board labelled the member broken rather than degraded.
+//
+// The window is extended from the CURRENT failure count, so a burst of requests
+// that were all in flight when the host went down advances the schedule rather
+// than each restarting it.
+func (g *hostGate) fail(cause error) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
 	g.failures++
 	g.cause = cause
-	until := time.Now().Add(backoffFor(g.failures))
-	if until.After(g.openUntil) {
+	if until := time.Now().Add(backoffFor(g.failures)); until.After(g.openUntil) {
 		g.openUntil = until
 	}
+	return &UnavailableError{Host: g.host, RetryAfter: time.Until(g.openUntil), Cause: cause}
 }
 
 // backoffFor is the cooldown after the nth consecutive failure: backoffBase
@@ -252,13 +262,7 @@ func (g *hostGate) record(answered bool, cause error) {
 // retrying in lockstep; the floor of half keeps the schedule meaningfully
 // exponential.
 func backoffFor(n int) time.Duration {
-	d := backoffBase
-	for i := 1; i < n && d < backoffMax; i++ {
-		d *= 2
-	}
-	if d > backoffMax {
-		d = backoffMax
-	}
+	d := backoff.Doubling(backoffBase, n, backoffMax)
 	half := d / 2
 	if half <= 0 {
 		return d
@@ -266,18 +270,10 @@ func backoffFor(n int) time.Duration {
 	return half + rand.N(half+1)
 }
 
-// classify reports whether a completed round trip counts as the host
-// answering. err is http.Client.Do's error; status is the response status when
-// err is nil. A context cancellation by the CALLER is neither: the caller gave
-// up, the host may be fine, so it must not move the gate at all (ok=false).
-func classify(ctx context.Context, err error, status int) (answered, ok bool) {
-	if err != nil {
-		if errors.Is(ctx.Err(), context.Canceled) {
-			return false, false
-		}
-		// A deadline that expired waiting on the host IS a sign it is not
-		// keeping up, as is every dial/TLS/reset failure.
-		return false, true
-	}
-	return !unavailableStatus(status), true
+// callerCanceled reports whether a failed round trip was the CALLER giving up.
+// That says nothing about the host, so it must not move the gate at all. A
+// deadline that expired waiting on the host, by contrast, IS a sign it is not
+// keeping up, as is every dial/TLS/reset failure.
+func callerCanceled(ctx context.Context) bool {
+	return errors.Is(ctx.Err(), context.Canceled)
 }

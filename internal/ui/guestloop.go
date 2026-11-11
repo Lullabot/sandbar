@@ -46,6 +46,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	retry "github.com/lullabot/sandbar/internal/backoff"
 )
 
 // guestLoopTTL bounds ONE guest loop's lifetime. It is deliberately long: the
@@ -155,17 +157,7 @@ func (l guestLoop) script() string {
 // unchanged, so a one-off death (the ordinary `limactl stop`) is still retried as
 // promptly as it always was.
 func backoff(base time.Duration, n int, max time.Duration) time.Duration {
-	if base <= 0 {
-		return 0
-	}
-	wait := base
-	for i := 1; i < n && wait < max; i++ {
-		wait *= 2
-	}
-	if wait > max {
-		wait = max
-	}
-	return wait
+	return retry.Doubling(base, n, max)
 }
 
 // probeRequests paces guest work over the existing SSH stdin. EOF or a two-minute

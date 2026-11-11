@@ -48,9 +48,11 @@ func ageCaches(p *proxmoxProvider, d time.Duration) {
 	c := &p.cache
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.snapAt = c.snapAt.Add(-d)
-	c.diskAt = c.diskAt.Add(-d)
-	c.hostAt = c.hostAt.Add(-d)
+	for _, at := range []*time.Time{&c.snap.at, &c.disk.at, &c.host.at} {
+		if !at.IsZero() { // zero means invalid; keep it that way
+			*at = at.Add(-d)
+		}
+	}
 	for id, e := range c.prov {
 		e.fetched = e.fetched.Add(-d)
 		c.prov[id] = e
@@ -272,8 +274,56 @@ func TestProxmoxConcurrentMemoryReadingsShareOneListing(t *testing.T) {
 	}
 }
 
-// A VM whose guest agent fails is left alone for a while: the next address
-// lookup (a heartbeat or sweep reconnecting) is answered locally instead of
+// The shared listing fetch must not inherit its first caller's context. The
+// heartbeat passes context.Background(); a fetch bound to that and stuck on a
+// host that accepts connections but never answers used to stay the in-flight
+// listing forever, so every later List joined it and timed out without ever
+// fetching again.
+func TestProxmoxListingFetchIsBoundedIndependentlyOfItsCaller(t *testing.T) {
+	m := fleetMock(t, 1)
+	var hang atomic.Bool
+	hang.Store(true)
+	inner := m.routes["/api2/json/cluster/resources"]
+	m.on("/cluster/resources", func(w http.ResponseWriter, r *http.Request) {
+		if hang.Load() {
+			<-r.Context().Done()
+			return
+		}
+		inner(w, r)
+	})
+	p := newProxmoxForTest(t, m)
+	orig := apiTimeout
+	apiTimeout = 50 * time.Millisecond
+	t.Cleanup(func() { apiTimeout = orig })
+
+	// The first caller brings no deadline of its own, like the heartbeat.
+	leader := make(chan error, 1)
+	go func() {
+		_, err := p.listing(context.Background(), listingMaxAge)
+		leader <- err
+	}()
+	time.Sleep(20 * time.Millisecond) // let it become the in-flight fetch
+	hang.Store(false)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		_, err := p.listing(ctx, listingMaxAge)
+		cancel()
+		if err == nil {
+			if err := <-leader; err == nil {
+				t.Fatal("the first caller's fetch against a hung host succeeded")
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the listing never recovered after the host started answering")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// A VM whose guest agent fails is left alone for a while: the next polling
+// address lookup (a heartbeat or sweep reconnecting, AsPoll) is answered locally instead of
 // costing a status read, a config read and another failing agent call.
 func TestProxmoxGuestAgentFailureIsNotRetriedImmediately(t *testing.T) {
 	m := newPVEMock(t)
@@ -282,8 +332,9 @@ func TestProxmoxGuestAgentFailureIsNotRetriedImmediately(t *testing.T) {
 	m.data("/nodes/pve1/qemu/100/config", `{"net0":"virtio=`+testMAC+`,bridge=vmbr0"}`)
 	m.fail("/nodes/pve1/qemu/100/agent/network-get-interfaces", http.StatusInternalServerError, "QEMU guest agent is not running")
 	p := newProxmoxForTest(t, m)
+	poll := AsPoll(context.Background())
 
-	if _, err := p.guestIP(context.Background(), "web"); err == nil {
+	if _, err := p.guestIP(poll, "web"); err == nil {
 		t.Fatal("guestIP: expected the agent failure")
 	}
 	if n := m.count("/nodes/pve1/qemu/100/agent/network-get-interfaces"); n != 1 {
@@ -292,7 +343,7 @@ func TestProxmoxGuestAgentFailureIsNotRetriedImmediately(t *testing.T) {
 
 	m.reset()
 	for range 10 {
-		if _, err := p.guestIP(context.Background(), "web"); err == nil {
+		if _, err := p.guestIP(poll, "web"); err == nil {
 			t.Fatal("guestIP: expected the remembered agent failure")
 		}
 	}
@@ -302,18 +353,28 @@ func TestProxmoxGuestAgentFailureIsNotRetriedImmediately(t *testing.T) {
 
 	// Once the backoff lapses the agent is asked again.
 	ageCaches(p, agentBackoffMax)
-	if _, err := p.guestIP(context.Background(), "web"); err == nil {
+	if _, err := p.guestIP(poll, "web"); err == nil {
 		t.Fatal("guestIP: expected the agent failure again")
 	}
 	if !m.sawPath("/nodes/pve1/qemu/100/agent/network-get-interfaces") {
 		t.Fatalf("the agent must be asked again after its backoff: %v", m.seen())
 	}
 
+	// A lookup without the poll mark (a shell, a copy) is not refused by the
+	// board's backoff: the agent may well have come up since.
+	m.reset()
+	if _, err := p.guestIP(context.Background(), "web"); err == nil {
+		t.Fatal("guestIP: expected the agent failure")
+	}
+	if !m.sawPath("/nodes/pve1/qemu/100/agent/network-get-interfaces") {
+		t.Fatalf("a user-initiated lookup must ask the agent despite the backoff: %v", m.seen())
+	}
+
 	// And a failure streak lengthens the window.
 	p.cache.mu.Lock()
 	st := p.cache.agent["web"]
 	p.cache.mu.Unlock()
-	if st.failures != 2 || time.Until(st.until) <= agentBackoffBase {
-		t.Fatalf("second failure: streak %d, window %v; want 2 and longer than %v", st.failures, time.Until(st.until), agentBackoffBase)
+	if st.failures != 3 || time.Until(st.until) <= agentBackoffBase {
+		t.Fatalf("third failure: streak %d, window %v; want 3 and longer than %v", st.failures, time.Until(st.until), agentBackoffBase)
 	}
 }

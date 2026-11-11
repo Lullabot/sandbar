@@ -68,31 +68,30 @@ func refreshTickCmd(scope registry.Scope, d time.Duration, gen uint64) tea.Cmd {
 // reopening — the same discipline that keeps the heartbeat gate correct without
 // being rechecked at a few remembered call sites.
 //
-// The per-member `arming` flag guards against a SECOND loop for that member:
+// The per-member arming() check guards against a SECOND loop for that member:
 // without it, every message while the gate is open would spawn its own tea.Tick
 // for every member, and N messages would poll N times as often — the same bug
 // tickSpinner's m.spinning guards against for the spinner, now per member so a
 // healthy member keeps its steady cadence while a wedged one backs off. An error
 // binding (nil provider) is never armed — there is nothing to list.
 //
-// Clearing `arming` when the gate closes does NOT cancel the tea.Tick already
+// Disarming (tickGen = 0) when the gate closes does NOT cancel the tea.Tick already
 // scheduled. Each arm therefore stamps a fresh tickGen, and the handler drops
 // any tick that is not the member's current one — otherwise returning to the
 // board before that old tick fired would leave two loops running for good.
 func (m *model) tickRefresh() tea.Cmd {
 	if !m.shouldTick() {
 		for i := range m.members {
-			m.members[i].arming = false
+			m.members[i].tickGen = 0
 		}
 		return nil
 	}
 	var cmds []tea.Cmd
 	for i := range m.members {
 		mem := &m.members[i]
-		if mem.prov == nil || mem.arming {
+		if mem.prov == nil || mem.arming() {
 			continue
 		}
-		mem.arming = true
 		mem.tickGen = refreshIDs.Add(1)
 		delay := mem.refreshDelay()
 		if time.Since(m.lastInput) >= heartbeatIdleAfter && delay < idleProbeInterval {
@@ -113,7 +112,7 @@ func (m *model) requestRefresh(i int, preflight, queue bool) tea.Cmd {
 	if mem.prov == nil {
 		return nil
 	}
-	if mem.refreshing && time.Since(mem.refreshSince) < refreshStuckAfter {
+	if mem.refreshing() && time.Since(mem.refreshSince) < refreshStuckAfter {
 		if queue {
 			mem.refreshQueued = true
 			mem.refreshQueuedPreflight = mem.refreshQueuedPreflight || preflight
@@ -121,7 +120,7 @@ func (m *model) requestRefresh(i int, preflight, queue bool) tea.Cmd {
 		return nil
 	}
 	seq := refreshIDs.Add(1)
-	mem.refreshing, mem.refreshSeq, mem.refreshSince = true, seq, time.Now()
+	mem.refreshSeq, mem.refreshSince = seq, time.Now()
 	return stampRefresh(refreshCmd(mem.scope, mem.prov, mem.hostFiles, preflight), seq)
 }
 
@@ -138,10 +137,10 @@ func (m *model) refreshLanded(scope registry.Scope, seq uint64) tea.Cmd {
 		return nil
 	}
 	mem := &m.members[i]
-	if !mem.refreshing || mem.refreshSeq != seq {
+	if mem.refreshSeq != seq {
 		return nil
 	}
-	mem.refreshing = false
+	mem.refreshSeq = 0
 	if !mem.refreshQueued || mem.state == connDisabled {
 		mem.refreshQueued, mem.refreshQueuedPreflight = false, false
 		return nil
@@ -150,6 +149,14 @@ func (m *model) refreshLanded(scope registry.Scope, seq uint64) tea.Cmd {
 	mem.refreshQueued, mem.refreshQueuedPreflight = false, false
 	return m.requestRefresh(i, preflight, false)
 }
+
+// arming reports whether a refresh-tick loop is in flight for this member —
+// exactly one at a time, so tickRefresh cannot stack duplicate ticks for one
+// member while still arming the others.
+func (mem *fleetMember) arming() bool { return mem.tickGen != 0 }
+
+// refreshing reports whether a refreshCmd for this member is in flight.
+func (mem *fleetMember) refreshing() bool { return mem.refreshSeq != 0 }
 
 // stampRefresh tags the vmsLoadedMsg a refresh produces with its sequence
 // number, so refreshLanded can match the result to the request.

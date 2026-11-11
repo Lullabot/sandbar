@@ -735,7 +735,7 @@ func (r *heartbeatRegistry) start(scope registry.Scope, name string) (uint64, <-
 	// WithoutMux: this connection lives as long as the board does, so it must not
 	// ride (or become) the shared control master — one master's death would
 	// otherwise take every VM's gauges down with it. See sshx.WithoutMux.
-	ctx, cancel := context.WithCancel(sshx.WithoutMux(context.Background()))
+	ctx, cancel := context.WithCancel(provider.AsPoll(sshx.WithoutMux(context.Background())))
 	// Buffered by one so the sampler can hand off a sample and get straight back to
 	// reading the stream, without waiting for Update to come round.
 	ch := make(chan guestSample, 1)

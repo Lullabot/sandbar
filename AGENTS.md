@@ -112,7 +112,10 @@ it is not where prose belongs.
   board's polling to about one `/cluster/resources` per refresh, whatever the
   fleet size. One listing serves `List`, `Provenance` and `VMHostMemory`.
   Markers, disk allocation and node capacity have long TTLs, and a failing
-  guest agent is backed off per VM. Lifecycle verbs keep their live, verified
+  guest agent is backed off per VM, but only for contexts marked
+  `provider.AsPoll` (the heartbeat and the sweep). A user's shell, paste,
+  copy or forward is never refused by that backoff, whichever helper it goes
+  through. Lifecycle verbs keep their live, verified
   `resolve` reads. **Do not put a per-VM API call on the polling path.**
   `TestProxmoxRefreshCostDoesNotGrowWithFleetSize` enforces this. In the TUI,
   each member has one refresh loop (`tickGen` drops stale ticks) and one

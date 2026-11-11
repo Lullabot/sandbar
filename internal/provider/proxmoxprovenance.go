@@ -362,17 +362,24 @@ func (p *proxmoxProvider) markManagedUnlocked(ctx context.Context, name string, 
 	// Description text travels as a normal form value; url.Values.Encode
 	// (inside SetConfigSync's request body) is the only escaping it ever
 	// gets — hand-escaping it here would double-encode it on the wire.
+	merged := mergeTag(tags, sandbarTag)
 	form := url.Values{
 		"description": {spliceDescriptionBlock(desc, payload)},
-		"tags":        {mergeTag(tags, sandbarTag)},
+		"tags":        {merged},
 	}
 	if err := p.client.SetConfigSync(ctx, vmid, form); err != nil {
 		return fmt.Errorf("proxmox: writing provenance for %s: %w", name, err)
 	}
 	// The board's cached view follows the write at once: the marker it just
-	// wrote, and a listing that will show the tag.
+	// wrote, and a listing that will show the tag. A tag newly added is a VM
+	// just cloned (or adopted), whose disk the cached allocation and free
+	// space do not include yet; a build's progress writes leave both alone.
 	p.storeProvenance(vmid, name, pv, true)
-	p.invalidateListing()
+	if merged != tags {
+		p.invalidateFleet()
+	} else {
+		p.invalidateListing()
+	}
 	return nil
 }
 

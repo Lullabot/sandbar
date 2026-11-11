@@ -44,13 +44,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/lullabot/sandbar/internal/backoff"
 	"github.com/lullabot/sandbar/internal/pve"
 )
 
 // Cache tunables. Vars so tests can shrink or pin them.
 var (
-	// listingMaxAge is how old a cluster listing List, Provenance and
-	// lookupVMID will accept. Short enough that every board refresh (5s) sees
+	// listingMaxAge is how old a cluster listing List and Provenance will
+	// accept. Short enough that every board refresh (5s) sees
 	// a fresh listing; long enough that List and Provenance in the SAME
 	// refresh share one.
 	listingMaxAge = 2 * time.Second
@@ -98,26 +99,41 @@ var (
 type proxmoxCache struct {
 	mu sync.Mutex
 
-	// The cluster listing. snapGen is bumped by invalidate, so a fetch that
-	// was already in flight when a mutation happened cannot install its
-	// pre-mutation listing as fresh.
-	snap      []pve.VMResource
-	snapAt    time.Time
-	snapValid bool
-	snapGen   uint64
-	flight    *listingFlight
-
-	disk      map[int]int64
-	diskAt    time.Time
-	diskValid bool
-
-	host      HostResources
-	hostAt    time.Time
-	hostValid bool
+	snap   ttlSlot[[]pve.VMResource] // the cluster listing
+	flight *listingFlight
+	disk   ttlSlot[map[int]int64] // per-VMID storage allocation
+	host   ttlSlot[HostResources] // node capacity and storage free space
 
 	prov map[int]provenanceEntry
 
 	agent map[string]agentState
+}
+
+// ttlSlot is one cached fact: its value, when it was stored (zero: never, or
+// invalidated since), and a generation that invalidate bumps, so a fetch that
+// was already in flight when a mutation happened cannot install its
+// pre-mutation answer as fresh. invalidate keeps the value, so a caller that
+// prefers a stale answer to none can still read it. Guarded by proxmoxCache.mu.
+type ttlSlot[T any] struct {
+	v   T
+	at  time.Time
+	gen uint64
+}
+
+func (s *ttlSlot[T]) fresh(maxAge time.Duration) bool {
+	return !s.at.IsZero() && time.Since(s.at) <= maxAge
+}
+
+func (s *ttlSlot[T]) invalidate() {
+	s.at = time.Time{}
+	s.gen++
+}
+
+// install stores v unless the slot was invalidated after gen was read.
+func (s *ttlSlot[T]) install(v T, gen uint64) {
+	if gen == s.gen {
+		s.v, s.at = v, time.Now()
+	}
 }
 
 type listingFlight struct {
@@ -150,112 +166,82 @@ type agentState struct {
 	err      error
 }
 
-// invalidate drops everything a lifecycle change can make wrong: the listing
-// (status, tags, membership), the disk allocation and the host's free space.
-// Provenance entries are per VM and updated by their own writers.
-func (c *proxmoxCache) invalidate() {
+// invalidate drops the listing (status, tags, membership). With fleet set it
+// also drops the disk allocation and the host's free space, which only a VM
+// being created or deleted changes; a power transition or a marker write does
+// not, and refetching both after every one of a build's progress writes would
+// be two requests each for numbers that had not moved. Provenance entries are
+// per VM and updated by their own writers.
+func (c *proxmoxCache) invalidate(fleet bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.snapValid = false
-	c.snapGen++
+	c.snap.invalidate()
 	c.flight = nil
-	c.diskValid = false
-	c.hostValid = false
+	if fleet {
+		c.disk.invalidate()
+		c.host.invalidate()
+	}
 }
 
 // listing returns the pool's cluster listing, no older than maxAge. Callers
 // must treat the slice as READ-ONLY: it is shared with every other caller
 // until the next fetch replaces it.
+//
+// The fetch runs on its own apiTimeout-bounded context, detached from every
+// caller's: it is shared, so one caller's short deadline must not fail the
+// others, and one caller's unbounded context (the heartbeat's memory read
+// passes context.Background()) must not leave a hung request as the flight
+// every later caller joins, forever. Each caller still stops waiting when its
+// own context ends.
 func (p *proxmoxProvider) listing(ctx context.Context, maxAge time.Duration) ([]pve.VMResource, error) {
 	c := &p.cache
 	c.mu.Lock()
-	if c.snapValid && time.Since(c.snapAt) <= maxAge {
-		res := c.snap
+	if c.snap.fresh(maxAge) {
+		res := c.snap.v
 		c.mu.Unlock()
 		return res, nil
 	}
-	if f := c.flight; f != nil {
-		c.mu.Unlock()
-		select {
-		case <-f.done:
-			return f.res, f.err
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
+	f := c.flight
+	if f == nil {
+		f = &listingFlight{done: make(chan struct{})}
+		c.flight = f
+		go p.fetchListing(f, c.snap.gen)
 	}
-	f := &listingFlight{done: make(chan struct{})}
-	c.flight = f
-	gen := c.snapGen
 	c.mu.Unlock()
+	select {
+	case <-f.done:
+		return f.res, f.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
 
+// fetchListing performs one shared listing fetch for flight f, and installs
+// its result as the cached listing unless an invalidation happened meanwhile.
+func (p *proxmoxProvider) fetchListing(f *listingFlight, gen uint64) {
+	ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
+	defer cancel()
 	res, err := p.client.ListVMs(ctx, p.pool)
 
+	c := &p.cache
 	c.mu.Lock()
 	if c.flight == f {
 		c.flight = nil
 	}
-	if err == nil && gen == c.snapGen {
-		c.snap, c.snapAt, c.snapValid = res, time.Now(), true
+	if err == nil {
+		c.snap.install(res, gen)
 	}
 	c.mu.Unlock()
 	f.res, f.err = res, err
 	close(f.done)
-	return res, err
 }
 
-// invalidateListing is the hook every lifecycle mutation calls.
-func (p *proxmoxProvider) invalidateListing() { p.cache.invalidate() }
+// invalidateListing is the hook a power transition or a marker write calls.
+func (p *proxmoxProvider) invalidateListing() { p.cache.invalidate(false) }
 
-// cachedDiskUsed returns the per-VM allocation index, refetching the storage
-// content listing only when the cached one is older than diskUsedTTL. A failed
-// fetch keeps serving the previous index (an allocation figure that is a
-// minute stale beats an absent one) and caches nothing new.
-func (p *proxmoxProvider) cachedDiskUsed(ctx context.Context) map[int]int64 {
-	if p.storage == "" {
-		return nil
-	}
-	c := &p.cache
-	c.mu.Lock()
-	if c.diskValid && time.Since(c.diskAt) < diskUsedTTL {
-		d := c.disk
-		c.mu.Unlock()
-		return d
-	}
-	prev := c.disk
-	c.mu.Unlock()
-
-	items, err := p.client.StorageContent(ctx, p.storage)
-	if err != nil {
-		return prev
-	}
-	d := diskUsedByVMID(items)
-	c.mu.Lock()
-	c.disk, c.diskAt, c.diskValid = d, time.Now(), true
-	c.mu.Unlock()
-	return d
-}
-
-// cachedHostResources serves HostResources from cache for hostResourcesTTL.
-// Only a reading with real numbers is cached, so a failed sample is retried
-// on the next refresh rather than pinned as zeros.
-func (p *proxmoxProvider) cachedHostResources(fetch func() HostResources) HostResources {
-	c := &p.cache
-	c.mu.Lock()
-	if c.hostValid && time.Since(c.hostAt) < hostResourcesTTL {
-		hr := c.host
-		c.mu.Unlock()
-		return hr
-	}
-	c.mu.Unlock()
-
-	hr := fetch()
-	if hr.CPUs > 0 || hr.MemBytes > 0 || hr.DiskTotalBytes > 0 {
-		c.mu.Lock()
-		c.host, c.hostAt, c.hostValid = hr, time.Now(), true
-		c.mu.Unlock()
-	}
-	return hr
-}
+// invalidateFleet is the hook for a VM appearing or disappearing: the listing,
+// and the storage allocation and free space that VM's disk changes.
+func (p *proxmoxProvider) invalidateFleet() { p.cache.invalidate(true) }
 
 // --- provenance -----------------------------------------------------------------
 
@@ -324,14 +310,6 @@ func (p *proxmoxProvider) dropProvenance(vmid int) {
 	delete(c.prov, vmid)
 }
 
-// IsDegraded reports whether err means a backend's API is not answering — a
-// proxy/gateway 5xx, a transport failure, or the client backing off after
-// one — as opposed to answering with an error. The board shows such a member
-// as degraded and retrying, not as broken: nothing about its configuration is
-// wrong, and the client is already pacing its retries. It exists so the UI
-// can ask without importing a backend's client package.
-func IsDegraded(err error) bool { return pve.IsUnavailable(err) }
-
 // --- guest agent backoff ---------------------------------------------------------
 
 // isAgentFailure reports whether err is the guest agent itself failing (PVE
@@ -369,14 +347,8 @@ func (p *proxmoxProvider) noteAgentFailure(name string, err error) {
 	}
 	st := c.agent[name]
 	st.failures++
-	wait := agentBackoffBase
-	for i := 1; i < st.failures && wait < agentBackoffMax; i++ {
-		wait *= 2
-	}
-	if wait > agentBackoffMax {
-		wait = agentBackoffMax
-	}
-	st.until, st.err = time.Now().Add(wait), err
+	st.until = time.Now().Add(backoff.Doubling(agentBackoffBase, st.failures, agentBackoffMax))
+	st.err = err
 	c.agent[name] = st
 }
 
