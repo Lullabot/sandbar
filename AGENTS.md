@@ -1054,16 +1054,16 @@ comment at `roles/agent-clipboard/tasks/main.yml`.
   The role creates a small `package.json` pinned by `selfreview_version`,
   runs `npm install`, links the CLI onto PATH, and verifies it runs.
   Renovate tracks the version. There is no build step or committed lockfile.
-  Keep the npm override until the unused dependency is removed upstream:
-  `@self-review/serve` declares `@self-review/react` at runtime, but serves
-  a prebuilt client and imports only `@self-review/core` outside Node's
-  built-ins. Replacing React with `@self-review/types` avoids its unused
-  dependency tree. For the measured release, this reduced the installation
-  from 310 MB/320 packages to 17 MB/17 packages. Deleting React afterwards
-  would leave dependencies npm installed at the top level. The role's
-  verification and `lima-e2e` size and resolution checks must stay: if a new
-  release needs React at runtime, the base build must fail. Remove the
-  override when upstream moves React to `devDependencies`.
+  `@self-review/serve` serves a prebuilt client and imports only
+  `@self-review/core` outside Node's built-ins. Since 2.0.4,
+  `@self-review/react` is a dev dependency, so `npm install --omit=dev`
+  skips its tree (310 MB/320 packages versus 17 MB/17 packages in the
+  measured release). Earlier releases needed an npm override replacing it
+  with `@self-review/types`; it has been removed. Deleting React after
+  installing would leave dependencies npm installed at the top level. The
+  role's verification and `lima-e2e` absence and size checks must stay: if
+  a release declares React at runtime again, the build must fail and the
+  override must return.
 - **Every base mutation belongs inside the base lock held by
   `prepareBaseAndClone`.** Build, in-place re-apply (converge), the 30-day
   refresh, and `--rebuild`'s destroy are all reached through

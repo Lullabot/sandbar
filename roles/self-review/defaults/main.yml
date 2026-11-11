@@ -3,13 +3,6 @@
 # than a literal in tasks/main.yml so Renovate can bump one line (see the
 # regex manager in renovate.json) and so a base can be built against a
 # different release without editing the role.
-#
-# The template uses this ONE value twice: for @self-review/serve itself and
-# for the @self-review/types release that stands in for its unused
-# @self-review/react dependency (see tasks/main.yml). That is correct rather
-# than lazy — every @self-review/* package is published in lockstep at the
-# same version, so a single pin is what keeps the substitute in step with the
-# thing it substitutes for.
 selfreview_version: "2.0.4"
 
 # selfreview_install_dir is the ONE fixed, predictable guest path the review

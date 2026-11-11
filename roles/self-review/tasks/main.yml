@@ -26,30 +26,18 @@
 # signal to re-run npm. Nothing else re-runs it, which is what keeps a
 # converge at changed=0.
 #
-# The `overrides` entry in that template is the load-bearing part, and it is
-# worth understanding before touching it. @self-review/serve declares
-# @self-review/react as a RUNTIME dependency, but it is not one: the browser
-# client ships prebuilt in the package's own dist/client, and the only thing
-# that ever needed React was the vite build that produced it upstream. Nothing
-# in dist/cli.js's import graph reaches it — the server's only non-builtin
-# import is @self-review/core.
-#
-# Installing it anyway is not a rounding error. Measured against 1.45.0:
-# 320 packages and 310MB with it, 17 packages and 17MB without — the
-# difference being mermaid (84MB), lucide-react (45MB), @emoji-mart (27MB),
-# @base-ui (21MB) and es-toolkit (18MB), every one of them reached ONLY
-# through that one dependency. Deleting the directory afterwards would not
-# help, because npm hoists those transitive packages to the top level where
-# they are no longer identifiable as react's.
-#
-# So the dependency is replaced, by npm itself, with @self-review/types — a
-# real package, already in the tree, small — and its subtree is therefore
-# never fetched at all. The verification task at the bottom of this file is
-# what keeps the substitution honest.
-#
-# The upstream fix is to move @self-review/react to devDependencies in
-# packages/serve/package.json. If that lands, this override simply stops
-# having anything to substitute.
+# The browser client ships prebuilt in the package's own dist/client, so the
+# server needs nothing beyond @self-review/core at runtime. Releases before
+# 2.0.4 nevertheless declared @self-review/react as a RUNTIME dependency, and
+# this manifest carried an npm `overrides` entry replacing it with the small
+# @self-review/types package. Installing React's tree is not a rounding error:
+# measured against 1.45.0 it was 320 packages and 310MB with it, 17 packages
+# and 17MB without (mermaid, lucide-react, @emoji-mart, @base-ui and
+# es-toolkit, all reached only through that one dependency). 2.0.4 moved it to
+# devDependencies, which `--omit=dev` below never installs, so the override has
+# been removed. If a release declares it as a runtime dependency again, the
+# lima-e2e job's absence and size checks fail; restore the override then
+# rather than letting the tree back in.
 - name: Write the pinned self-review install manifest
   ansible.builtin.template:
     src: package.json.j2
@@ -83,14 +71,13 @@
     owner: root
     group: root
 
-# The install above substitutes one of upstream's declared dependencies, so
-# this play does not get to ASSUME the result runs — it has to demonstrate it.
-# `--version` is enough to do that despite doing so little, because ES module
-# imports are hoisted: reaching the version branch at all means the entire
-# server import graph resolved. A release that genuinely started importing
-# @self-review/react at runtime would fail here with MODULE_NOT_FOUND, turning
-# the override into a red base build instead of a VM whose review command is
-# quietly broken.
+# The install above omits upstream's dev dependencies, so this play does not
+# get to ASSUME the result runs — it has to demonstrate it. `--version` is
+# enough to do that despite doing so little, because ES module imports are
+# hoisted: reaching the version branch at all means the entire server import
+# graph resolved. A release that imported a dev-only package at runtime would
+# fail here with MODULE_NOT_FOUND, turning it into a red base build instead of
+# a VM whose review command is quietly broken.
 #
 # It checks the VERSION, not just the exit status, so a stale binary left by a
 # failed upgrade cannot pass as a successful install.
