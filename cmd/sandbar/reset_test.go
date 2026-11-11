@@ -32,6 +32,15 @@ func (s *stubResetter) Reset(_ context.Context, cfg vm.CreateConfig, opts provis
 	return s.err
 }
 
+// The rest of manage.ResetBackend. A stub VM never exists and its transport
+// always answers, so manage.Reset never has a reason to retry against it.
+func (s *stubResetter) Get(name string) (vm.VM, error) { return vm.VM{}, vm.ErrNotFound }
+func (s *stubResetter) Delete(string, bool) error      { return nil }
+func (s *stubResetter) ShellOut(context.Context, string, ...string) ([]byte, error) {
+	return nil, nil
+}
+func (s *stubResetter) Preflight() error { return nil }
+
 // recordedVM is a VM already in the index, built with settings that are all
 // distinguishable from vm.DefaultCreateConfig()'s — otherwise "the reset used
 // the record" and "the reset used the defaults" look identical.

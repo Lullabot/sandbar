@@ -1354,11 +1354,15 @@ func (m model) submitReset(cfg vm.CreateConfig) (tea.Model, tea.Cmd) {
 	if mem, ok := m.memberByScope(m.formScope); ok {
 		opts.Profile = provision.ProfileRef{ID: mem.profile.ID, Name: mem.profile.Name}
 	}
+	provenancer, _ := prov.(provider.Provenancer)
 	run := func(ctx context.Context, c vm.CreateConfig, out io.Writer) error {
 		if _, err := agentprefs.LoadOrMigrate(prov.HostFiles(), c.BaseName); err != nil {
 			return err
 		}
-		return prov.Reset(ctx, cloneCfg, opts, out)
+		// manage.Reset, as `sandbar reset` does: a reset that loses its SSH
+		// connection (a locked workstation's agent, a dropped network) waits for
+		// it and finishes instead of failing with the VM already deleted.
+		return manage.Reset(ctx, prov, cloneCfg, opts, out, provenancer)
 	}
 	// beginReset, not beginProvision: a reset DELETES its VM and clones it back, so
 	// its VM legitimately vanishes from `limactl list` mid-run. The registry has to

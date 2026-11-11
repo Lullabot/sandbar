@@ -21,10 +21,10 @@ import (
 
 // resetter is the narrow backend surface doReset drives, so the gating and
 // bookkeeping around a reset can be unit-tested without a real limactl.
-// provider.Provider satisfies it natively.
-type resetter interface {
-	Reset(ctx context.Context, cfg vm.CreateConfig, opts provision.ResetOptions, out io.Writer) error
-}
+// provider.Provider satisfies it natively. It is manage.ResetBackend because
+// doReset runs the reset through manage.Reset, which needs to probe and clean
+// up after a dropped connection, not only to call Reset.
+type resetter = manage.ResetBackend
 
 // runReset implements `sandbar reset NAME`: the headless spelling of the TUI's `R`,
 // with the same gate (a sandbar-managed VM only), the same defaulting (every
@@ -154,6 +154,9 @@ There is no --clone-url: a reset rebuilds the project this VM already has. To
 work on a different repo, create another VM with 'sandbar create'.
 A blank --clone-token reuses the saved GitHub or scoped GitLab token for cloning.
 An explicit token replaces the saved token after a successful reset.
+
+A reset that loses its SSH connection (a locked SSH agent, a dropped network)
+waits up to two hours for it to come back, then finishes on its own.
 
 If a reset fails after the VM was deleted, the error names a directory holding
 your backup. Finish the job with:
@@ -546,7 +549,10 @@ func doReset(ctx context.Context, reg *registry.Registry, p resetter, cfg vm.Cre
 	if err != nil {
 		return err
 	}
-	if err := p.Reset(ctx, cloneCfg, opts, out); err != nil {
+	// manage.Reset, not p.Reset: a reset that loses its SSH connection waits for
+	// it and finishes, rather than leaving a half-built VM behind (see
+	// manage.Reset). The TUI goes through the same function.
+	if err := manage.Reset(ctx, p, cloneCfg, opts, out, firstProvenancer(provenancer)); err != nil {
 		return err
 	}
 	if err := manage.RecordSuccess(reg, cfg, scope, provenancer...); err != nil {
@@ -610,4 +616,12 @@ func reorderFlags(fs *flag.FlagSet, args []string) []string {
 		}
 	}
 	return append(flagArgs, positional...)
+}
+
+// firstProvenancer is doReset's optional trailing provenancer, or nil.
+func firstProvenancer(ps []provider.Provenancer) provider.Provenancer {
+	if len(ps) == 0 {
+		return nil
+	}
+	return ps[0]
 }
