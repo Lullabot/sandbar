@@ -78,6 +78,10 @@ var (
 // failure — a playbook task, a full disk — would fail the same way again, and
 // a cancelled context (Ctrl-C, or the TUI cancelling the job) means stop.
 func Reset(ctx context.Context, b ResetBackend, cfg vm.CreateConfig, opts provision.ResetOptions, out io.Writer, prov provider.Provenancer) error {
+	// Held across the retries too: the waiting is for someone to come back to
+	// the workstation, and a workstation that sleeps meanwhile drops the
+	// connection the wait is for.
+	defer StayAwake("Resetting " + cfg.Name)()
 	err := b.Reset(ctx, cfg, opts, out)
 	deadline := now().Add(resetRetryBudget)
 	for attempt := 1; err != nil && attempt <= resetMaxAttempts; attempt++ {

@@ -434,6 +434,11 @@ again, the reset continues automatically:
 
 Press Ctrl-C to stop waiting. The usual error and recovery command follow.
 
+While a create or reset runs, `sandbar` also asks your workstation not to
+sleep when idle. This keeps the connection open while you are away. The
+screen still locks, and closing the lid still sleeps. macOS and Linux desktop
+sessions support this. Elsewhere, the request quietly does nothing.
+
 ### If a reset fails after the VM was deleted
 
 When a reset fails after it deleted the VM, for example because the clone ran

@@ -1255,6 +1255,9 @@ func (m model) submitForm() (tea.Model, tea.Cmd) {
 		if err := agentprefs.Save(agentprefs.FromConfig(c)); err != nil {
 			return err
 		}
+		// Concurrent builds share one hold; the reset path takes its own inside
+		// manage.Reset.
+		defer manage.StayAwake("Creating " + c.Name)()
 		return prov.Create(ctx, c, opts, out)
 	}
 	cmd := m.beginProvision("Creating "+cfg.Name, run, cfg)

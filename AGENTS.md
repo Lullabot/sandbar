@@ -140,6 +140,11 @@ it is not where prose belongs.
   (the `LIMA_HOME=… limactl` prefix, instance files, the two-stage copy, the
   remote lock); the Proxmox provider uses a `Conn` directly, and imports
   `internal/lima` only for the `HostFiles` seam.
+- `keepawake` — keeps the workstation out of idle sleep during a create or
+  reset, so the SSH connection those depend on survives someone walking
+  away. It uses native APIs with no subprocess; see "What a reset preserves"
+  below. It adds the only two module dependencies that are platform-specific:
+  `github.com/ebitengine/purego` and `github.com/godbus/dbus/v5`.
 - `provision` — orchestrates create/reset (base build, `limactl clone`,
   finalize) and the Ansible run; `staging.go` moves data across a reset.
   Depends on `*lima.Client` and the `Host` seam (for base-image file access),
@@ -1206,11 +1211,11 @@ shared rules.
   `AdoptOnce` stamped the half-built VM *ready*. A resume may delete exactly
   one VM, its own half-built replacement: `manage.OwnRebuild` compares the
   two tokens, and a missing record, a missing marker or a different token
-  means "refuse", never "delete". The Lima reset removes a
-  replacement whose clone or first boot failed, as `createVM` does. That is
-  safe only because the name was proven free first: deleted, or
-  `lima.Client.Exists` reported a definite absence. Do not weaken either check
-  to `Status`'s "empty or error".
+  means "refuse", never "delete". The Lima reset removes a replacement whose
+  clone or first boot failed, as `createVM` does. That is safe only because
+  the name was proven free first: deleted, or `lima.Client.Exists` reported a
+  definite absence. Do not weaken either check to `Status`'s "empty or
+  error".
 - **A reset that loses its SSH transport waits and finishes** (`manage.Reset`,
   used by both `sandbar reset` and the TUI's `R`; call it, never
   `Provider.Reset` directly). It retries only `sshx.IsTransportFailure`
@@ -1219,6 +1224,14 @@ shared rules.
   `resetRetryBudget`. A failure after the delete resumes from the backup,
   with the preserve flags cleared, as `--from-backup` clears them. Any other
   failure reruns the same reset.
+- **Creates and resets hold the workstation out of idle sleep**
+  (`internal/keepawake` via `manage.StayAwake`). The backends call native
+  APIs: IOKit through `purego` on macOS (release builds are `CGO_ENABLED=0`),
+  logind's D-Bus `Inhibit` on Linux, and `SetThreadExecutionState` on
+  Windows. Do not replace them with `caffeinate`/`systemd-inhibit`
+  subprocesses. Holds are reference-counted and failures are silent.
+  `StayAwake` is a no-op under `go test` (`testing.Testing()`), so faked
+  builds never take a real inhibitor.
 - **Validate preserve paths before deleting the VM.** Guest-supplied
   `PreservePaths` reach `tar -C <home> <rel>` and root's recursive `chown`
   during restore. `preservePathRel` must reject paths outside the guest home
