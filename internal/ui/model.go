@@ -736,11 +736,7 @@ func (m model) Init() tea.Cmd {
 	var cmds []tea.Cmd
 	cmds = append(cmds, releaseCheckCmd(m.releaseChecker))
 	for i := range m.members {
-		mem := m.members[i]
-		if mem.prov == nil {
-			continue
-		}
-		cmds = append(cmds, refreshCmd(mem.scope, mem.prov, mem.hostFiles, true))
+		cmds = append(cmds, m.requestRefresh(i, true, true))
 	}
 	return tea.Batch(cmds...)
 }
@@ -974,6 +970,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	nm.syncBoard()
 	nm.heartbeats.activity(nm.lastInput)
 	nm.sweeps.activity(nm.lastInput)
+	// A refresh result closes its member's in-flight slot here, centrally,
+	// rather than at each of the vmsLoadedMsg handler's many early returns —
+	// one forgotten return would leave the member's board frozen behind a
+	// refresh that had long since landed. It may start a queued refresh.
+	var landed tea.Cmd
+	if loaded, ok := msg.(vmsLoadedMsg); ok {
+		landed = nm.refreshLanded(loaded.scope, loaded.seq)
+	}
 	// The batch is built into a LOCAL before nm is returned. tickRefresh takes a
 	// POINTER receiver and sets nm.refreshing = true; Go orders the function calls in
 	// a return statement but not the copy of the plain `nm` operand sitting beside
@@ -982,7 +986,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// would arm another, stacking refresh loops until the list call rate ran away.
 	// gc happens to copy last today. This is the same hazard updateBoard already
 	// hoists around (see the note under Quit there); not leaning on it is free.
-	cmds := tea.Batch(cmd, nm.syncHeartbeats(), nm.syncSweeps(), nm.tickRefresh())
+	cmds := tea.Batch(cmd, landed, nm.syncHeartbeats(), nm.syncSweeps(), nm.tickRefresh())
 	return nm, cmds
 }
 
@@ -1157,6 +1161,13 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !ok {
 			return m, nil
 		}
+		// A tick from a loop this member has since replaced — armed before a
+		// trip off the board, firing after the return — is dropped WITHOUT
+		// touching arming: the member's current loop is the one still pending,
+		// and letting this one through would run two loops for good.
+		if msg.gen != 0 && msg.gen != m.members[i].tickGen {
+			return m, nil
+		}
 		m.members[i].arming = false
 		if !m.shouldTick() {
 			return m, nil
@@ -1167,8 +1178,9 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Re-preflight only while this member is NOT already connected — its
 		// errored-self-heal retry re-runs the handshake, a healthy member just
-		// re-lists (the pre-fleet local behaviour).
-		return m, refreshCmd(mem.scope, mem.prov, mem.hostFiles, mem.state != connConnected)
+		// re-lists (the pre-fleet local behaviour). A tick that finds the last
+		// refresh still running skips its turn (requestRefresh).
+		return m, m.requestRefresh(i, mem.state != connConnected, false)
 
 	case spinner.TickMsg:
 		// The spinner animates for any job in flight (on any VM, whether or not its

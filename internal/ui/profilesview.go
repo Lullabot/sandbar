@@ -449,7 +449,8 @@ func (m *model) rebuildMember(p profiles.Profile) tea.Cmd {
 	if mem.prov == nil {
 		return nil
 	}
-	return refreshCmd(scope, mem.prov, mem.hostFiles, true)
+	i, _ := m.memberIndexByProfileID(p.ID)
+	return m.requestRefresh(i, true, true)
 }
 
 // enableProfile persists id as enabled and spins its binding up live (see
@@ -1245,7 +1246,7 @@ func profileRowText(p profiles.Profile, mem fleetMember, hasMember bool) string 
 		case connErrored:
 			live := "error"
 			if mem.lastErr != nil {
-				live += ": " + mem.lastErr.Error()
+				live = memberErrorLabel(mem.lastErr) + ": " + mem.lastErr.Error()
 			}
 			parts = append(parts, live)
 		case connDisabled:

@@ -53,6 +53,7 @@ type Config struct {
 // request with a single static API token header.
 type Client struct {
 	http        *http.Client
+	gate        *hostGate
 	base        *url.URL
 	tokenHeader string
 	node        string
@@ -79,6 +80,7 @@ func New(cfg Config) (*Client, error) {
 	}
 
 	tlsConfig := &tls.Config{InsecureSkipVerify: cfg.InsecureSkipVerify}
+	var caPEM []byte
 	if cfg.CAFile != "" {
 		pem, err := os.ReadFile(cfg.CAFile)
 		if err != nil {
@@ -89,10 +91,16 @@ func New(cfg Config) (*Client, error) {
 			return nil, fmt.Errorf("pve: no certificates found in %s", cfg.CAFile)
 		}
 		tlsConfig.RootCAs = pool
+		caPEM = pem
 	}
 
+	// Both the HTTP client and the gate are SHARED per host (hostgate.go), so
+	// rebuilding a provider (a profile edit, say) neither opens a second
+	// connection pool nor gets a fresh concurrency budget against the same
+	// pveproxy.
 	return &Client{
-		http:        &http.Client{Transport: &http.Transport{TLSClientConfig: tlsConfig}},
+		http:        sharedHTTPClient(hostport, cfg.InsecureSkipVerify, caPEM, tlsConfig),
+		gate:        gateFor(hostport),
 		base:        &url.URL{Scheme: "https", Host: hostport, Path: apiBasePath},
 		tokenHeader: fmt.Sprintf("PVEAPIToken=%s", cfg.TokenID),
 		node:        cfg.Node,
@@ -129,15 +137,33 @@ func (c *Client) do(ctx context.Context, method, path string, query, body url.Va
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	}
 
+	// The slot is held for the whole exchange, body included: an unread body
+	// keeps its connection busy exactly like an unanswered request does.
+	if err := c.gate.acquire(ctx); err != nil {
+		return fmt.Errorf("pve: %s %s: %w", method, path, err)
+	}
+	defer c.gate.release()
+
 	resp, err := c.http.Do(req)
 	if err != nil {
+		if _, ok := classify(ctx, err, 0); ok {
+			c.gate.record(false, err)
+		}
 		return fmt.Errorf("pve: %s %s: %w", method, path, err)
 	}
 	defer resp.Body.Close()
 
+	// Always read to EOF, error responses included, so the connection returns
+	// to the idle pool instead of being torn down and redialled.
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
+		if _, ok := classify(ctx, err, 0); ok {
+			c.gate.record(false, err)
+		}
 		return fmt.Errorf("pve: reading %s %s response: %w", method, path, err)
+	}
+	if answered, ok := classify(ctx, nil, resp.StatusCode); ok {
+		c.gate.record(answered, fmt.Errorf("HTTP %s", resp.Status))
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {

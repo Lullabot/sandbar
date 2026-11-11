@@ -100,6 +100,23 @@ it is not where prose belongs.
   living in the HTTP reason phrase (not the body), async `POST`/sync `PUT`
   config, and node/VM stat fields that lie (QEMU `disk` is hardcoded 0). Adds
   **no** module dependency — keep it that way.
+  **The client must not be able to overload a node** (a sandbar board once
+  drove a PVE host's pveproxy into fd exhaustion and the OOM killer).
+  `hostgate.go` enforces this for every `Client`, not at call sites: a shared
+  `Transport` per host, a cap of 4 concurrent requests per host across all
+  clients, and jittered exponential backoff after a gateway 5xx (502/503/504,
+  596/599) or transport failure. During backoff, requests fail locally with
+  `ErrUnavailable` (`IsUnavailable`, `provider.IsDegraded`). Plain 500s do
+  **not** trip it: PVE reports ordinary errors, including "guest agent is not
+  running", as 500. On the provider side, `proxmoxcache.go` keeps the
+  board's polling to about one `/cluster/resources` per refresh, whatever the
+  fleet size. One listing serves `List`, `Provenance` and `VMHostMemory`.
+  Markers, disk allocation and node capacity have long TTLs, and a failing
+  guest agent is backed off per VM. Lifecycle verbs keep their live, verified
+  `resolve` reads. **Do not put a per-VM API call on the polling path.**
+  `TestProxmoxRefreshCostDoesNotGrowWithFleetSize` enforces this. In the TUI,
+  each member has one refresh loop (`tickGen` drops stale ticks) and one
+  refresh in flight (`requestRefresh`).
 - `lima` — typed wrapper over the `limactl` CLI. All subprocess execution goes
   through the `Host` interface (a union of `Runner` and `HostFiles` seams),
   and `Runner` is the gateway for subprocess execution — both implement it

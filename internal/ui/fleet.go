@@ -190,6 +190,28 @@ type fleetMember struct {
 	// still arming the others.
 	arming bool
 
+	// tickGen identifies the ONE refresh tick this member's loop is waiting
+	// on. The flag above cannot do that alone: leaving the board clears it,
+	// but the tea.Tick already scheduled still fires later, and if the user
+	// came back in the meantime a second tick had been armed beside it — two
+	// loops, each re-arming itself forever, one more per quick round trip off
+	// the board. A tick whose generation is not this one is dropped (see
+	// refreshTickMsg in model.go). Drawn from a process-wide counter, so a
+	// member rebuilt in place can never collide with its predecessor's ticks.
+	tickGen uint64
+
+	// refreshing is true while a refreshCmd for this member is in flight, and
+	// refreshSeq identifies it. A tick that finds one in flight is SKIPPED, so
+	// a slow API is never asked to serve overlapping refreshes; an
+	// action-triggered refresh is QUEUED (refreshQueued) and runs once the
+	// in-flight one lands, so a stop or start is never missing from the board.
+	// refreshSince lets a refresh that never reports back be superseded.
+	refreshing             bool
+	refreshSeq             uint64
+	refreshSince           time.Time
+	refreshQueued          bool
+	refreshQueuedPreflight bool
+
 	// warnedHostMem/warnedHostDisk latch a host-capacity warning already
 	// logged for THIS member (hostwarn.go's checkHostMemWarn/checkHostDiskWarn),
 	// so the refresh loop — which re-evaluates every refreshInterval — does not
@@ -366,9 +388,9 @@ func (m model) refreshMemberCmd(sc registry.Scope) tea.Cmd {
 	if !ok {
 		return nil
 	}
-	mem := m.members[i]
-	if mem.prov == nil {
-		return nil
-	}
-	return refreshCmd(mem.scope, mem.prov, mem.hostFiles, mem.state != connConnected)
+	// Queued, not skipped, when a refresh is already in flight: that one may
+	// have listed the fleet before this action changed it. m is a copy, but
+	// members is a shared slice, so the in-flight bookkeeping lands on the
+	// model Bubble Tea keeps.
+	return m.requestRefresh(i, m.members[i].state != connConnected, true)
 }

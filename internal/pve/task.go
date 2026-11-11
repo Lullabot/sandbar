@@ -134,19 +134,26 @@ func (c *Client) waitTask(ctx context.Context, upid string, out io.Writer) error
 
 		default:
 			var ae *APIError
-			transient := errors.As(err, &ae) &&
-				((ae.Status == http.StatusBadRequest && ae.HasErrorKey("upid")) ||
-					ae.Status == 596 || ae.Status == 599)
+			transient := IsUnavailable(err) || (errors.As(err, &ae) &&
+				ae.Status == http.StatusBadRequest && ae.HasErrorKey("upid"))
 			if !transient {
 				return err
 			}
-			// else: task not yet registered, or a proxy artifact — keep polling.
+			// else: task not yet registered, or the host is not answering
+			// (a proxy 5xx, a transport failure, or the backoff gate refusing
+			// locally). The task itself runs on the node regardless, so an
+			// outage of the API in front of it is no reason to abandon the
+			// wait — only to wait longer, which the gate's RetryAfter says.
 		}
 
+		wait := delay
+		if ra := RetryAfter(err); ra > wait {
+			wait = ra
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(delay):
+		case <-time.After(wait):
 		}
 		if delay += waitTaskPollInterval; delay > waitTaskMaxPollInterval {
 			delay = waitTaskMaxPollInterval

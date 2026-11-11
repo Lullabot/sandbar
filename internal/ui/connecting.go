@@ -35,8 +35,11 @@ func (m model) fleetConnectingBanner() string {
 	// profile is visible rather than a board that just sits blank forever.
 	var errLine string
 	for i := range m.members {
-		if m.members[i].state == connErrored && m.members[i].lastErr != nil {
-			errLine = m.members[i].lastErr.Error()
+		if err := m.members[i].lastErr; m.members[i].state == connErrored && err != nil {
+			errLine = err.Error()
+			if label := memberErrorLabel(err); label != "error" {
+				errLine = label + ": " + errLine
+			}
 			break
 		}
 	}
