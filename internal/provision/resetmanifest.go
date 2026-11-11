@@ -12,6 +12,9 @@
 package provision
 
 import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -56,6 +59,94 @@ func NewResetManifest(cfg vm.CreateConfig, plan PreservePlan, opts ResetOptions)
 		Config:         cfg,
 		Plan:           plan,
 		TemplateSource: opts.TemplateSource,
+	}
+}
+
+// rebuildRecordName is the file a reset writes beside its archives once the
+// replacement VM has been cloned. It is separate from reset.json on purpose:
+// the manifest is written while the old guest is intact and never rewritten,
+// so resuming a resume cannot damage it, and a backup from before manifests
+// existed can still carry a rebuild record.
+const rebuildRecordName = "rebuild.json"
+
+// rebuildRecord names the replacement VM a reset started building, by the
+// random RebuildID also written into that VM's provenance marker.
+//
+// It answers one question: is the instance now sitting under this name the
+// half-built replacement THIS backup's reset created, or something else? A
+// failed reset leaves its replacement behind, and a resume must not build over
+// a VM it cannot prove is disposable. Neither the instance's existence nor its
+// in-flight flag proves that: the board heals an in-flight marker to ready
+// after provider.AbandonedBuildAfter, the TUI's progress republisher rewrites
+// the marker's timestamp, and a VM created by hand under the same name in the
+// meantime is not ours to delete. A token both sides carry is what does.
+type rebuildRecord struct {
+	RebuildID string `json:"rebuild_id"`
+	Name      string `json:"name"`
+}
+
+// newRebuildID is a random token identifying one rebuild attempt.
+func newRebuildID() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:]) // crypto/rand.Read never returns an error
+	return hex.EncodeToString(b[:])
+}
+
+// RebuildID returns the token of the replacement VM that the reset which left
+// dir behind started building, or "" when it never got as far as cloning one
+// (or predates rebuild records).
+func RebuildID(dir string) (string, error) {
+	data, err := os.ReadFile(filepath.Join(dir, rebuildRecordName))
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", rebuildRecordName, err)
+	}
+	var r rebuildRecord
+	if err := json.Unmarshal(data, &r); err != nil {
+		return "", fmt.Errorf("read %s: %w", rebuildRecordName, err)
+	}
+	return r.RebuildID, nil
+}
+
+// MarkRebuildCloned is what both backends' resets call the moment the
+// replacement VM exists. It hands opts.OnCloned a RebuildID to stamp into the
+// clone's in-flight provenance marker and, once that write succeeded, records
+// the same ID beside the backup so a later resume can recognise the clone as
+// its own (see rebuildRecord). With nothing staged there is no backup to
+// resume from, so the ID is empty and only the marker is written.
+//
+// The marker matters even then. Without it a reset's replacement had NO
+// marker while it built, so when the reset failed the next sandbar command's
+// one-time adoption (manage.AdoptOnce) found a registry entry with no marker
+// and stamped the half-built VM READY.
+//
+// Best effort, like the create path's in-flight marker: a failed write leaves
+// a reset that still works, and costs only the automatic replacement of the
+// half-built VM should the reset later fail. The record is written only after
+// the marker, so a resume never trusts a token the VM does not carry.
+func MarkRebuildCloned(ctx context.Context, stage *StageGuard, opts ResetOptions, name string, out io.Writer) {
+	if opts.OnCloned == nil {
+		return
+	}
+	id := ""
+	if stage.Dir() != "" {
+		id = newRebuildID()
+	}
+	if err := opts.OnCloned(ctx, id); err != nil {
+		note(out, "Note: could not write the in-flight provenance marker for %q (%v); if this reset fails, delete the half-built VM yourself before resuming it.", name, err)
+		return
+	}
+	if id == "" {
+		return
+	}
+	data, err := json.MarshalIndent(rebuildRecord{RebuildID: id, Name: name}, "", "  ")
+	if err == nil {
+		err = os.WriteFile(filepath.Join(stage.Dir(), rebuildRecordName), data, 0o600)
+	}
+	if err != nil {
+		note(out, "Note: could not record the rebuild in %s (%v); if this reset fails, delete the half-built VM yourself before resuming it.", stage.Dir(), err)
 	}
 }
 

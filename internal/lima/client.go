@@ -159,7 +159,7 @@ func (c *Client) Get(name string) (vm.VM, error) {
 	out, err := c.r.Output(context.Background(), "list", name, "--format", "json")
 	if err != nil {
 		// limactl says "No instance matching <name> found." / "unmatched instances".
-		if strings.Contains(err.Error(), "unmatched instance") || strings.Contains(err.Error(), "No instance matching") {
+		if isNoInstance(err) {
 			return vm.VM{}, fmt.Errorf("%w: %s", vm.ErrNotFound, name)
 		}
 		return vm.VM{}, fmt.Errorf("limactl list %s: %w", name, err)
@@ -479,4 +479,26 @@ func (c *Client) runStream(ctx context.Context, out io.Writer, args ...string) e
 		return fmt.Errorf("limactl %s: %w", strings.Join(args, " "), err)
 	}
 	return nil
+}
+
+// Exists reports whether an instance named name exists, distinguishing a
+// definite "no such instance" (false, nil) from a lookup that failed (false,
+// err). The difference decides whether a caller may treat the name as free:
+// a reset that cleans up a failed clone must never clean up an instance it
+// could only fail to see.
+func (c *Client) Exists(name string) (bool, error) {
+	status, err := c.Status(name)
+	if err != nil {
+		if isNoInstance(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return status != "", nil
+}
+
+// isNoInstance recognises limactl's "No instance matching <name> found." /
+// "unmatched instances" refusal for a name it does not know.
+func isNoInstance(err error) bool {
+	return strings.Contains(err.Error(), "unmatched instance") || strings.Contains(err.Error(), "No instance matching")
 }

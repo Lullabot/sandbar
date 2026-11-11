@@ -839,10 +839,10 @@ no sync protocol.
 **Marker contract** (for future Proxmox/cloud implementers):
 - **Location:** `<LimaHome>/<name>/sandbar.json` on the host (Lima home directory).
 - **JSON schema** — `internal/provider/provenance.go`'s `Provenance` struct
-  (`provider.MarkerSchemaVersion`, currently **4**):
+  (`provider.MarkerSchemaVersion`, currently **5**):
   ```json
   {
-    "schema": 4,
+    "schema": 5,
     "base": "sandbar-base",
     "config": { /* vm.CreateConfig: name, BaseName, CPUs, Memory, Disk, etc. */ },
     "sandbar_version": "0.6.0",
@@ -850,7 +850,8 @@ no sync protocol.
     "provisioning": true,
     "progress": { "role": "user", "index": 3, "total": 9 },
     "base_revision": "…",
-    "setup_revision": "…"
+    "setup_revision": "…",
+    "rebuild_id": "…"
   }
   ```
   Every version so far is additive, so an older marker decodes with the newer
@@ -862,7 +863,14 @@ no sync protocol.
   (v4, `omitempty`) are the source revision the VM was actually cloned from,
   captured inside the clone lock, and the setup revision its finalize pass
   applied, recorded only after finalize succeeds. Empty means unknown —
-  including every marker written before v4 — never "current". Bump
+  including every marker written before v4 — never "current". `rebuild_id`
+  (v5, `omitempty`) is set only on a reset's replacement when that reset
+  staged a backup. The same random token goes into the backup's `rebuild.json`.
+  It is the ONLY evidence a resume accepts that the VM under the name is its
+  own half-built replacement and safe to delete. `MarkProgress` must carry it
+  across, and `Ready()` keeps it. Do not substitute `created_at` or
+  `provisioning`: the TUI's progress republisher rewrites the first, and the
+  board's abandoned-build healing clears the second. Bump
   `registry.adoptSchemaVersion` with `MarkerSchemaVersion`; it is a mirror kept
   in step for an import-cycle reason. Build a marker with
   `provider.NewProvenance(cfg, provisioning)`
@@ -1181,8 +1189,22 @@ shared rules.
   archives and only full success removes the directory. A directory with no
   manifest restores only a whole-home or agents archive. Project and extras
   archives are refused, since their paths came from a probe that cannot be
-  repeated. `StageGuard.Fail` prints the resume command: keep it accurate when
-  the flag changes.
+  repeated. `StageGuard.Fail` returns a `*StagedResetError` whose message
+  prints the resume command: keep it accurate when the flag changes. A
+  resume's finalize derives `sand_preserved_home`/`_agents` from the restored
+  plan as well as the options, because a resume has no preserve options of
+  its own.
+- **A reset's replacement carries a `rebuild_id` tied to its backup.**
+  Both resets call `provision.MarkRebuildCloned` the moment the replacement is
+  cloned. It writes an in-flight marker carrying a fresh `rebuild_id` through
+  `ResetOptions.OnCloned`, which `resetInFlightMarker` installs. Only after
+  that write succeeds does it write `rebuild.json` beside the backup. Before
+  this change a reset's clone carried no marker at all, so after a failure
+  `AdoptOnce` stamped the half-built VM *ready*. The Lima reset removes a
+  replacement whose clone or first boot failed, as `createVM` does. That is
+  safe only because the name was proven free first: deleted, or
+  `lima.Client.Exists` reported a definite absence. Do not weaken either check
+  to `Status`'s "empty or error".
 - **Validate preserve paths before deleting the VM.** Guest-supplied
   `PreservePaths` reach `tar -C <home> <rel>` and root's recursive `chown`
   during restore. `preservePathRel` must reject paths outside the guest home

@@ -1251,6 +1251,13 @@ type ResetOptions struct {
 	// preserve options are ignored, since the directory's own manifest says what
 	// was staged.
 	RestoreFrom string
+
+	// OnCloned is called once the replacement VM exists, with the RebuildID to
+	// stamp into its in-flight provenance marker ("" when nothing was staged).
+	// The provider wires it; see MarkRebuildCloned for what it is for. Like
+	// CreateOptions.OnCloned it is a callback because this package does not
+	// import internal/provider.
+	OnCloned func(ctx context.Context, rebuildID string) error
 }
 
 // Any reports whether the options ask for anything at all to survive the
@@ -1296,10 +1303,18 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 		// already happened, in a previous run. The archives are the only copy of
 		// the guest's data, which is why ResumeStage hands back a guard that keeps
 		// them on every failure.
-		if status, err := p.Lima.Status(cfg.Name); err == nil && status != "" {
+		//
+		// Only a definite "no such instance" lets the rebuild proceed. A lookup
+		// that failed for any other reason (a dropped connection to a remote host)
+		// proves nothing, and the clone-failure cleanup below assumes the name was
+		// free — it would otherwise remove an instance this resume never created.
+		exists, err := p.Lima.Exists(cfg.Name)
+		if err != nil {
+			return fmt.Errorf("check whether %q exists before restoring into it: %w", cfg.Name, err)
+		}
+		if exists {
 			return fmt.Errorf("cannot restore into %q: an instance with that name already exists; delete it first (this restores into a freshly built VM, it never overwrites a live one)", cfg.Name)
 		}
-		var err error
 		if stage, plan, err = ResumeReset(opts.RestoreFrom, cfg.Name, out); err != nil {
 			return err
 		}
@@ -1346,8 +1361,17 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 		// copy of what was in the guest, so every later failure keeps them — flipped
 		// BEFORE the call, since a delete that reports an error may still have taken
 		// the instance with it.
+		//
+		// An instance that is already gone is not a failure: it is what a rerun of
+		// a reset that failed after this point finds (the half-built replacement is
+		// cleaned up below when its clone or first boot fails), and it is how the
+		// Proxmox reset has always treated a missing VM. Only a definite "no such
+		// instance" skips the delete; a lookup error still reaches it, so a
+		// transport failure surfaces from the delete as before.
 		stage.DestroyingGuest()
-		if err := p.Lima.Delete(cfg.Name, true); err != nil {
+		if exists, err := p.Lima.Exists(cfg.Name); err == nil && !exists {
+			step(out, "%q no longer exists; building it fresh.", cfg.Name)
+		} else if err := p.Lima.Delete(cfg.Name, true); err != nil {
 			return stage.Fail(fmt.Errorf("delete %q: %w", cfg.Name, err))
 		}
 	}
@@ -1360,18 +1384,30 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 	// does; see phaseTimer's doc comment) — prepareBaseAndClone still needs a
 	// timer to share its signature with createVM, so give it one whose readings
 	// are simply discarded here.
+	//
+	// Until the clone has booted it holds nothing of the user's — the archives
+	// have not gone back yet — so a failure up to that point removes it, exactly
+	// as createVM does: a half-written instance directory makes every later
+	// `limactl list` fail, and a leftover replacement is one more thing a resume
+	// would have to get past. The name is known to be free here (deleted above,
+	// or proved absent by a resume), so anything under it is this run's.
 	if err := p.prepareBaseAndClone(ctx, cfg, cloneOpts, out, newPhaseTimer(out)); err != nil {
+		p.cleanupInstance(cfg.Name, out)
 		return stage.Fail(err)
 	}
+	MarkRebuildCloned(ctx, stage, opts, cfg.Name, out)
 	pbDir, err := p.stagedPlaybookDir(ctx)
 	if err != nil {
+		p.cleanupInstance(cfg.Name, out)
 		return stage.Fail(err)
 	}
 	if err := p.Lima.Configure(cfg.Name, cfg.CPUs, cfg.Memory, cfg.Disk, pbDir); err != nil {
+		p.cleanupInstance(cfg.Name, out)
 		return stage.Fail(fmt.Errorf("configure clone %q: %w", cfg.Name, err))
 	}
 	step(out, "Starting %q…", cfg.Name)
 	if err := p.Lima.StartStreaming(ctx, cfg.Name, out); err != nil {
+		p.cleanupInstance(cfg.Name, out)
 		return stage.Fail(fmt.Errorf("start %q: %w", cfg.Name, err))
 	}
 
@@ -1397,7 +1433,11 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 	if plan.Project.RestoresCheckout {
 		finCfg.CloneURL = "" // omit project_clone_url so the role skips its clone
 	}
-	if err := p.runProvision(ctx, cfg.Name, "finalize", cfg.EffectiveHostname(), finCfg, false, out, PreservationVars{FreshClone: opts.TemplateSource == "", Home: opts.PreserveHome, Agents: opts.PreserveAgents, OnSetupRevision: opts.OnSetupRevision}); err != nil {
+	// What was restored, not only what was asked for, tells finalize a home or
+	// agent state came back: a resume (RestoreFrom) carries no preserve options —
+	// the backup's plan says what is in it — and without the plan here its
+	// finalize treated a restored home as a fresh one.
+	if err := p.runProvision(ctx, cfg.Name, "finalize", cfg.EffectiveHostname(), finCfg, false, out, PreservationVars{FreshClone: opts.TemplateSource == "", Home: opts.PreserveHome || plan.WholeHome, Agents: opts.PreserveAgents || plan.Agents, OnSetupRevision: opts.OnSetupRevision}); err != nil {
 		return stage.Fail(err)
 	}
 
