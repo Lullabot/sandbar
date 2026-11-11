@@ -1987,7 +1987,10 @@ the <code>self-review-install-skills</code> command to run by hand.</p>
 attempting to delete the VM, it keeps the archives and prints their path
 for recovery, along with the <code>sandbar reset NAME --from-backup DIR</code> command that
 finishes the reset from a terminal. See
-<a href="../cli-reference/#if-a-reset-fails-after-the-vm-was-deleted"><code>sandbar reset</code></a>.</p>
+<a href="../cli-reference/#if-a-reset-fails-after-the-vm-was-deleted"><code>sandbar reset</code></a>.
+A reset that only lost its SSH connection, for example because your SSH agent
+locked with the screen, waits for the connection and finishes on its own. See
+<a href="../cli-reference/#if-the-connection-drops-during-a-reset">If the connection drops during a reset</a>.</p>
 <p><strong>Do not preserve data if you suspect the VM is compromised.</strong> It can
 include credentials and files written by an agent. See
 <a href="../../reference/security-model/">Security Model</a>.</p>

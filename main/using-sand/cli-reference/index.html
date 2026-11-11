@@ -951,6 +951,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#if-the-connection-drops-during-a-reset" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        If the connection drops during a reset
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#if-a-reset-fails-after-the-vm-was-deleted" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1852,6 +1863,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#if-the-connection-drops-during-a-reset" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        If the connection drops during a reset
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#if-a-reset-fails-after-the-vm-was-deleted" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2614,6 +2636,25 @@ include credentials and anything an agent wrote in the selected directories.
 See <a href="../../reference/security-model/">Security Model</a>.</p>
 <p>Files outside the directories you preserve are deleted. Nothing outside the
 guest home, such as <code>/srv</code> or <code>/opt</code>, can be preserved by these options.</p>
+<h3 id="if-the-connection-drops-during-a-reset">If the connection drops during a reset</h3>
+<p>A reset runs over SSH for several minutes, so a dropped connection is the
+most likely way for one to fail. A common cause is locking your workstation:
+SSH agents such as 1Password's lock with the screen, and any new SSH
+connection then fails to authenticate.</p>
+<p><code>sandbar</code> waits instead of failing. When SSH itself fails (exit status 255,
+never a failure inside the VM), the reset prints a message and checks the
+connection every 30 seconds for up to two hours. When the connection works
+again, the reset continues automatically:</p>
+<ul>
+<li>If the VM was already deleted and a backup staged, it resumes from the
+  backup, as <code>--from-backup</code> does.</li>
+<li>Otherwise it runs the same reset again.</li>
+</ul>
+<p>Press Ctrl-C to stop waiting. The usual error and recovery command follow.</p>
+<p>While a create or reset runs, <code>sandbar</code> also asks your workstation not to
+sleep when idle. This keeps the connection open while you are away. The
+screen still locks, and closing the lid still sleeps. macOS and Linux desktop
+sessions support this. Elsewhere, the request quietly does nothing.</p>
 <h3 id="if-a-reset-fails-after-the-vm-was-deleted">If a reset fails after the VM was deleted</h3>
 <p>When a reset fails after it deleted the VM, for example because the clone ran
 out of disk space, the VM is gone and the only copy of your preserved data is
@@ -2628,18 +2669,21 @@ does, and removes the directory once everything is back. If it fails again, the
 directory is kept and you can retry.</p>
 <ul>
 <li>The backup directory contains <code>reset.json</code> beside the archives. It records
-  the VM's settings and what was backed up. It never contains the clone token,
-  so cloning reuses the saved host token. Pass <code>--clone-token</code> if no token is
-  saved or to override it.</li>
-<li>The VM must not exist. <code>--from-backup</code> completes a reset; it never
-  overwrites a running VM. If you already created a replacement, delete it
-  first.</li>
+  the VM's settings, what was backed up, and the connection profile the VM
+  was on. It never contains the clone token, so cloning reuses the saved host
+  token. Pass <code>--clone-token</code> if no token is saved or to override it.</li>
+<li>A failed reset usually leaves a half-built replacement under the VM's name.
+  <code>--from-backup</code> deletes it and rebuilds. It only does this when the VM's
+  provenance marker carries the ID recorded in the backup's <code>rebuild.json</code>.
+  Any other VM with that name is refused, and you must delete it yourself.
+  <code>--from-backup</code> never overwrites a VM it can't prove is disposable.</li>
 <li>Don't combine <code>--from-backup</code> with the <code>--preserve</code> flags. The backup says
   what it holds.</li>
 <li>Other flags, such as <code>--memory</code>, override the recorded settings, as they do
   in a normal reset.</li>
-<li>The VM no longer exists, so <code>sandbar</code> can't discover its connection profile.
-  Pass <code>--profile</code> when more than one profile is enabled.</li>
+<li>The VM is rebuilt on the connection profile recorded in the backup. Pass
+  <code>--profile</code> to choose another. A backup made before profiles were recorded
+  needs <code>--profile</code> when more than one profile is enabled.</li>
 <li>A backup made by an older <code>sandbar</code> has no <code>reset.json</code>. A whole-home or
   agent-state backup still restores, using the VM's entry in the managed index
   or defaults for its settings. A backup that holds a project or checkout
@@ -2777,7 +2821,7 @@ before creating a VM.</p>
 <td><code>--profile</code></td>
 <td>string</td>
 <td><em>the profile that owns NAME</em></td>
-<td>Which <a href="../connection-profiles/">Connection Profile</a> <code>NAME</code> lives on. Only needed when the same name exists under more than one enabled profile.</td>
+<td>Which <a href="../connection-profiles/">Connection Profile</a> <code>NAME</code> lives on. Only needed when the same name exists under more than one enabled profile. With <code>--from-backup</code>, the default is the profile recorded in the backup.</td>
 </tr>
 </tbody>
 </table>
@@ -2836,61 +2880,64 @@ rotated later without a rebuild. See <a href="../secrets/#github-and-gitlab-toke
 <a id="__codelineno-6-33" name="__codelineno-6-33" href="#__codelineno-6-33"></a>A blank --clone-token reuses the saved GitHub or scoped GitLab token for cloning.
 <a id="__codelineno-6-34" name="__codelineno-6-34" href="#__codelineno-6-34"></a>An explicit token replaces the saved token after a successful reset.
 <a id="__codelineno-6-35" name="__codelineno-6-35" href="#__codelineno-6-35"></a>
-<a id="__codelineno-6-36" name="__codelineno-6-36" href="#__codelineno-6-36"></a>If a reset fails after the VM was deleted, the error names a directory holding
-<a id="__codelineno-6-37" name="__codelineno-6-37" href="#__codelineno-6-37"></a>your backup. Finish the job with:
+<a id="__codelineno-6-36" name="__codelineno-6-36" href="#__codelineno-6-36"></a>A reset that loses its SSH connection (a locked SSH agent, a dropped network)
+<a id="__codelineno-6-37" name="__codelineno-6-37" href="#__codelineno-6-37"></a>waits up to two hours for it to come back, then finishes on its own.
 <a id="__codelineno-6-38" name="__codelineno-6-38" href="#__codelineno-6-38"></a>
-<a id="__codelineno-6-39" name="__codelineno-6-39" href="#__codelineno-6-39"></a>  sandbar reset NAME --from-backup DIR
-<a id="__codelineno-6-40" name="__codelineno-6-40" href="#__codelineno-6-40"></a>
-<a id="__codelineno-6-41" name="__codelineno-6-41" href="#__codelineno-6-41"></a>That rebuilds NAME with the settings the failed reset recorded, restores the
-<a id="__codelineno-6-42" name="__codelineno-6-42" href="#__codelineno-6-42"></a>backup in the usual order, and removes DIR once everything is back. The VM must
-<a id="__codelineno-6-43" name="__codelineno-6-43" href="#__codelineno-6-43"></a>not exist (the failed reset already deleted it). Pass --profile if NAME's
-<a id="__codelineno-6-44" name="__codelineno-6-44" href="#__codelineno-6-44"></a>connection profile is not the only enabled one.
-<a id="__codelineno-6-45" name="__codelineno-6-45" href="#__codelineno-6-45"></a>
-<a id="__codelineno-6-46" name="__codelineno-6-46" href="#__codelineno-6-46"></a>Examples:
-<a id="__codelineno-6-47" name="__codelineno-6-47" href="#__codelineno-6-47"></a>  sandbar reset web                                  # clean rebuild, same settings
-<a id="__codelineno-6-48" name="__codelineno-6-48" href="#__codelineno-6-48"></a>  sandbar reset web --preserve-agents                # keep coding-agent state
-<a id="__codelineno-6-49" name="__codelineno-6-49" href="#__codelineno-6-49"></a>  sandbar reset web --preserve-agents --preserve-project
-<a id="__codelineno-6-50" name="__codelineno-6-50" href="#__codelineno-6-50"></a>  sandbar reset web --preserve ~/src/app --preserve ~/scratch/spike
-<a id="__codelineno-6-51" name="__codelineno-6-51" href="#__codelineno-6-51"></a>  sandbar reset web --preserve-home                  # keep everything, rebuild the OS
-<a id="__codelineno-6-52" name="__codelineno-6-52" href="#__codelineno-6-52"></a>  sandbar reset web --cpus 8 --memory 16GiB          # rebuild bigger
-<a id="__codelineno-6-53" name="__codelineno-6-53" href="#__codelineno-6-53"></a>
-<a id="__codelineno-6-54" name="__codelineno-6-54" href="#__codelineno-6-54"></a>Flags:
-<a id="__codelineno-6-55" name="__codelineno-6-55" href="#__codelineno-6-55"></a>  -clone-token string
-<a id="__codelineno-6-56" name="__codelineno-6-56" href="#__codelineno-6-56"></a>        Token for this VM's recorded repo (GitHub or GitLab); blank reuses its saved token
-<a id="__codelineno-6-57" name="__codelineno-6-57" href="#__codelineno-6-57"></a>  -cpus string
-<a id="__codelineno-6-58" name="__codelineno-6-58" href="#__codelineno-6-58"></a>        vCPUs (default: whatever this VM has)
-<a id="__codelineno-6-59" name="__codelineno-6-59" href="#__codelineno-6-59"></a>  -disk string
-<a id="__codelineno-6-60" name="__codelineno-6-60" href="#__codelineno-6-60"></a>        Disk size, e.g. 100GiB (default: whatever this VM has; a clone's disk can grow but never shrink)
-<a id="__codelineno-6-61" name="__codelineno-6-61" href="#__codelineno-6-61"></a>  -docker-proxy-host string
-<a id="__codelineno-6-62" name="__codelineno-6-62" href="#__codelineno-6-62"></a>        Docker registry pull-through proxy host (default: whatever this VM has)
-<a id="__codelineno-6-63" name="__codelineno-6-63" href="#__codelineno-6-63"></a>  -domain string
-<a id="__codelineno-6-64" name="__codelineno-6-64" href="#__codelineno-6-64"></a>        Domain suffix (default: whatever this VM has)
-<a id="__codelineno-6-65" name="__codelineno-6-65" href="#__codelineno-6-65"></a>  -from-backup DIR
-<a id="__codelineno-6-66" name="__codelineno-6-66" href="#__codelineno-6-66"></a>        Finish a reset that failed after deleting the VM: rebuild NAME and restore the backup in DIR (the path the failure named)
-<a id="__codelineno-6-67" name="__codelineno-6-67" href="#__codelineno-6-67"></a>  -git-email string
-<a id="__codelineno-6-68" name="__codelineno-6-68" href="#__codelineno-6-68"></a>        git user.email written into the VM (default: whatever this VM has)
-<a id="__codelineno-6-69" name="__codelineno-6-69" href="#__codelineno-6-69"></a>  -git-name string
-<a id="__codelineno-6-70" name="__codelineno-6-70" href="#__codelineno-6-70"></a>        git user.name written into the VM (default: whatever this VM has)
-<a id="__codelineno-6-71" name="__codelineno-6-71" href="#__codelineno-6-71"></a>  -hostname string
-<a id="__codelineno-6-72" name="__codelineno-6-72" href="#__codelineno-6-72"></a>        VM hostname (default: whatever this VM has)
-<a id="__codelineno-6-73" name="__codelineno-6-73" href="#__codelineno-6-73"></a>  -locale string
-<a id="__codelineno-6-74" name="__codelineno-6-74" href="#__codelineno-6-74"></a>        System locale (default: whatever this VM has)
-<a id="__codelineno-6-75" name="__codelineno-6-75" href="#__codelineno-6-75"></a>  -memory string
-<a id="__codelineno-6-76" name="__codelineno-6-76" href="#__codelineno-6-76"></a>        RAM, e.g. 8GiB (default: whatever this VM has)
-<a id="__codelineno-6-77" name="__codelineno-6-77" href="#__codelineno-6-77"></a>  -preserve PATH
-<a id="__codelineno-6-78" name="__codelineno-6-78" href="#__codelineno-6-78"></a>        Keep one more directory PATH inside the guest home (repeatable); run 'sandbar land NAME' to list this VM's checkouts
-<a id="__codelineno-6-79" name="__codelineno-6-79" href="#__codelineno-6-79"></a>  -preserve-agents
-<a id="__codelineno-6-80" name="__codelineno-6-80" href="#__codelineno-6-80"></a>        Keep settings and files for Claude Code, Codex, OpenCode, and Pi across the rebuild
-<a id="__codelineno-6-81" name="__codelineno-6-81" href="#__codelineno-6-81"></a>  -preserve-home
-<a id="__codelineno-6-82" name="__codelineno-6-82" href="#__codelineno-6-82"></a>        Keep the ENTIRE guest home directory across the rebuild (implies the other --preserve-* flags)
-<a id="__codelineno-6-83" name="__codelineno-6-83" href="#__codelineno-6-83"></a>  -preserve-project
-<a id="__codelineno-6-84" name="__codelineno-6-84" href="#__codelineno-6-84"></a>        Keep the cloned project's per-org directory (checkout + .env) across the rebuild
-<a id="__codelineno-6-85" name="__codelineno-6-85" href="#__codelineno-6-85"></a>  -profile string
-<a id="__codelineno-6-86" name="__codelineno-6-86" href="#__codelineno-6-86"></a>        Connection profile NAME lives on (only needed when NAME exists under more than one enabled profile)
-<a id="__codelineno-6-87" name="__codelineno-6-87" href="#__codelineno-6-87"></a>  -timezone string
-<a id="__codelineno-6-88" name="__codelineno-6-88" href="#__codelineno-6-88"></a>        IANA timezone for the guest (default: whatever this VM has)
-<a id="__codelineno-6-89" name="__codelineno-6-89" href="#__codelineno-6-89"></a>  -user string
-<a id="__codelineno-6-90" name="__codelineno-6-90" href="#__codelineno-6-90"></a>        Primary VM user (default: whatever this VM has)
+<a id="__codelineno-6-39" name="__codelineno-6-39" href="#__codelineno-6-39"></a>If a reset fails after the VM was deleted, the error names a directory holding
+<a id="__codelineno-6-40" name="__codelineno-6-40" href="#__codelineno-6-40"></a>your backup. Finish the job with:
+<a id="__codelineno-6-41" name="__codelineno-6-41" href="#__codelineno-6-41"></a>
+<a id="__codelineno-6-42" name="__codelineno-6-42" href="#__codelineno-6-42"></a>  sandbar reset NAME --from-backup DIR
+<a id="__codelineno-6-43" name="__codelineno-6-43" href="#__codelineno-6-43"></a>
+<a id="__codelineno-6-44" name="__codelineno-6-44" href="#__codelineno-6-44"></a>That rebuilds NAME on the connection profile and with the settings the failed
+<a id="__codelineno-6-45" name="__codelineno-6-45" href="#__codelineno-6-45"></a>reset recorded, restores the backup in the usual order, and removes DIR once
+<a id="__codelineno-6-46" name="__codelineno-6-46" href="#__codelineno-6-46"></a>everything is back. The half-built VM a failed reset leaves behind is replaced;
+<a id="__codelineno-6-47" name="__codelineno-6-47" href="#__codelineno-6-47"></a>any other VM of that name is refused.
+<a id="__codelineno-6-48" name="__codelineno-6-48" href="#__codelineno-6-48"></a>
+<a id="__codelineno-6-49" name="__codelineno-6-49" href="#__codelineno-6-49"></a>Examples:
+<a id="__codelineno-6-50" name="__codelineno-6-50" href="#__codelineno-6-50"></a>  sandbar reset web                                  # clean rebuild, same settings
+<a id="__codelineno-6-51" name="__codelineno-6-51" href="#__codelineno-6-51"></a>  sandbar reset web --preserve-agents                # keep coding-agent state
+<a id="__codelineno-6-52" name="__codelineno-6-52" href="#__codelineno-6-52"></a>  sandbar reset web --preserve-agents --preserve-project
+<a id="__codelineno-6-53" name="__codelineno-6-53" href="#__codelineno-6-53"></a>  sandbar reset web --preserve ~/src/app --preserve ~/scratch/spike
+<a id="__codelineno-6-54" name="__codelineno-6-54" href="#__codelineno-6-54"></a>  sandbar reset web --preserve-home                  # keep everything, rebuild the OS
+<a id="__codelineno-6-55" name="__codelineno-6-55" href="#__codelineno-6-55"></a>  sandbar reset web --cpus 8 --memory 16GiB          # rebuild bigger
+<a id="__codelineno-6-56" name="__codelineno-6-56" href="#__codelineno-6-56"></a>
+<a id="__codelineno-6-57" name="__codelineno-6-57" href="#__codelineno-6-57"></a>Flags:
+<a id="__codelineno-6-58" name="__codelineno-6-58" href="#__codelineno-6-58"></a>  -clone-token string
+<a id="__codelineno-6-59" name="__codelineno-6-59" href="#__codelineno-6-59"></a>        Token for this VM's recorded repo (GitHub or GitLab); blank reuses its saved token
+<a id="__codelineno-6-60" name="__codelineno-6-60" href="#__codelineno-6-60"></a>  -cpus string
+<a id="__codelineno-6-61" name="__codelineno-6-61" href="#__codelineno-6-61"></a>        vCPUs (default: whatever this VM has)
+<a id="__codelineno-6-62" name="__codelineno-6-62" href="#__codelineno-6-62"></a>  -disk string
+<a id="__codelineno-6-63" name="__codelineno-6-63" href="#__codelineno-6-63"></a>        Disk size, e.g. 100GiB (default: whatever this VM has; a clone's disk can grow but never shrink)
+<a id="__codelineno-6-64" name="__codelineno-6-64" href="#__codelineno-6-64"></a>  -docker-proxy-host string
+<a id="__codelineno-6-65" name="__codelineno-6-65" href="#__codelineno-6-65"></a>        Docker registry pull-through proxy host (default: whatever this VM has)
+<a id="__codelineno-6-66" name="__codelineno-6-66" href="#__codelineno-6-66"></a>  -domain string
+<a id="__codelineno-6-67" name="__codelineno-6-67" href="#__codelineno-6-67"></a>        Domain suffix (default: whatever this VM has)
+<a id="__codelineno-6-68" name="__codelineno-6-68" href="#__codelineno-6-68"></a>  -from-backup DIR
+<a id="__codelineno-6-69" name="__codelineno-6-69" href="#__codelineno-6-69"></a>        Finish a reset that failed after deleting the VM: rebuild NAME and restore the backup in DIR (the path the failure named)
+<a id="__codelineno-6-70" name="__codelineno-6-70" href="#__codelineno-6-70"></a>  -git-email string
+<a id="__codelineno-6-71" name="__codelineno-6-71" href="#__codelineno-6-71"></a>        git user.email written into the VM (default: whatever this VM has)
+<a id="__codelineno-6-72" name="__codelineno-6-72" href="#__codelineno-6-72"></a>  -git-name string
+<a id="__codelineno-6-73" name="__codelineno-6-73" href="#__codelineno-6-73"></a>        git user.name written into the VM (default: whatever this VM has)
+<a id="__codelineno-6-74" name="__codelineno-6-74" href="#__codelineno-6-74"></a>  -hostname string
+<a id="__codelineno-6-75" name="__codelineno-6-75" href="#__codelineno-6-75"></a>        VM hostname (default: whatever this VM has)
+<a id="__codelineno-6-76" name="__codelineno-6-76" href="#__codelineno-6-76"></a>  -locale string
+<a id="__codelineno-6-77" name="__codelineno-6-77" href="#__codelineno-6-77"></a>        System locale (default: whatever this VM has)
+<a id="__codelineno-6-78" name="__codelineno-6-78" href="#__codelineno-6-78"></a>  -memory string
+<a id="__codelineno-6-79" name="__codelineno-6-79" href="#__codelineno-6-79"></a>        RAM, e.g. 8GiB (default: whatever this VM has)
+<a id="__codelineno-6-80" name="__codelineno-6-80" href="#__codelineno-6-80"></a>  -preserve PATH
+<a id="__codelineno-6-81" name="__codelineno-6-81" href="#__codelineno-6-81"></a>        Keep one more directory PATH inside the guest home (repeatable); run 'sandbar land NAME' to list this VM's checkouts
+<a id="__codelineno-6-82" name="__codelineno-6-82" href="#__codelineno-6-82"></a>  -preserve-agents
+<a id="__codelineno-6-83" name="__codelineno-6-83" href="#__codelineno-6-83"></a>        Keep settings and files for Claude Code, Codex, OpenCode, and Pi across the rebuild
+<a id="__codelineno-6-84" name="__codelineno-6-84" href="#__codelineno-6-84"></a>  -preserve-home
+<a id="__codelineno-6-85" name="__codelineno-6-85" href="#__codelineno-6-85"></a>        Keep the ENTIRE guest home directory across the rebuild (implies the other --preserve-* flags)
+<a id="__codelineno-6-86" name="__codelineno-6-86" href="#__codelineno-6-86"></a>  -preserve-project
+<a id="__codelineno-6-87" name="__codelineno-6-87" href="#__codelineno-6-87"></a>        Keep the cloned project's per-org directory (checkout + .env) across the rebuild
+<a id="__codelineno-6-88" name="__codelineno-6-88" href="#__codelineno-6-88"></a>  -profile string
+<a id="__codelineno-6-89" name="__codelineno-6-89" href="#__codelineno-6-89"></a>        Connection profile NAME lives on (only needed when NAME exists under more than one enabled profile)
+<a id="__codelineno-6-90" name="__codelineno-6-90" href="#__codelineno-6-90"></a>  -timezone string
+<a id="__codelineno-6-91" name="__codelineno-6-91" href="#__codelineno-6-91"></a>        IANA timezone for the guest (default: whatever this VM has)
+<a id="__codelineno-6-92" name="__codelineno-6-92" href="#__codelineno-6-92"></a>  -user string
+<a id="__codelineno-6-93" name="__codelineno-6-93" href="#__codelineno-6-93"></a>        Primary VM user (default: whatever this VM has)
 </code></pre></div>
 <h2 id="sandbar-updates-name"><code>sandbar updates NAME</code></h2>
 <p>Inspect the VM's base and setup revisions separately, including VMs created
