@@ -1159,3 +1159,20 @@ func TestUnknownArchNeitherRendersNorTurnsTheBadgeOn(t *testing.T) {
 		t.Fatalf("a VM with a known arch rendered %q; want its own value", got)
 	}
 }
+
+// A provider that has not yet looked up a stopped VM's last-used time (or
+// whose lookup failed) must not have the tile claim the VM was never used.
+func TestTileUptimeClauseUnknownLastUsedIsNotNeverUsed(t *testing.T) {
+	now := time.Now()
+	got := ansi.Strip(tileUptimeClause(vm.VM{Status: "Stopped", LastUsedUnknown: true}, now))
+	if got != "last used —" {
+		t.Fatalf("unknown last-used clause = %q, want %q", got, "last used —")
+	}
+	if got := ansi.Strip(tileUptimeClause(vm.VM{Status: "Stopped"}, now)); got != "never used" {
+		t.Fatalf("known-never clause = %q, want %q (the zero value keeps Lima's meaning)", got, "never used")
+	}
+	known := vm.VM{Status: "Stopped", LastUsed: now.Add(-3 * time.Hour), LastUsedUnknown: true}
+	if got := ansi.Strip(tileUptimeClause(known, now)); got != "last used 3h ago" {
+		t.Fatalf("a known time must win over the flag, got %q", got)
+	}
+}

@@ -162,7 +162,7 @@ type proxmoxProvider struct {
 	// a real VM — the same rule internal/lima keeps for limactl.
 	runSSH func(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr io.Writer) error
 
-	// mu guards both caches below. They are read on the TUI's refresh path and
+	// mu guards the caches below. They are read on the TUI's refresh path and
 	// written by every lifecycle call, so a plain mutex is the honest tool.
 	mu sync.Mutex
 	// vmids is the name->VMID index (see the file header for why it exists and
@@ -176,6 +176,9 @@ type proxmoxProvider struct {
 	// means NOT YET KNOWN (or a token without Sys.Audit on the node), which the
 	// tile renders as an absence rather than a guess — see nodeArch.
 	arch string
+	// lastUsed caches each stopped VM's last-used time by VMID; see
+	// lastUsedAt in proxmoxtimes.go.
+	lastUsed map[int]time.Time
 
 	// cache holds the polled facts (the cluster listing, disk allocation, host
 	// capacity, provenance markers, guest-agent backoff) that keep the board's
@@ -405,6 +408,9 @@ func (p *proxmoxProvider) List() ([]vm.VM, error) {
 	// (diskUsedTTL), so a refresh does not pay for it at all most of the time.
 	diskUsed := p.diskUsedIndex(ctx)
 	arch := p.nodeArch(ctx)
+	p.refreshLastUsedCache(resources, index)
+	now := time.Now()
+	lookups := lastUsedLookupsPerCall
 
 	out := make([]vm.VM, 0, len(index))
 	for _, r := range resources {
@@ -413,7 +419,13 @@ func (p *proxmoxProvider) List() ([]vm.VM, error) {
 		if id, ok := index[r.Name]; !ok || id != r.VMID {
 			continue
 		}
-		out = append(out, p.resourceVM(r, diskUsed, arch))
+		v := p.resourceVM(r, diskUsed, arch, now)
+		// Only a stopped VM has a last-used time. Get does not fill it: tiles
+		// come from List, and Get's callers want live power state, not history.
+		if r.Status == pveStopped {
+			v.LastUsed, v.LastUsedUnknown = p.lastUsedAt(ctx, r.VMID, &lookups)
+		}
+		out = append(out, v)
 	}
 	return out, nil
 }
@@ -454,7 +466,7 @@ func (p *proxmoxProvider) Get(name string) (vm.VM, error) {
 	if err != nil {
 		return vm.VM{}, err
 	}
-	return p.statusVM(name, st, p.diskUsedIndex(ctx), p.nodeArch(ctx)), nil
+	return p.statusVM(name, st, p.diskUsedIndex(ctx), p.nodeArch(ctx), time.Now()), nil
 }
 
 // Status reports one instance's status in the vocabulary the UI and provisioner
@@ -619,7 +631,7 @@ func (p *proxmoxProvider) setArch(machine string) string {
 // is this call's storage-content index (see diskUsedIndex); a VM absent from
 // it (the fetch failed, or it simply owns no volume yet) gets DiskUsed=="",
 // the same "unknown" byteString already uses for Memory/Disk.
-func (p *proxmoxProvider) resourceVM(r pve.VMResource, diskUsed map[int]int64, arch string) vm.VM {
+func (p *proxmoxProvider) resourceVM(r pve.VMResource, diskUsed map[int]int64, arch string, now time.Time) vm.VM {
 	return vm.VM{
 		Name:     r.Name,
 		Status:   limaStatus(r.Status),
@@ -631,12 +643,13 @@ func (p *proxmoxProvider) resourceVM(r pve.VMResource, diskUsed map[int]int64, a
 		DiskUsedIsAllocation: true,
 		Arch:                 arch,
 		Dir:                  p.instanceDir(r.Name),
+		UpSince:              upSinceFromUptime(r.Uptime, now),
 	}
 }
 
 // statusVM converts a single-VM status reading into sand's VM record.
 // diskUsed is this call's storage-content index (see diskUsedIndex).
-func (p *proxmoxProvider) statusVM(name string, st pve.VMStatus, diskUsed map[int]int64, arch string) vm.VM {
+func (p *proxmoxProvider) statusVM(name string, st pve.VMStatus, diskUsed map[int]int64, arch string, now time.Time) vm.VM {
 	return vm.VM{
 		Name:                 name,
 		Status:               limaStatus(st.Status),
@@ -647,6 +660,7 @@ func (p *proxmoxProvider) statusVM(name string, st pve.VMStatus, diskUsed map[in
 		DiskUsedIsAllocation: true, // provisioned, not used — see resourceVM
 		Arch:                 arch,
 		Dir:                  p.instanceDir(name),
+		UpSince:              upSinceFromUptime(st.Uptime, now),
 	}
 }
 

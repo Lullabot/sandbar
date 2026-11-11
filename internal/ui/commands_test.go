@@ -5,8 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provider"
@@ -495,5 +498,49 @@ func TestRefreshCmdDoesNotClobberProviderPopulatedDiskUsed(t *testing.T) {
 	}
 	if got := msg.vms[0].DiskUsed; got != "53691285504" {
 		t.Fatalf("DiskUsed = %q; want the provider-populated reading preserved, not overwritten by the absent host-side probe", got)
+	}
+}
+
+// The Proxmox provider answers up-since and last-used from its own API, and
+// its Dir is a local state directory, not a Lima instance directory. The
+// Lima file probe must leave those answers alone, including an explicit
+// "unknown" that it would otherwise turn into a time from whatever file it
+// happened to find.
+func TestRefreshCmdKeepsProviderPopulatedTimes(t *testing.T) {
+	dir := t.TempDir()
+	stale := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, name := range []string{"ha.pid", "ha.stderr.log"} {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(p, stale, stale); err != nil {
+			t.Fatal(err)
+		}
+	}
+	up := time.Now().Add(-2 * time.Hour).Truncate(time.Second)
+	used := time.Now().Add(-26 * time.Hour).Truncate(time.Second)
+	prov := &providerfake.Provider{
+		ListFunc: func() ([]vm.VM, error) {
+			return []vm.VM{
+				{Name: "running", Status: "Running", Dir: dir, UpSince: up},
+				{Name: "stopped", Status: "Stopped", Dir: dir, LastUsed: used},
+				{Name: "pending", Status: "Stopped", Dir: dir, LastUsedUnknown: true},
+			}, nil
+		},
+	}
+
+	msg := refreshCmd(registry.LocalScope, prov, lima.LocalFiles(), false)().(vmsLoadedMsg)
+	if len(msg.vms) != 3 {
+		t.Fatalf("vms = %v; want three", msg.vms)
+	}
+	if got := msg.vms[0].UpSince; !got.Equal(up) {
+		t.Errorf("UpSince = %v; want the provider's %v", got, up)
+	}
+	if got := msg.vms[1].LastUsed; !got.Equal(used) {
+		t.Errorf("LastUsed = %v; want the provider's %v", got, used)
+	}
+	if got := msg.vms[2]; !got.LastUsed.IsZero() || !got.LastUsedUnknown {
+		t.Errorf("pending VM = LastUsed %v, unknown %v; want it left unknown", got.LastUsed, got.LastUsedUnknown)
 	}
 }

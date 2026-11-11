@@ -34,6 +34,8 @@ type VMResource struct {
 	// per-VM status endpoint calls it cpus. A missing count zeros the header's
 	// guest-to-host CPU utilization calculation even when the guest is busy.
 	CPUs float64 `json:"maxcpu"`
+	// Uptime is the running VM's seconds since boot, and 0 for a stopped one.
+	Uptime int64 `json:"uptime"`
 	// Tags is PVE's semicolon-separated tag list for the VM. This listing
 	// endpoint carries it even though it does NOT carry the description —
 	// see internal/provider/proxmoxprovenance.go's Provenance, which reads
@@ -562,6 +564,29 @@ func (c *Client) GetStatus(ctx context.Context, vmid int) (VMStatus, error) {
 		return VMStatus{}, err
 	}
 	return st, nil
+}
+
+// RRDPoint is one row of GET .../qemu/{vmid}/rrddata. Time is the Unix start
+// of the row's consolidation interval. CPU is nil when the row has no reading:
+// pvestatd records a stopped VM's cpu as unknown, and PVE omits unknown fields
+// from each row rather than sending null or 0.
+// A pointer lets a caller distinguish a stopped interval from an idle one.
+type RRDPoint struct {
+	Time int64    `json:"time"`
+	CPU  *float64 `json:"cpu,omitempty"`
+}
+
+// RRDData reads vmid's recorded statistics over timeframe ("hour", "day",
+// "week", "month" or "year"; PVE 9 adds "decade") using AVERAGE
+// consolidation. Rows are in chronological order. Requires VM.Audit on the VM.
+func (c *Client) RRDData(ctx context.Context, vmid int, timeframe string) ([]RRDPoint, error) {
+	var out []RRDPoint
+	path := fmt.Sprintf("/nodes/%s/qemu/%d/rrddata", c.node, vmid)
+	q := url.Values{"timeframe": {timeframe}, "cf": {"AVERAGE"}}
+	if err := c.do(ctx, http.MethodGet, path, q, nil, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // DeleteVM deletes vmid via DELETE .../qemu/{vmid}, returning a UPID. When
