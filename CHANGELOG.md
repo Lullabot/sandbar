@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.19.0](https://github.com/Lullabot/sandbar/compare/v0.18.0...v0.19.0) (2026-11-13)
+
+
+### Features
+
+* **keepawake:** keep the workstation out of idle sleep during builds ([#346](https://github.com/Lullabot/sandbar/issues/346)) ([d75a976](https://github.com/Lullabot/sandbar/commit/d75a976ab4b24f1482fb816215c7c7f90aaced43))
+* **reset:** finish --from-backup without --profile or a manual delete ([#344](https://github.com/Lullabot/sandbar/issues/344)) ([2859930](https://github.com/Lullabot/sandbar/commit/2859930fd30efba5732453603fd4a127b948bd12))
+* **reset:** wait out a dropped SSH connection instead of failing ([#345](https://github.com/Lullabot/sandbar/issues/345)) ([b0454a5](https://github.com/Lullabot/sandbar/commit/b0454a5e21371c04fe7e30e012f89a1cbfd44349))
+
+
+### Bug Fixes
+
+* **deps:** update module charm.land/lipgloss/v2 to v2.1.0 ([#352](https://github.com/Lullabot/sandbar/issues/352)) ([c27527a](https://github.com/Lullabot/sandbar/commit/c27527ade5bb301853a9adb16078cb837df48372))
+* **deps:** update module github.com/ebitengine/purego to v0.11.3 ([#350](https://github.com/Lullabot/sandbar/issues/350)) ([5beac3b](https://github.com/Lullabot/sandbar/commit/5beac3bbd71056f704de7ee163a1c2bb8dd6e7c6))
+* **proxmox:** bound the TUI's request load on a PVE node ([#348](https://github.com/Lullabot/sandbar/issues/348)) ([0bb1989](https://github.com/Lullabot/sandbar/commit/0bb1989b616c2d2791fa2a987545a3700be95cee))
+* **proxmox:** show real up/last-used times on Proxmox tiles ([#351](https://github.com/Lullabot/sandbar/issues/351)) ([c07ecdb](https://github.com/Lullabot/sandbar/commit/c07ecdb13a4ebb367d8ebeb38fa19a25a0261ad9))
+* **reset:** mark a reset's replacement in flight and fix resume finalize ([#343](https://github.com/Lullabot/sandbar/issues/343)) ([3cdd937](https://github.com/Lullabot/sandbar/commit/3cdd937e1c3ea4cac40777b85d12bba1c1931952))
+
 ## [0.18.0](https://github.com/Lullabot/sandbar/compare/v0.17.0...v0.18.0) (2026-11-09)
 
 
