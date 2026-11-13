@@ -1,6 +1,8 @@
 package sshconfig
 
 import (
+	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -192,21 +194,202 @@ func TestUpsertRepairsTruncatedBlock(t *testing.T) {
 }
 
 func TestAliases(t *testing.T) {
-	for in, want := range map[string]string{
-		"Home Proxmox": "sandbar-home-proxmox-vm1",
-		"--Mac_Mini!!": "sandbar-mac-mini-vm1",
-		"":             "sandbar-profile-vm1",
-		"Ünïcode":      "sandbar-n-code-vm1",
-	} {
-		if got := ProfileAlias(in, "vm1"); got != want {
-			t.Errorf("ProfileAlias(%q) = %q, want %q", in, got, want)
-		}
+	if got := ProfileAlias("0123456789abcdef", "vm1"); got != "sandbar-0123456789abcdef-vm1" {
+		t.Errorf("ProfileAlias = %q", got)
+	}
+	if got := ProfileAliasPrefix("0123456789abcdef"); got != "sandbar-0123456789abcdef-" {
+		t.Errorf("ProfileAliasPrefix = %q", got)
 	}
 	if got := LimaAlias("foo"); got != "lima-foo" {
 		t.Errorf("LimaAlias = %q", got)
 	}
 }
 
+// RemoveWhere removes every matching VM block in one rewrite, reports what it
+// removed, and leaves the other blocks and the include-check block alone.
+func TestRemoveWhere(t *testing.T) {
+	isolate(t)
+	if got, err := RemoveWhere(func(string) bool { return true }); err != nil || got != nil {
+		t.Fatalf("missing file: RemoveWhere = %v, %v; want nothing", got, err)
+	}
+	if _, err := os.Stat(ManagedPath()); !os.IsNotExist(err) {
+		t.Fatal("RemoveWhere on a missing file must not create it")
+	}
+	for _, e := range []Entry{
+		{Alias: "sandbar-aa-web", HostName: "10.0.0.1"},
+		{Alias: "lima-web", Include: "/l/web/ssh.config"},
+		{Alias: "sandbar-aa-api", HostName: "10.0.0.2"},
+		{Alias: "sandbar-bb-web", HostName: "10.0.0.3"},
+	} {
+		if err := Upsert(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := RemoveWhere(func(a string) bool { return strings.HasPrefix(a, ProfileAliasPrefix("aa")) })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, ",") != "sandbar-aa-web,sandbar-aa-api" {
+		t.Fatalf("removed %q", got)
+	}
+	data := readFile(t, ManagedPath())
+	for _, gone := range []string{"sandbar-aa-web", "sandbar-aa-api"} {
+		if strings.Contains(data, gone) {
+			t.Fatalf("%s survived:\n%s", gone, data)
+		}
+	}
+	for _, kept := range []string{"# sandbar end lima-web", "# sandbar end sandbar-bb-web", checkBlock} {
+		if !strings.Contains(data, kept) {
+			t.Fatalf("%q was lost:\n%s", kept, data)
+		}
+	}
+	if got, err := RemoveWhere(func(string) bool { return false }); err != nil || got != nil {
+		t.Fatalf("no match: RemoveWhere = %v, %v", got, err)
+	}
+}
+
+// Every write leaves exactly one header and include-check block at the top,
+// including over a file an older sandbar wrote (header, no check block) and a
+// check block a hand edit truncated.
+func TestManagedFilePreamble(t *testing.T) {
+	isolate(t)
+	path := ManagedPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	legacy := managedHeader + "# sandbar begin lima-a\nMatch all\nInclude \"/a\"\n# sandbar end lima-a\n"
+	if err := os.WriteFile(path, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureManaged(); err != nil {
+		t.Fatal(err)
+	}
+	want := managedHeader + checkBlock + "# sandbar begin lima-a\nMatch all\nInclude \"/a\"\n# sandbar end lima-a\n"
+	if got := readFile(t, path); got != want {
+		t.Fatalf("upgraded file:\n%s\nwant:\n%s", got, want)
+	}
+	if err := Upsert(Entry{Alias: "lima-b", Include: "/b"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, path); strings.Count(got, checkBegin) != 1 || strings.Count(got, managedHeader) != 1 || !strings.HasPrefix(got, managedHeader+checkBlock) {
+		t.Fatalf("preamble duplicated or moved:\n%s", got)
+	}
+
+	truncated := checkBegin + "Host sandbar-include-check-*\n" + "# sandbar begin lima-a\nMatch all\nInclude \"/a\"\n# sandbar end lima-a\n"
+	if err := os.WriteFile(path, []byte(truncated), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureManaged(); err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, path); got != want {
+		t.Fatalf("truncated check block not repaired:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// pinQuerySSH replaces the ssh the probe runs for one test.
+func pinQuerySSH(t *testing.T, fake func(ctx context.Context, args ...string) ([]byte, error)) {
+	t.Helper()
+	old := QuerySSH
+	t.Cleanup(func() { QuerySSH = old })
+	QuerySSH = fake
+}
+
+// IncludeApplied writes the check block before asking, names the user config
+// with -F, and reads ssh's answer from the hostname line.
+func TestIncludeAppliedParsesSSHAnswer(t *testing.T) {
+	isolate(t)
+	var args []string
+	answer := "user me\nhostname " + includeProbeHostName + "\nport 22\n"
+	pinQuerySSH(t, func(_ context.Context, a ...string) ([]byte, error) {
+		args = a
+		if !strings.Contains(readFile(t, ManagedPath()), checkBlock) {
+			t.Error("ssh was asked before the check block was written")
+		}
+		return []byte(answer), nil
+	})
+	if ok, err := IncludeApplied(context.Background()); err != nil || !ok {
+		t.Fatalf("applied: IncludeApplied = %v, %v", ok, err)
+	}
+	if want := []string{"-G", "-F", UserConfigPath(), IncludeProbeHost}; strings.Join(args, " ") != strings.Join(want, " ") {
+		t.Fatalf("ssh args %q, want %q", args, want)
+	}
+	answer = "hostname " + IncludeProbeHost + "\n"
+	if ok, err := IncludeApplied(context.Background()); err != nil || ok {
+		t.Fatalf("not applied: IncludeApplied = %v, %v", ok, err)
+	}
+	pinQuerySSH(t, func(context.Context, ...string) ([]byte, error) { return nil, ErrNoSSH })
+	if _, err := IncludeApplied(context.Background()); !errors.Is(err, ErrNoSSH) {
+		t.Fatalf("no ssh: err = %v, want ErrNoSSH", err)
+	}
+}
+
+// TopLevel is an Include of the managed file before any Host or Match line.
+func TestIncludeStatusTopLevel(t *testing.T) {
+	isolate(t)
+	for content, want := range map[string][2]bool{
+		"Include " + ManagedPath() + "\nHost x\n":                {true, true},
+		"ServerAliveInterval 5\nInclude " + ManagedPath() + "\n": {true, true},
+		"Host foo\n  Include " + ManagedPath() + "\n":            {true, false},
+		"Match host foo\nInclude " + ManagedPath() + "\n":        {true, false},
+		"HostName x\nInclude " + ManagedPath() + "\n":            {true, true},
+		"Host foo\nInclude " + ManagedPath() + ".bak\n":          {false, false},
+	} {
+		writeUserConfig(t, content)
+		st, err := IncludeStatus()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if [2]bool{st.Present, st.TopLevel} != want {
+			t.Errorf("%q: present/topLevel = %v/%v, want %v", content, st.Present, st.TopLevel, want)
+		}
+	}
+}
+
+// TestRealSSHDetectsMisplacedInclude is the probe against the real ssh
+// client: an Include line under a Host block is present in the file but not
+// applied, AddInclude then prepends a working one without touching the
+// user's, and an Include at the top passes from the start.
+func TestRealSSHDetectsMisplacedInclude(t *testing.T) {
+	if _, err := exec.LookPath("ssh"); err != nil {
+		t.Skip("ssh not installed")
+	}
+	isolate(t)
+	misplaced := "Host foo\n  HostName foo.example.com\n  " + IncludeLine() + "\n"
+	writeUserConfig(t, misplaced)
+	st, err := IncludeStatus()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.Present || st.TopLevel {
+		t.Fatalf("misplaced line: status %+v", st)
+	}
+	if ok, err := IncludeApplied(context.Background()); err != nil || ok {
+		t.Fatalf("misplaced Include: IncludeApplied = %v, %v; want false", ok, err)
+	}
+	if err := AddInclude(); err != nil {
+		t.Fatal(err)
+	}
+	got := readFile(t, UserConfigPath())
+	if !strings.HasSuffix(got, misplaced) || !strings.HasPrefix(got, includeComment+IncludeLine()+"\n") {
+		t.Fatalf("AddInclude should prepend and leave the user's line as written:\n%s", got)
+	}
+	if ok, err := IncludeApplied(context.Background()); err != nil || !ok {
+		t.Fatalf("after AddInclude: IncludeApplied = %v, %v; want true", ok, err)
+	}
+	// Now at the top, a second AddInclude has nothing to do.
+	if err := AddInclude(); err != nil {
+		t.Fatal(err)
+	}
+	if again := readFile(t, UserConfigPath()); again != got {
+		t.Fatalf("AddInclude added a second line:\n%s", again)
+	}
+
+	writeUserConfig(t, IncludeLine()+"\nHost foo\n  HostName foo.example.com\n")
+	if ok, err := IncludeApplied(context.Background()); err != nil || !ok {
+		t.Fatalf("top-of-file Include: IncludeApplied = %v, %v; want true", ok, err)
+	}
+}
 func TestIncludeStatusDetection(t *testing.T) {
 	home := isolate(t)
 	st, err := IncludeStatus()
@@ -352,7 +535,7 @@ func TestSSHResolvesManagedEntries(t *testing.T) {
 	// A key path with a space (needs quoting) and a percent sign (a token
 	// introducer ssh would otherwise try to expand).
 	key := filepath.Join(home, "my keys%1", "id_ed25519")
-	pve := ProfileAlias("Home PVE", "bar")
+	pve := ProfileAlias("0123456789abcdef", "bar")
 	if err := Upsert(Entry{
 		Alias:             pve,
 		HostName:          "127.0.0.1",

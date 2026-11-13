@@ -34,6 +34,11 @@ func isolate(t *testing.T, codeOnPath string) {
 	statFile = func(string) error { return os.ErrNotExist }
 }
 
+var (
+	localProf = profiles.Profile{ID: profiles.LocalProfileID, Name: "local", Type: profiles.TypeLocal}
+	miniProf  = profiles.Profile{ID: "mini", Name: "Mac Mini", Type: profiles.TypeRemoteSSH}
+)
+
 func fakeProvider(entry sshconfig.Entry, err error) *providerfake.Provider {
 	return &providerfake.Provider{
 		EditorSSHFunc: func(context.Context, vm.VM) (sshconfig.Entry, error) { return entry, err },
@@ -45,7 +50,7 @@ func TestPrepareOpensProjectCheckoutAndWritesEntry(t *testing.T) {
 	isolate(t, "/usr/bin/code")
 	p := fakeProvider(sshconfig.Entry{Include: "/lima/web/ssh.config"}, nil)
 
-	res, err := Prepare(context.Background(), p, vm.VM{Name: "web"}, "lima-web", "https://github.com/acme/widgets.git")
+	res, err := Prepare(context.Background(), p, localProf, vm.VM{Name: "web"}, "https://github.com/acme/widgets.git")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +76,7 @@ func TestPrepareOpensProjectCheckoutAndWritesEntry(t *testing.T) {
 func TestPrepareWithoutCloneURLOpensHome(t *testing.T) {
 	isolate(t, "/usr/bin/code")
 	p := fakeProvider(sshconfig.Entry{Include: "/lima/web/ssh.config", AuthorizedKey: "/k.pub"}, nil)
-	res, err := Prepare(context.Background(), p, vm.VM{Name: "web"}, "lima-web", "")
+	res, err := Prepare(context.Background(), p, localProf, vm.VM{Name: "web"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +94,7 @@ func TestPrepareUsesEntryGuestHome(t *testing.T) {
 		t.Fatal("GuestHome must not be read when the entry carries the home")
 		return ""
 	}
-	res, err := Prepare(context.Background(), p, vm.VM{Name: "web"}, "sandbar-mini-web", "")
+	res, err := Prepare(context.Background(), p, miniProf, vm.VM{Name: "web"}, "")
 	if err != nil || res.Folder != "/home/remote" {
 		t.Fatalf("Prepare = %+v, %v", res, err)
 	}
@@ -100,7 +105,7 @@ func TestPrepareFallsBackToGuestUserHome(t *testing.T) {
 	p := fakeProvider(sshconfig.Entry{Include: "/x"}, nil)
 	p.GuestHomeFunc = func(vm.VM) string { return "" }
 	p.GuestUserFunc = func(vm.VM) string { return "dev" }
-	res, err := Prepare(context.Background(), p, vm.VM{Name: "web"}, "lima-web", "")
+	res, err := Prepare(context.Background(), p, localProf, vm.VM{Name: "web"}, "")
 	if err != nil || res.Folder != "/home/dev" {
 		t.Fatalf("Prepare = %+v, %v", res, err)
 	}
@@ -109,7 +114,7 @@ func TestPrepareFallsBackToGuestUserHome(t *testing.T) {
 func TestPrepareWithoutCodeReturnsNoArgv(t *testing.T) {
 	isolate(t, "")
 	p := fakeProvider(sshconfig.Entry{Include: "/x"}, nil)
-	res, err := Prepare(context.Background(), p, vm.VM{Name: "web"}, "lima-web", "")
+	res, err := Prepare(context.Background(), p, localProf, vm.VM{Name: "web"}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +132,7 @@ func TestPrepareWithoutCodeReturnsNoArgv(t *testing.T) {
 func TestPrepareRefusesEmptyEntry(t *testing.T) {
 	isolate(t, "/usr/bin/code")
 	p := fakeProvider(sshconfig.Entry{}, nil)
-	if _, err := Prepare(context.Background(), p, vm.VM{Name: "web"}, "lima-web", ""); err == nil {
+	if _, err := Prepare(context.Background(), p, localProf, vm.VM{Name: "web"}, ""); err == nil {
 		t.Fatal("Prepare accepted an empty entry")
 	}
 }
@@ -153,7 +158,7 @@ func TestFindCodeUsesMacAppBundle(t *testing.T) {
 func TestPrepareEditorSSHErrorWritesNothing(t *testing.T) {
 	isolate(t, "/usr/bin/code")
 	p := fakeProvider(sshconfig.Entry{}, errors.New("no guest address"))
-	if _, err := Prepare(context.Background(), p, vm.VM{Name: "web"}, "lima-web", ""); err == nil || !strings.Contains(err.Error(), "no guest address") {
+	if _, err := Prepare(context.Background(), p, localProf, vm.VM{Name: "web"}, ""); err == nil || !strings.Contains(err.Error(), "no guest address") {
 		t.Fatalf("err = %v", err)
 	}
 	if _, err := os.Stat(sshconfig.ManagedPath()); !errors.Is(err, os.ErrNotExist) {
@@ -182,7 +187,7 @@ func TestOpenLaunches(t *testing.T) {
 	launched := pinLaunch(t, nil)
 	p := fakeProvider(sshconfig.Entry{HostName: "127.0.0.1", AuthorizedKey: "/k.pub"}, nil)
 
-	lines, ok, err := Open(context.Background(), p, vm.VM{Name: "web"}, "sandbar-mini-web", "")
+	lines, ok, err := Open(context.Background(), p, miniProf, vm.VM{Name: "web"}, "")
 	if err != nil || !ok {
 		t.Fatalf("Open = %v, %v, %v", lines, ok, err)
 	}
@@ -200,7 +205,7 @@ func TestOpenLaunches(t *testing.T) {
 func TestOpenWithoutCodeNamesTheAlias(t *testing.T) {
 	isolate(t, "")
 	launched := pinLaunch(t, nil)
-	lines, ok, err := Open(context.Background(), fakeProvider(sshconfig.Entry{Include: "/x"}, nil), vm.VM{Name: "web"}, "lima-web", "")
+	lines, ok, err := Open(context.Background(), fakeProvider(sshconfig.Entry{Include: "/x"}, nil), localProf, vm.VM{Name: "web"}, "")
 	if err != nil || ok {
 		t.Fatalf("Open = %v, %v, %v", lines, ok, err)
 	}
@@ -218,7 +223,7 @@ func TestOpenLaunchFailure(t *testing.T) {
 	isolate(t, "/usr/bin/code")
 	pinLaunch(t, errors.New("exec format error"))
 	p := fakeProvider(sshconfig.Entry{HostName: "127.0.0.1", AuthorizedKey: "/k.pub"}, nil)
-	lines, ok, err := Open(context.Background(), p, vm.VM{Name: "web"}, "sandbar-mini-web", "")
+	lines, ok, err := Open(context.Background(), p, miniProf, vm.VM{Name: "web"}, "")
 	if err == nil || ok || !strings.Contains(err.Error(), "start /usr/bin/code") {
 		t.Fatalf("Open = %v, %v, %v", lines, ok, err)
 	}
@@ -227,15 +232,65 @@ func TestOpenLaunchFailure(t *testing.T) {
 	}
 }
 
+// pinSSH stands in for the ssh CheckInclude's probe runs: applied says
+// whether ssh reports the managed file as applied, and err, when set, is what
+// running ssh fails with instead.
+func pinSSH(t *testing.T, applied *bool, err *error) {
+	t.Helper()
+	old := sshconfig.QuerySSH
+	t.Cleanup(func() { sshconfig.QuerySSH = old })
+	sshconfig.QuerySSH = func(context.Context, ...string) ([]byte, error) {
+		if *err != nil {
+			return nil, *err
+		}
+		if *applied {
+			return []byte("hostname include-check.sandbar.invalid\n"), nil
+		}
+		return []byte("hostname " + sshconfig.IncludeProbeHost + "\n"), nil
+	}
+}
+
 func TestCheckInclude(t *testing.T) {
 	isolate(t, "")
+	applied, sshErr := false, error(nil)
+	pinSSH(t, &applied, &sshErr)
+	ctx := context.Background()
 	path := sshconfig.UserConfigPath()
 
-	if got, why := CheckInclude(); got != IncludeAsk || why != "" {
+	if got, why := CheckInclude(ctx); got != IncludeAsk || why != "" {
 		t.Fatalf("missing, creatable config: CheckInclude = %v, %q; want IncludeAsk", got, why)
 	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// An Include line ssh does not apply: asked, with the reason.
+	misplaced := "Host x\n  " + sshconfig.IncludeLine() + "\n"
+	if err := os.WriteFile(path, []byte(misplaced), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, why := CheckInclude(ctx); got != IncludeAsk || !strings.Contains(why, "is not applied (it may be inside a Host or Match block)") {
+		t.Fatalf("misplaced: CheckInclude = %v, %q; want IncludeAsk explaining why", got, why)
+	}
+	// ssh says it applies (an Include under "Host *", or via another file).
+	applied = true
+	if got, _ := CheckInclude(ctx); got != IncludePresent {
+		t.Fatalf("applied: CheckInclude = %v, want IncludePresent", got)
+	}
+	// No ssh to ask: the line in the file is taken at its word, as before.
+	applied, sshErr = false, sshconfig.ErrNoSSH
+	if got, _ := CheckInclude(ctx); got != IncludePresent {
+		t.Fatalf("no ssh, line present: CheckInclude = %v, want IncludePresent", got)
+	}
+	if err := os.WriteFile(path, []byte("Host x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, why := CheckInclude(ctx); got != IncludeAsk || why != "" {
+		t.Fatalf("no ssh, no line: CheckInclude = %v, %q; want a plain IncludeAsk", got, why)
+	}
+	sshErr = nil
+
+	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
 	target := filepath.Join(t.TempDir(), "dotfiles-config")
@@ -245,17 +300,21 @@ func TestCheckInclude(t *testing.T) {
 	if err := os.Symlink(target, path); err != nil {
 		t.Fatal(err)
 	}
-	if got, why := CheckInclude(); got != IncludeManual || !strings.Contains(why, "symlink") {
+	if got, why := CheckInclude(ctx); got != IncludeManual || !strings.Contains(why, "symlink") {
 		t.Fatalf("symlink: CheckInclude = %v, %q; want IncludeManual naming the symlink", got, why)
 	}
-
-	// Present wins even through a symlink: there is nothing to edit.
-	if err := os.WriteFile(target, []byte(sshconfig.IncludeLine()+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(target, []byte(misplaced), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := CheckInclude(); got != IncludePresent {
+	if got, why := CheckInclude(ctx); got != IncludeManual || !strings.Contains(why, "not applied") || !strings.Contains(why, "symlink") {
+		t.Fatalf("symlink, misplaced: CheckInclude = %v, %q; want IncludeManual giving both reasons", got, why)
+	}
+	// Applied wins even through a symlink: there is nothing to edit.
+	applied = true
+	if got, _ := CheckInclude(ctx); got != IncludePresent {
 		t.Fatalf("included: CheckInclude = %v, want IncludePresent", got)
 	}
+	applied = false
 
 	if os.Geteuid() == 0 {
 		t.Skip("root ignores file permissions")
@@ -266,22 +325,120 @@ func TestCheckInclude(t *testing.T) {
 	if err := os.WriteFile(path, []byte("Host x\n"), 0o400); err != nil {
 		t.Fatal(err)
 	}
-	if got, why := CheckInclude(); got != IncludeManual || !strings.Contains(why, "not writable") {
+	if got, why := CheckInclude(ctx); got != IncludeManual || !strings.Contains(why, "not writable") {
 		t.Fatalf("read-only: CheckInclude = %v, %q; want IncludeManual saying not writable", got, why)
 	}
 }
 
 // Alias keeps Lima's own name on Local (its Include matches only that) and
-// namespaces every other profile's VMs by the profile.
+// namespaces every other profile's VMs by the profile's ID, so a rename
+// changes nothing.
 func TestAlias(t *testing.T) {
-	local := profiles.Profile{Name: "my-laptop", Type: profiles.TypeLocal}
+	local := profiles.Profile{ID: profiles.LocalProfileID, Name: "my-laptop", Type: profiles.TypeLocal}
 	if got := Alias(local, "web"); got != "lima-web" {
 		t.Fatalf("Alias(local) = %q", got)
 	}
 	for _, typ := range []profiles.Type{profiles.TypeRemoteSSH, profiles.TypeProxmox} {
-		if got := Alias(profiles.Profile{Name: "Home PVE", Type: typ}, "web"); got != "sandbar-home-pve-web" {
-			t.Fatalf("Alias(%s) = %q", typ, got)
+		for _, name := range []string{"Home PVE", "Renamed"} {
+			if got := Alias(profiles.Profile{ID: "0123456789abcdef", Name: name, Type: typ}, "web"); got != "sandbar-0123456789abcdef-web" {
+				t.Fatalf("Alias(%s, %q) = %q", typ, name, got)
+			}
 		}
+	}
+}
+
+// seedEntries writes one entry per alias.
+func seedEntries(t *testing.T, aliases ...string) {
+	t.Helper()
+	for _, a := range aliases {
+		if err := sshconfig.Upsert(sshconfig.Entry{Alias: a, HostName: "10.0.0.1"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// managedAliases is every VM alias in the managed file.
+func managedAliases(t *testing.T) []string {
+	t.Helper()
+	data, err := os.ReadFile(sshconfig.ManagedPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, l := range strings.Split(string(data), "\n") {
+		if a, ok := strings.CutPrefix(l, "# sandbar begin "); ok {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+// The cleanups stay inside one profile's namespace: Local owns the lima-
+// blocks, a remote profile the blocks under its ID, and neither touches the
+// other's — nor a different profile whose ID merely shares a VM's name.
+func TestCleanupsStayInTheProfilesNamespace(t *testing.T) {
+	isolate(t, "")
+	other := profiles.Profile{ID: "other", Type: profiles.TypeProxmox}
+	seedEntries(t, "lima-web", "lima-api", "sandbar-mini-web", "sandbar-mini-api", "sandbar-other-web")
+
+	if got, err := RemoveEntries(miniProf, "web"); err != nil || strings.Join(got, ",") != "sandbar-mini-web" {
+		t.Fatalf("RemoveEntries = %v, %v", got, err)
+	}
+	if got, err := PruneEntries(localProf, []vm.VM{{Name: "web"}}); err != nil || strings.Join(got, ",") != "lima-api" {
+		t.Fatalf("PruneEntries(local) = %v, %v", got, err)
+	}
+	if got, err := RemoveProfileEntries(other); err != nil || strings.Join(got, ",") != "sandbar-other-web" {
+		t.Fatalf("RemoveProfileEntries = %v, %v", got, err)
+	}
+	if got := strings.Join(managedAliases(t), ","); got != "lima-web,sandbar-mini-api" {
+		t.Fatalf("left %q", got)
+	}
+	// A profile with no ID owns nothing, rather than every "sandbar--" alias.
+	if got, err := RemoveProfileEntries(profiles.Profile{Type: profiles.TypeProxmox}); err != nil || got != nil {
+		t.Fatalf("ID-less profile removed %v, %v", got, err)
+	}
+}
+
+// Opening a VM prunes its profile's entries for VMs the fresh listing no
+// longer has, keeps the one it just wrote, and reports what went.
+func TestOpenPrunesStaleEntriesOfTheProfile(t *testing.T) {
+	isolate(t, "")
+	seedEntries(t, "sandbar-mini-gone", "sandbar-mini-api", "sandbar-other-gone", "lima-gone")
+	p := fakeProvider(sshconfig.Entry{HostName: "127.0.0.1"}, nil)
+	p.ListFunc = func() ([]vm.VM, error) { return []vm.VM{{Name: "web"}, {Name: "api"}}, nil }
+
+	lines, _, err := Open(context.Background(), p, miniProf, vm.VM{Name: "web"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(managedAliases(t), ","); got != "sandbar-mini-api,sandbar-other-gone,lima-gone,sandbar-mini-web" {
+		t.Fatalf("left %q", got)
+	}
+	if len(lines) != 2 || lines[0] != "Removed ssh host entries for VMs that no longer exist: sandbar-mini-gone." {
+		t.Fatalf("lines = %q", lines)
+	}
+}
+
+// A listing that fails, or that does not even contain the VM being opened,
+// prunes nothing and does not fail the open.
+func TestOpenSkipsPruneOnUntrustworthyListing(t *testing.T) {
+	for name, list := range map[string]func() ([]vm.VM, error){
+		"error":          func() ([]vm.VM, error) { return nil, errors.New("limactl list: instance mid-clone") },
+		"missing the VM": func() ([]vm.VM, error) { return []vm.VM{{Name: "api"}}, nil },
+		"empty listing":  func() ([]vm.VM, error) { return nil, nil },
+	} {
+		t.Run(name, func(t *testing.T) {
+			isolate(t, "")
+			seedEntries(t, "sandbar-mini-gone")
+			p := fakeProvider(sshconfig.Entry{HostName: "127.0.0.1"}, nil)
+			p.ListFunc = list
+			if _, _, err := Open(context.Background(), p, miniProf, vm.VM{Name: "web"}, ""); err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Join(managedAliases(t), ","); got != "sandbar-mini-gone,sandbar-mini-web" {
+				t.Fatalf("left %q", got)
+			}
+		})
 	}
 }
 

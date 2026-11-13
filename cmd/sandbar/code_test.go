@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lullabot/sandbar/internal/profiles"
 	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/providerfake"
 	"github.com/lullabot/sandbar/internal/registry"
@@ -79,7 +80,7 @@ func TestCodeLaunchesOnProjectCheckout(t *testing.T) {
 	p, _ := codeProvider(limaRunning)
 
 	var out bytes.Buffer
-	if err := doCode(context.Background(), p, reg, registry.LocalScope, "web", "lima-web", strings.NewReader(""), false, &out); err != nil {
+	if err := doCode(context.Background(), p, reg, registry.LocalScope, codeLocal, "web", strings.NewReader(""), false, &out); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"/usr/bin/code", "--remote", "ssh-remote+lima-web", "/home/dev.linux/github.com/acme/widgets"}
@@ -124,7 +125,7 @@ func TestCodeReadsCloneURLFromMarkerFirst(t *testing.T) {
 	fake, _ := codeProvider(limaRunning)
 	p := markerProvider{Provider: fake, cloneURL: "https://gitlab.com/acme/api.git"}
 
-	if err := doCode(context.Background(), p, reg, registry.LocalScope, "web", "lima-web", strings.NewReader(""), false, &bytes.Buffer{}); err != nil {
+	if err := doCode(context.Background(), p, reg, registry.LocalScope, codeLocal, "web", strings.NewReader(""), false, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	if got := (*launched)[len(*launched)-1]; got != "/home/dev.linux/gitlab.com/acme/api" {
@@ -138,7 +139,7 @@ func TestCodeWithoutCodeCommandNamesAlias(t *testing.T) {
 	p, _ := codeProvider(limaRunning)
 
 	var out bytes.Buffer
-	if err := doCode(context.Background(), p, registry.NewEmpty(), registry.LocalScope, "web", "lima-web", strings.NewReader(""), false, &out); err != nil {
+	if err := doCode(context.Background(), p, registry.NewEmpty(), registry.LocalScope, codeLocal, "web", strings.NewReader(""), false, &out); err != nil {
 		t.Fatal(err)
 	}
 	if *launched != nil {
@@ -153,7 +154,7 @@ func TestCodeRefusesStoppedVM(t *testing.T) {
 	launched := codeEnv(t, "/usr/bin/code")
 	p, editorCalled := codeProvider("Stopped")
 
-	err := doCode(context.Background(), p, registry.NewEmpty(), registry.LocalScope, "web", "lima-web", strings.NewReader("y\n"), true, &bytes.Buffer{})
+	err := doCode(context.Background(), p, registry.NewEmpty(), registry.LocalScope, codeLocal, "web", strings.NewReader("y\n"), true, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "start it first") {
 		t.Fatalf("err = %v, want a not-running refusal", err)
 	}
@@ -183,7 +184,7 @@ func TestCodeIncludeConsent(t *testing.T) {
 			codeEnv(t, "/usr/bin/code")
 			p, _ := codeProvider(limaRunning)
 			var out bytes.Buffer
-			if err := doCode(context.Background(), p, registry.NewEmpty(), registry.LocalScope, "web", "lima-web", strings.NewReader(c.input), c.interactive, &out); err != nil {
+			if err := doCode(context.Background(), p, registry.NewEmpty(), registry.LocalScope, codeLocal, "web", strings.NewReader(c.input), c.interactive, &out); err != nil {
 				t.Fatal(err)
 			}
 			st, err := sshconfig.IncludeStatus()
@@ -219,7 +220,7 @@ func TestCodeSymlinkedConfigIsNeverEdited(t *testing.T) {
 	p, _ := codeProvider(limaRunning)
 	var out bytes.Buffer
 	// "y" is offered but must never be read: a symlink is not asked about.
-	if err := doCode(context.Background(), p, registry.NewEmpty(), registry.LocalScope, "web", "lima-web", strings.NewReader("y\n"), true, &out); err != nil {
+	if err := doCode(context.Background(), p, registry.NewEmpty(), registry.LocalScope, codeLocal, "web", strings.NewReader("y\n"), true, &out); err != nil {
 		t.Fatal(err)
 	}
 	if data, _ := os.ReadFile(real); string(data) != "Host x\n" {
@@ -250,5 +251,47 @@ func TestIsTerminalRejectsDevNull(t *testing.T) {
 	defer f.Close()
 	if isTerminal(f) {
 		t.Fatal("isTerminal(regular file) = true; want false")
+	}
+}
+
+var codeLocal = profiles.Profile{ID: profiles.LocalProfileID, Name: "local", Type: profiles.TypeLocal}
+
+// An Include line ssh does not apply (here, under a Host block) is no reason
+// to skip the question: the user is told why it is being asked, and a yes
+// prepends a working line while leaving theirs as written. The answer comes
+// from a stand-in ssh so the test does not depend on the one installed.
+func TestCodeMisplacedIncludeIsAskedAbout(t *testing.T) {
+	codeEnv(t, "/usr/bin/code")
+	oldSSH := sshconfig.QuerySSH
+	t.Cleanup(func() { sshconfig.QuerySSH = oldSSH })
+	sshconfig.QuerySSH = func(context.Context, ...string) ([]byte, error) {
+		st, err := sshconfig.IncludeStatus()
+		if err != nil {
+			return nil, err
+		}
+		if st.TopLevel {
+			return []byte("hostname include-check.sandbar.invalid\n"), nil
+		}
+		return []byte("hostname " + sshconfig.IncludeProbeHost + "\n"), nil
+	}
+	path := sshconfig.UserConfigPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	misplaced := "Host x\n  " + sshconfig.IncludeLine() + "\n"
+	if err := os.WriteFile(path, []byte(misplaced), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p, _ := codeProvider(limaRunning)
+	var out bytes.Buffer
+	if err := doCode(context.Background(), p, registry.NewEmpty(), registry.LocalScope, codeLocal, "web", strings.NewReader("y\n"), true, &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "is not applied (it may be inside a Host or Match block)") || !strings.Contains(out.String(), "[y/N]") {
+		t.Fatalf("want the reason, then the prompt:\n%s", out.String())
+	}
+	data, _ := os.ReadFile(path)
+	if !strings.HasSuffix(string(data), misplaced) || !strings.Contains(string(data), sshconfig.IncludeLine()+"\n\n"+misplaced) {
+		t.Fatalf("want a prepended line and the user's left as written:\n%s", data)
 	}
 }

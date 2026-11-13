@@ -25,13 +25,17 @@
 package sshconfig
 
 import (
+	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"syscall"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -193,35 +197,19 @@ func quotePath(p string) string {
 // other alias would not match that file's Host line.
 func LimaAlias(name string) string { return "lima-" + name }
 
-// ProfileAlias is the alias for remote-Lima and Proxmox entries. The profile
-// is part of it because two profiles may each hold a VM with the same name.
-func ProfileAlias(profileName, vmName string) string {
-	return "sandbar-" + slug(profileName) + "-" + vmName
+// ProfileAlias is the alias for remote-Lima and Proxmox entries. It is
+// namespaced by the profile's immutable ID, not its display name: two profiles
+// may each hold a VM with the same name, a rename must not orphan the entries
+// already written (or leave VS Code's recent list pointing at dead names), and
+// the ID lets sandbar find every entry a profile owns to remove them all.
+func ProfileAlias(profileID, vmName string) string {
+	return ProfileAliasPrefix(profileID) + vmName
 }
 
-// slug lowercases and replaces every run of characters other than [a-z0-9]
-// with a single hyphen, so a profile name such as "Home Proxmox" becomes a
-// valid alias component.
-func slug(s string) string {
-	var b strings.Builder
-	hyphen := false
-	for _, r := range strings.ToLower(s) {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			b.WriteRune(r)
-			hyphen = false
-			continue
-		}
-		if !hyphen {
-			b.WriteByte('-')
-			hyphen = true
-		}
-	}
-	out := strings.Trim(b.String(), "-")
-	if out == "" {
-		return "profile"
-	}
-	return out
-}
+// ProfileAliasPrefix is what every ProfileAlias of profileID begins with.
+// Generated IDs are fixed-length hex, so one profile's prefix is never a
+// prefix of another's.
+func ProfileAliasPrefix(profileID string) string { return "sandbar-" + profileID + "-" }
 
 const (
 	beginMarker = "# sandbar begin "
@@ -229,6 +217,30 @@ const (
 
 	managedHeader = "# Managed by sandbar. Each VM's block is rewritten whenever sandbar opens it\n" +
 		"# in VS Code (sandbar code); edits inside a block will be lost.\n"
+
+	// The include-check block is how sandbar asks ssh itself whether
+	// ~/.ssh/config really applies this file (see IncludeApplied). Its own
+	// markers, distinct from a VM block's, keep it out of RemoveWhere's reach.
+	checkBegin = "# sandbar include-check begin\n"
+	checkEnd   = "# sandbar include-check end\n"
+
+	// IncludeProbeHost is the name IncludeApplied resolves. It matches the
+	// check block's wildcard pattern, which is a wildcard so that VS Code's
+	// Remote-SSH host picker (which lists only literal Host names) never
+	// offers it. No VM alias can match it: a profile ID is hex, and a Lima
+	// alias starts "lima-".
+	IncludeProbeHost = "sandbar-include-check-probe"
+	// includeProbeHostName is a reserved .invalid name (RFC 2606) the check
+	// block maps the probe to: ssh -G reports it only when this file was
+	// applied to the probe, and it can never resolve to a real machine.
+	includeProbeHostName = "include-check.sandbar.invalid"
+
+	checkBlock = checkBegin +
+		"# sandbar runs \"ssh -G " + IncludeProbeHost + "\" to learn whether ~/.ssh/config\n" +
+		"# really applies this file: an Include inside a Host or Match block does not.\n" +
+		"Host sandbar-include-check-*\n" +
+		"  HostName " + includeProbeHostName + "\n" +
+		checkEnd
 )
 
 // homeDir falls back to "." rather than failing so a broken environment
@@ -278,9 +290,6 @@ func Upsert(e Entry) error {
 		out, at := removeBlock(lines, e.Alias)
 		blockLines := splitLines(block)
 		if at < 0 {
-			if len(out) == 0 {
-				out = splitLines(managedHeader)
-			}
 			return append(out, blockLines...)
 		}
 		return append(out[:at], append(blockLines, out[at:]...)...)
@@ -292,17 +301,61 @@ func Upsert(e Entry) error {
 // Proxmox, whose entry names a DHCP address that may later be handed to an
 // unrelated machine.
 func Remove(alias string) error {
+	_, err := RemoveWhere(func(a string) bool { return a == alias })
+	return err
+}
+
+// RemoveWhere deletes every VM block whose alias match accepts, in one locked
+// read-modify-write, and returns the aliases it removed. It is how a caller
+// that knows an alias namespace (internal/vscode, per profile) cleans up the
+// entries of VMs that are gone. A missing file removes nothing and is not an
+// error.
+func RemoveWhere(match func(alias string) bool) ([]string, error) {
 	if _, err := os.Stat(ManagedPath()); errors.Is(err, os.ErrNotExist) {
-		return nil
+		return nil, nil
 	}
-	return mutate(func(lines []string) []string {
-		out, _ := removeBlock(lines, alias)
-		return out
+	var removed []string
+	err := mutate(func(lines []string) []string {
+		removed = nil
+		for _, alias := range blockAliases(lines) {
+			if match(alias) {
+				lines, _ = removeBlock(lines, alias)
+				removed = append(removed, alias)
+			}
+		}
+		return lines
 	})
+	if err != nil {
+		return nil, err
+	}
+	return removed, nil
+}
+
+// blockAliases lists the alias of every VM block, once each, in file order.
+func blockAliases(lines []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, l := range lines {
+		alias, ok := strings.CutPrefix(strings.TrimRight(l, "\r\n"), beginMarker)
+		if ok && alias != "" && !seen[alias] {
+			seen[alias] = true
+			out = append(out, alias)
+		}
+	}
+	return out
+}
+
+// EnsureManaged creates the managed file if it is missing and brings its
+// header and include-check block up to date, leaving every VM block as it
+// is. IncludeApplied needs the check block in place before it asks ssh.
+func EnsureManaged() error {
+	return mutate(func(lines []string) []string { return lines })
 }
 
 // mutate is the single write path for the managed file: lock, re-read, apply,
-// write atomically. Re-reading under the lock is what stops a long-running
+// write atomically. Every write also puts the header and the include-check
+// block back at the top, so a file written by an older sandbar gains the
+// block the first time sandbar touches it. Re-reading under the lock is what stops a long-running
 // TUI from writing back an older copy over a block another sandbar process
 // added; the lock alone would only order the two lost-update writes.
 func mutate(apply func(lines []string) []string) error {
@@ -317,11 +370,39 @@ func mutate(apply func(lines []string) []string) error {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("read %s: %w", path, err)
 	}
-	next := strings.Join(apply(splitLines(string(data))), "")
+	lines := stripPreamble(apply(splitLines(string(data))))
+	next := managedHeader + checkBlock + strings.Join(lines, "")
 	if next == string(data) {
 		return nil
 	}
 	return writeAtomic(path, []byte(next), 0o600)
+}
+
+// stripPreamble removes the header comment lines and every include-check
+// block, wherever they sit, so mutate can put back exactly one current copy
+// at the top. A check block with no end marker (a damaged hand edit) runs up
+// to the next VM block, as removeBlock treats a truncated VM block.
+func stripPreamble(lines []string) []string {
+	header := map[string]bool{}
+	for _, l := range splitLines(managedHeader) {
+		header[l] = true
+	}
+	out := make([]string, 0, len(lines))
+	for i := 0; i < len(lines); i++ {
+		switch {
+		case header[lines[i]]:
+		case lines[i] == checkBegin:
+			for i+1 < len(lines) && lines[i+1] != checkEnd && !strings.HasPrefix(lines[i+1], beginMarker) {
+				i++
+			}
+			if i+1 < len(lines) && lines[i+1] == checkEnd {
+				i++
+			}
+		default:
+			out = append(out, lines[i])
+		}
+	}
+	return out
 }
 
 // splitLines splits s into lines that each keep their "\n", so joining them
@@ -398,8 +479,14 @@ func writeAtomic(path string, data []byte, mode os.FileMode) error {
 
 // IncludeState describes ~/.ssh/config with respect to the managed file.
 type IncludeState struct {
-	// Present: some Include line already names the managed file.
+	// Present: some Include line already names the managed file. It says
+	// nothing about whether ssh applies that line to every host: one inside
+	// a Host or Match block applies only there. IncludeApplied asks ssh.
 	Present bool
+	// TopLevel: an Include of the managed file comes before the first Host
+	// or Match line, where ssh applies it to every host. AddInclude is a
+	// no-op then, and otherwise prepends its own line.
+	TopLevel bool
 	// Exists: the config file (or a symlink at its path) exists.
 	Exists bool
 	// Symlink: the path is a symlink, typically into a dotfiles repository.
@@ -433,7 +520,7 @@ func IncludeStatus() (IncludeState, error) {
 	if err != nil && !errors.Is(err, os.ErrNotExist) { // a dangling symlink reads as not-exist
 		return st, fmt.Errorf("read %s: %w", path, err)
 	}
-	st.Present = includesManaged(string(data))
+	st.Present, st.TopLevel = includesManaged(string(data))
 
 	if f, err := os.OpenFile(path, os.O_WRONLY, 0); err == nil {
 		f.Close()
@@ -443,33 +530,106 @@ func IncludeStatus() (IncludeState, error) {
 	return st, nil
 }
 
-func includesManaged(config string) bool {
+// includesManaged reports whether a non-comment Include names the managed
+// file, and whether one does before any Host or Match line.
+func includesManaged(config string) (present, topLevel bool) {
 	abs := ManagedPath()
 	targets := map[string]bool{abs: true}
 	if rel, err := filepath.Rel(homeDir(), abs); err == nil && !strings.HasPrefix(rel, "..") {
 		targets["~/"+filepath.ToSlash(rel)] = true
 	}
+	inBlock := false
 	for _, line := range strings.Split(config, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		if len(line) < len("include")+1 || !strings.EqualFold(line[:len("include")], "include") {
+		if keyword(line, "host") != "" || keyword(line, "match") != "" {
+			inBlock = true
 			continue
 		}
-		rest := line[len("include"):]
-		if c := rest[0]; c != ' ' && c != '\t' && c != '=' {
-			continue // e.g. a hypothetical "IncludeFoo" keyword
-		}
-		rest = strings.TrimLeft(rest, " \t")
-		rest = strings.TrimPrefix(rest, "=")
+		rest := keyword(line, "include")
 		for _, arg := range splitArgs(rest) {
 			if targets[strings.ReplaceAll(arg, "%%", "%")] {
-				return true
+				present = true
+				topLevel = topLevel || !inBlock
 			}
 		}
 	}
-	return false
+	return present, topLevel
+}
+
+// keyword returns line's arguments when its keyword is name (ssh keywords are
+// case-insensitive and may be followed by whitespace or '='), else "".
+func keyword(line, name string) string {
+	if len(line) < len(name)+1 || !strings.EqualFold(line[:len(name)], name) {
+		return ""
+	}
+	rest := line[len(name):]
+	if c := rest[0]; c != ' ' && c != '\t' && c != '=' {
+		return "" // e.g. "HostName" is not "Host", and "IncludeFoo" not "Include"
+	}
+	rest = strings.TrimLeft(rest, " \t")
+	return strings.TrimPrefix(rest, "=")
+}
+
+// ErrNoSSH is IncludeApplied's error when no ssh client is installed, so the
+// caller can fall back to reading the file (IncludeStatus) instead.
+var ErrNoSSH = errors.New("ssh client not found")
+
+// includeProbeTimeout bounds the probe. `ssh -G` connects to nothing, but a
+// user config may run commands (Match exec) or canonicalize host names, and a
+// wedged probe must not hold up opening the editor.
+const includeProbeTimeout = 5 * time.Second
+
+// QuerySSH runs the workstation's ssh with args and returns its stdout. A var
+// so tests elsewhere can stand in for ssh (or its absence); the real one
+// reports ErrNoSSH when ssh is not on PATH.
+var QuerySSH = func(ctx context.Context, args ...string) ([]byte, error) {
+	bin, err := exec.LookPath("ssh")
+	if err != nil {
+		return nil, ErrNoSSH
+	}
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.WaitDelay = sshx.WaitDelay
+	var out, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &stderr
+	if err := sshx.SuccessDespiteHeldPipes(cmd.Run()); err != nil {
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return nil, fmt.Errorf("%w: %s", err, msg)
+		}
+		return nil, err
+	}
+	return out.Bytes(), nil
+}
+
+// IncludeApplied asks ssh itself whether ~/.ssh/config applies the managed
+// file to every host, by resolving IncludeProbeHost and checking that it
+// picked up the managed file's include-check block. Reading the Include line
+// cannot answer this: one written inside a Host or Match block is present but
+// applies only to that block's hosts, and ssh's rules for nested Includes and
+// Match criteria are not worth reimplementing.
+//
+// It writes the managed file first (EnsureManaged) so the block exists. -F
+// names the user config explicitly because ssh finds ~/.ssh/config through
+// the passwd entry's home directory, not $HOME, and must read the same file
+// AddInclude edits. The error wraps ErrNoSSH when there is no ssh to ask.
+func IncludeApplied(ctx context.Context) (bool, error) {
+	if err := EnsureManaged(); err != nil {
+		return false, fmt.Errorf("write %s: %w", ManagedPath(), err)
+	}
+	ctx, cancel := context.WithTimeout(ctx, includeProbeTimeout)
+	defer cancel()
+	out, err := QuerySSH(ctx, "-G", "-F", UserConfigPath(), IncludeProbeHost)
+	if err != nil {
+		return false, err
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if k, v, ok := strings.Cut(strings.TrimSpace(line), " "); ok && k == "hostname" {
+			return v == includeProbeHostName, nil
+		}
+	}
+	return false, nil
 }
 
 // splitArgs splits on whitespace, honouring double quotes, which is enough to
@@ -518,7 +678,11 @@ const includeComment = "# Added by sandbar: VM host entries for VS Code Remote-S
 
 // AddInclude prepends the Include of the managed file to ~/.ssh/config,
 // creating ~/.ssh (0700) and the file (0600) if needed and preserving an
-// existing file's mode. It is a no-op when the line is already present.
+// existing file's mode. It is a no-op when an Include of the file already
+// comes before any Host or Match line. One further down is left exactly as
+// the user wrote it, and the new line is prepended anyway: that one applies
+// only inside its block, and moving the user's line could change what their
+// own block means.
 // Callers must have the user's consent first; this function does not ask.
 // An error is the reason the file was left alone, worded to follow "could
 // not edit ~/.ssh/config"; the user then adds IncludeLine() by hand.
@@ -537,7 +701,7 @@ func AddInclude() error {
 		return err
 	}
 	switch {
-	case st.Present:
+	case st.TopLevel:
 		return nil
 	case st.Symlink:
 		return errors.New("it is a symlink")

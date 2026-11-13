@@ -31,12 +31,23 @@ sandbar turns each VM into an ordinary named ssh host, so VS Code, plain
 | Where the VM runs | Alias |
 | --- | --- |
 | Local profile (Lima on this machine) | `lima-<name>` |
-| A remote Lima or Proxmox profile | `sandbar-<profile>-<name>`, where `<profile>` is the profile name lowercased with other characters replaced by `-` (`Home Proxmox` → `home-proxmox`) |
+| A remote Lima or Proxmox profile | `sandbar-<profile-id>-<name>`, where `<profile-id>` is the profile's permanent ID (the `id` in `profiles.yaml`, 16 hex characters) |
+
+Using the profile's ID rather than its name keeps two profiles' same-named
+VMs apart and means renaming a profile changes no alias.
 
 The entries live in one file sandbar owns,
 `${XDG_CONFIG_HOME:-~/.config}/sandbar/ssh_config`, one delimited block per
 VM. sandbar rewrites a VM's block every time you open it, so don't edit
-inside a block. Deleting a VM from the board (`d`) removes its block too.
+inside a block. sandbar removes a VM's block when it sees the VM is gone:
+when you delete it from the board (`d`), when the board notices a VM it
+knew has disappeared, and, each time you open a VM, for any other VM of the
+same profile that no longer exists. Deleting a profile removes all of its
+blocks.
+
+The top of the file also holds a `Host sandbar-include-check-*` block.
+sandbar uses it to ask `ssh -G` whether `~/.ssh/config` really applies the
+file; it is a wildcard so VS Code's host list never shows it.
 
 sandbar never writes host entries into `~/.ssh/config`. ssh only reads the
 managed file once `~/.ssh/config` includes it, so the first time you open a
@@ -46,8 +57,11 @@ VM, sandbar asks before adding this line to the **top** of `~/.ssh/config`:
 Include "/home/you/.config/sandbar/ssh_config"
 ```
 
-It has to go at the top: an `Include` placed after a `Host` block applies
-only inside that block. If you decline, sandbar still writes the entry and
+It has to go at the top: an `Include` placed after a `Host` or `Match` line
+applies only inside that block. sandbar checks with `ssh -G` rather than
+looking for the line, so if you already have an `Include` of the file further
+down, sandbar says it is not applied and asks to add one at the top. It
+leaves your line where it is. If you decline, sandbar still writes the entry and
 opens VS Code, but the alias will not resolve until you add the line
 yourself. On the board, `esc` instead backs out without writing anything or
 opening VS Code. sandbar does not offer to edit `~/.ssh/config` when it is a
@@ -80,13 +94,15 @@ restart, the DHCP lease probably changed: press `c` again (or rerun
 On remote Lima and Proxmox, guests are disposable and get a new host key on
 every reset, so their entries do not record host keys
 (`StrictHostKeyChecking no`, `UserKnownHostsFile /dev/null`), matching
-sandbar's own connections.
+sandbar's own connections. For Proxmox this is an accepted gap: see
+[Editor entries do not check host keys](../reference/security-model.md#editor-entries-do-not-check-host-keys).
 
 ## Troubleshooting
 
 - **"Could not resolve hostname lima-…" or "sandbar-…".** `~/.ssh/config`
-  does not include the managed file. Add the `Include` line above at the top
-  of `~/.ssh/config`.
+  does not include the managed file, or includes it inside a `Host` or
+  `Match` block. Add the `Include` line above at the top of `~/.ssh/config`.
+  If the VM was deleted, its entry is gone too.
 - **The connection times out on a Proxmox VM.** Its address changed. Open it
   again with `c` or `sandbar code` to refresh the entry.
 - **Remote Lima: "no ssh key pair found in ~/.ssh".** Create a key pair, or

@@ -86,6 +86,30 @@ func runCode(t *testing.T, m model, cmd tea.Cmd) model {
 	return m
 }
 
+// pressCode presses `c` on the focused tile and delivers the Include check it
+// dispatches back through Update, as the program would: the check runs ssh,
+// so the key itself only starts it. It returns what the check's answer led
+// to — the consent overlay (with no command), or the operation to run.
+func pressCode(t *testing.T, m model) (model, tea.Cmd) {
+	t.Helper()
+	m, cmd := pressDispatch(t, m, runeKey('c'))
+	if cmd == nil {
+		t.Fatal("c dispatched nothing; the Include check is missing")
+	}
+	if m.confirm != nil {
+		t.Fatal("the overlay must wait for the Include check's answer")
+	}
+	checked, ok := cmd().(codeIncludeCheckedMsg)
+	if !ok {
+		t.Fatal("c should dispatch the Include check first")
+	}
+	// The handler directly, not Update: Update batches its refresh and
+	// heartbeat ticks onto every message, which would hide whether the answer
+	// itself dispatched anything (see pressDispatch).
+	next, cmd := m.handleCodeIncludeChecked(checked)
+	return next.(model), cmd
+}
+
 func readFile(t *testing.T, path string) string {
 	t.Helper()
 	b, err := os.ReadFile(path)
@@ -116,7 +140,7 @@ func TestCodeVerbConsentAddsIncludeWritesEntryAndLaunches(t *testing.T) {
 	}
 	m := codeModel(t)
 
-	m, cmd := pressDispatch(t, m, runeKey('c'))
+	m, cmd := pressCode(t, m)
 	if m.confirm == nil {
 		t.Fatal("a missing, writable Include should raise the consent overlay")
 	}
@@ -175,7 +199,7 @@ func TestCodeVerbDeclineLeavesConfigAndStillLaunches(t *testing.T) {
 	home, launched := codeEnv(t, "/fake/bin/code")
 	m := codeModel(t)
 
-	m, _ = pressDispatch(t, m, runeKey('c'))
+	m, _ = pressCode(t, m)
 	if m.confirm == nil {
 		t.Fatal("a missing ~/.ssh/config that can be created should raise the overlay")
 	}
@@ -207,7 +231,7 @@ func TestCodeVerbEscAbandonsTheVerb(t *testing.T) {
 	home, launched := codeEnv(t, "/fake/bin/code")
 	m := codeModel(t)
 
-	m, _ = pressDispatch(t, m, runeKey('c'))
+	m, _ = pressCode(t, m)
 	if m.confirm == nil {
 		t.Fatal("a missing ~/.ssh/config that can be created should raise the overlay")
 	}
@@ -249,7 +273,7 @@ func TestCodeVerbSymlinkedConfigSkipsOverlay(t *testing.T) {
 	}
 	m := codeModel(t)
 
-	m, cmd := pressDispatch(t, m, runeKey('c'))
+	m, cmd := pressCode(t, m)
 	if m.confirm != nil {
 		t.Fatal("a symlinked config must not raise the consent overlay")
 	}
@@ -272,7 +296,7 @@ func TestCodeVerbSymlinkedConfigSkipsOverlay(t *testing.T) {
 func TestCodeVerbWithoutCodeCommandNamesTheAlias(t *testing.T) {
 	_, launched := codeEnv(t, "")
 	m := codeModel(t)
-	m, _ = pressDispatch(t, m, runeKey('c'))
+	m, _ = pressCode(t, m)
 	m, cmd := pressDispatch(t, m, runeKey('n'))
 	m = runCode(t, m, cmd)
 
@@ -308,23 +332,84 @@ func TestCodeVerbOfferedOnlyOnRunningIdleVM(t *testing.T) {
 	}
 }
 
-// deliverCleanup runs what a delete result handed off the Update goroutine
-// and feeds the entry-removal outcome back through Update, as the program
-// would. The refresh batched beside it runs against the fakes and is dropped.
+// The check's answer is acted on for the VM `c` was pressed on, even if the
+// ring has moved since; and an answer that arrives while another question is
+// up does not replace it.
+func TestCodeVerbCheckIsPinnedToTheVM(t *testing.T) {
+	_, launched := codeEnv(t, "/fake/bin/code")
+	m := codeModel(t)
+	m = putOnBoard(t, m, vm.VM{Name: "api", Status: "Running"})
+	m.focusVM.Name = "web"
+
+	m, cmd := pressDispatch(t, m, runeKey('c'))
+	checked := cmd().(codeIncludeCheckedMsg)
+	m.focusVM.Name = "api"
+	next, _ := m.handleCodeIncludeChecked(checked)
+	m = next.(model)
+	if m.confirm == nil || m.confirm.vmName != "web" {
+		t.Fatalf("the overlay should be about web, the VM c was pressed on; got %+v", m.confirm)
+	}
+	m, cmd = pressDispatch(t, m, runeKey('n'))
+	m = runCode(t, m, cmd)
+	if len(*launched) != 1 || (*launched)[0][2] != "ssh-remote+lima-web" {
+		t.Fatalf("launch = %v, want web's alias", *launched)
+	}
+
+	// A second answer landing while a question is already open leaves it be.
+	other := &confirmState{prompt: "Delete \"api\"?", vmName: "api"}
+	m.confirm = other
+	next, cmd = m.handleCodeIncludeChecked(checked)
+	m = next.(model)
+	if m.confirm != other || cmd != nil {
+		t.Fatal("a late check answer must not replace an open question")
+	}
+	if !strings.Contains(m.lastMessage(), "press c again") {
+		t.Fatalf("the dropped answer should be reported, got %q", m.lastMessage())
+	}
+}
+
+// An Include line ssh does not apply raises the overlay with the reason
+// logged first, so the question does not read as sandbar not having seen it.
+func TestCodeVerbMisplacedIncludeExplainsTheQuestion(t *testing.T) {
+	home, _ := codeEnv(t, "/fake/bin/code")
+	old := sshconfig.QuerySSH
+	t.Cleanup(func() { sshconfig.QuerySSH = old })
+	sshconfig.QuerySSH = func(context.Context, ...string) ([]byte, error) {
+		return []byte("hostname " + sshconfig.IncludeProbeHost + "\n"), nil
+	}
+	userCfg := filepath.Join(home, ".ssh", "config")
+	if err := os.MkdirAll(filepath.Dir(userCfg), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(userCfg, []byte("Host x\n  "+sshconfig.IncludeLine()+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m, cmd := pressCode(t, codeModel(t))
+	if m.confirm == nil || cmd != nil {
+		t.Fatal("a misplaced Include should raise the consent overlay")
+	}
+	if !strings.Contains(loggedText(m), "is not applied (it may be inside a Host or Match block)") {
+		t.Fatalf("the log should say why it is asking, got:\n%s", loggedText(m))
+	}
+}
+
+// deliverCleanup runs what a result handed off the Update goroutine and feeds
+// the entry-removal outcome back through Update, as the program would.
+// Anything else batched beside it runs against the fakes and is dropped.
 func deliverCleanup(t *testing.T, m model, cmd tea.Cmd) model {
 	t.Helper()
 	if cmd == nil {
-		t.Fatal("the delete result dispatched nothing; the entry cleanup is missing")
+		t.Fatal("the result dispatched nothing; the entry cleanup is missing")
 	}
 	// Update batches its own follow-ups around the handler's, so the removal
 	// can be nested a level or two down.
-	var find func(tea.Cmd) (editorEntryRemovedMsg, bool)
-	find = func(c tea.Cmd) (editorEntryRemovedMsg, bool) {
+	var find func(tea.Cmd) (editorEntriesRemovedMsg, bool)
+	find = func(c tea.Cmd) (editorEntriesRemovedMsg, bool) {
 		if c == nil {
-			return editorEntryRemovedMsg{}, false
+			return editorEntriesRemovedMsg{}, false
 		}
 		switch msg := c().(type) {
-		case editorEntryRemovedMsg:
+		case editorEntriesRemovedMsg:
 			return msg, true
 		case tea.BatchMsg:
 			for _, inner := range msg {
@@ -333,14 +418,33 @@ func deliverCleanup(t *testing.T, m model, cmd tea.Cmd) model {
 				}
 			}
 		}
-		return editorEntryRemovedMsg{}, false
+		return editorEntriesRemovedMsg{}, false
 	}
 	res, ok := find(cmd)
 	if !ok {
-		t.Fatal("no editorEntryRemovedMsg came out of the delete result")
+		t.Fatal("no editorEntriesRemovedMsg came out of the result")
 	}
 	next, _ := m.Update(res)
 	return next.(model)
+}
+
+// twoProfileFleet is a local member and a remote one, each with a VM "web".
+func twoProfileFleet(t *testing.T) (model, registry.Scope) {
+	t.Helper()
+	remote := registry.Scope{Provider: "lima-remote", RemoteTarget: "u@mini:22"}
+	fleet := provider.Fleet{
+		{Profile: profiles.Profile{ID: profiles.LocalProfileID, Name: "local", Type: profiles.TypeLocal, Enabled: true}, Prov: &providerfake.Provider{}, Scope: registry.LocalScope},
+		{Profile: profiles.Profile{ID: "mini", Name: "Mac Mini", Type: profiles.TypeRemoteSSH, Enabled: true}, Prov: &providerfake.Provider{}, Scope: remote},
+	}
+	for _, e := range []sshconfig.Entry{
+		{Alias: sshconfig.LimaAlias("web"), Include: "/lima/web/ssh.config"},
+		{Alias: sshconfig.ProfileAlias("mini", "web"), HostName: "127.0.0.1", User: "tester"},
+	} {
+		if err := sshconfig.Upsert(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return New(fleet).(model), remote
 }
 
 // A board delete removes the VM's host entry, by the alias it was written
@@ -349,25 +453,12 @@ func deliverCleanup(t *testing.T, m model, cmd tea.Cmd) model {
 // the other profile.
 func TestDeleteRemovesTheVMsSSHEntry(t *testing.T) {
 	codeEnv(t, "")
-	remote := registry.Scope{Provider: "lima-remote", RemoteTarget: "u@mini:22"}
-	fleet := provider.Fleet{
-		{Profile: profiles.Profile{ID: profiles.LocalProfileID, Name: "local", Type: profiles.TypeLocal, Enabled: true}, Prov: &providerfake.Provider{}, Scope: registry.LocalScope},
-		{Profile: profiles.Profile{ID: "mini", Name: "Mac Mini", Type: profiles.TypeRemoteSSH, Enabled: true}, Prov: &providerfake.Provider{}, Scope: remote},
-	}
-	m := New(fleet).(model)
-	for _, e := range []sshconfig.Entry{
-		{Alias: sshconfig.LimaAlias("web"), Include: "/lima/web/ssh.config"},
-		{Alias: sshconfig.ProfileAlias("Mac Mini", "web"), HostName: "127.0.0.1", User: "tester"},
-	} {
-		if err := sshconfig.Upsert(e); err != nil {
-			t.Fatal(err)
-		}
-	}
+	m, remote := twoProfileFleet(t)
 
 	next, cmd := m.Update(actionDoneMsg{action: "delete", name: "web", scope: remote})
 	m = deliverCleanup(t, next.(model), cmd)
 	managed := readFile(t, sshconfig.ManagedPath())
-	if strings.Contains(managed, sshconfig.ProfileAlias("Mac Mini", "web")) {
+	if strings.Contains(managed, sshconfig.ProfileAlias("mini", "web")) {
 		t.Fatalf("the remote VM's entry should be gone, got:\n%s", managed)
 	}
 	if !strings.Contains(managed, "lima-web") {
@@ -384,13 +475,55 @@ func TestDeleteRemovesTheVMsSSHEntry(t *testing.T) {
 	}
 }
 
-// A failed entry removal is a warning naming the alias, never silence: the
+// A VM the registry knew that vanished outside sandbar loses its entry when
+// the board's reconcile drops it, under its own profile only.
+func TestReconcileRemovesDroppedVMsSSHEntries(t *testing.T) {
+	codeEnv(t, "")
+	m, remote := twoProfileFleet(t)
+	if err := m.reg.AddScoped(vm.CreateConfig{Name: "web", BaseName: "sandbar-base"}, remote); err != nil {
+		t.Fatal(err)
+	}
+	next, cmd := m.Update(vmsLoadedMsg{scope: remote, vms: nil})
+	deliverCleanup(t, next.(model), cmd)
+	managed := readFile(t, sshconfig.ManagedPath())
+	if strings.Contains(managed, sshconfig.ProfileAlias("mini", "web")) || !strings.Contains(managed, "lima-web") {
+		t.Fatalf("want only the remote web's entry removed, got:\n%s", managed)
+	}
+}
+
+// Deleting a profile removes every entry under its ID — no later delete or
+// reconcile could, since the ID never comes back — and leaves Local's alone.
+func TestProfileDeleteRemovesItsSSHEntries(t *testing.T) {
+	codeEnv(t, "")
+	p := seedRemoteProfile(t, "build-host", "example.com", "dev", 22)
+	_, scope, err := buildProfileProvider(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := New(provider.Fleet{
+		{Profile: profiles.Profile{ID: profiles.LocalProfileID, Type: profiles.TypeLocal, Enabled: true}, Prov: &providerfake.Provider{}, Scope: registry.LocalScope},
+		{Profile: p, Prov: &providerfake.Provider{}, Scope: scope},
+	}).(model)
+	for _, alias := range []string{"lima-web", vscode.Alias(p, "web"), vscode.Alias(p, "api")} {
+		if err := sshconfig.Upsert(sshconfig.Entry{Alias: alias, HostName: "10.0.0.1"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cmd := m.deleteProfile(p.ID)
+	deliverCleanup(t, m, cmd)
+	managed := readFile(t, sshconfig.ManagedPath())
+	if strings.Contains(managed, sshconfig.ProfileAliasPrefix(p.ID)) || !strings.Contains(managed, "# sandbar end lima-web") {
+		t.Fatalf("want only the deleted profile's entries removed, got:\n%s", managed)
+	}
+}
+
+// A failed entry removal is a warning naming the entries, never silence: the
 // stale entry may point at an address another machine now holds.
 func TestDeleteEntryRemovalFailureWarns(t *testing.T) {
 	codeEnv(t, "")
 	m := codeModel(t)
-	next, _ := m.Update(editorEntryRemovedMsg{name: "web", alias: "lima-web", err: errors.New("disk full")})
-	if got := loggedText(next.(model)); !strings.Contains(got, "ssh host entry lima-web not removed: disk full") {
+	next, _ := m.Update(editorEntriesRemovedMsg{what: "delete web: ssh host entry lima-web", err: errors.New("disk full")})
+	if got := loggedText(next.(model)); !strings.Contains(got, "delete web: ssh host entry lima-web not removed: disk full") {
 		t.Fatalf("log = %q", got)
 	}
 }

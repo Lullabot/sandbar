@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 	"syscall"
 
 	"github.com/lullabot/sandbar/internal/profiles"
@@ -30,6 +31,9 @@ type Guest interface {
 	EditorSSH(ctx context.Context, v vm.VM) (sshconfig.Entry, error)
 	GuestHome(v vm.VM) string
 	GuestUser(v vm.VM) string
+	// List is the fresh listing Prepare prunes the profile's stale entries
+	// against.
+	List() ([]vm.VM, error)
 }
 
 // Result describes what Prepare did and what the caller should do next.
@@ -47,6 +51,9 @@ type Result struct {
 	// in the guest (remote Lima), so the user can be told which key now
 	// opens it; "" when none was.
 	AuthorizedKey string
+	// Pruned are the aliases of this profile's other entries that Prepare
+	// removed because their VMs no longer exist.
+	Pruned []string
 }
 
 // The messages below are shared by the board and `sandbar code` so the two
@@ -66,6 +73,14 @@ func (r Result) AuthorizedMessage() string {
 // is written, so VS Code's own host picker can open it.
 func (r Result) NotFoundMessage() string {
 	return fmt.Sprintf("VS Code's \"code\" command was not found. In VS Code, run \"Remote-SSH: Connect to Host…\" and choose %s.", r.Alias)
+}
+
+// PrunedMessage reports the entries Prepare removed, or "" when none.
+func (r Result) PrunedMessage() string {
+	if len(r.Pruned) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("Removed ssh host entries for VMs that no longer exist: %s.", strings.Join(r.Pruned, ", "))
 }
 
 // OpeningMessage reports a successful launch.
@@ -104,39 +119,132 @@ const (
 )
 
 // CheckInclude inspects ~/.ssh/config and returns the one decision both front
-// ends make. why is the explanation ManualIncludeMessage takes, set only for
-// IncludeManual. A symlink is manual even when its target is writable,
-// because AddInclude's atomic rewrite would replace the link with a regular
-// file.
-func CheckInclude() (action IncludeAction, why string) {
+// ends make. why is the explanation ManualIncludeMessage takes for
+// IncludeManual; for IncludeAsk it is either "" or why the question is being
+// asked although an Include line is already there, for the front end to show
+// before asking.
+//
+// Whether the Include is in effect is ssh's answer, not the file's
+// (sshconfig.IncludeApplied): an Include line written inside a Host or Match
+// block is present but applies only to that block, and treating it as
+// present would leave every VM alias unresolvable with nothing said about
+// why. The probe runs ssh, so the TUI calls this in a command. Only when ssh
+// cannot answer (it is not installed, or it rejects the user's config) does
+// the textual check decide, as it did before the probe existed.
+//
+// A symlink is manual even when its target is writable, because AddInclude's
+// atomic rewrite would replace the link with a regular file.
+func CheckInclude(ctx context.Context) (action IncludeAction, why string) {
 	path := sshconfig.UserConfigPath()
 	st, err := sshconfig.IncludeStatus()
-	switch {
-	case err != nil:
+	if err != nil {
 		return IncludeManual, fmt.Sprintf("Could not read %s (%v)", path, err)
-	case st.Present:
-		return IncludePresent, ""
+	}
+	misplaced := ""
+	if st.Exists {
+		applied, err := sshconfig.IncludeApplied(ctx)
+		switch {
+		case err == nil && applied:
+			return IncludePresent, ""
+		case err == nil && st.Present:
+			misplaced = fmt.Sprintf("The Include line in %s is not applied (it may be inside a Host or Match block)", path)
+		case err != nil && st.Present:
+			return IncludePresent, ""
+		}
+	}
+	notEditing := func(reason string) string {
+		if misplaced != "" {
+			return fmt.Sprintf("%s, and sandbar is not editing it because it is %s", misplaced, reason)
+		}
+		return fmt.Sprintf("Not editing %s because it is %s", path, reason)
+	}
+	switch {
 	case st.Symlink:
-		return IncludeManual, fmt.Sprintf("Not editing %s because it is a symlink", path)
+		return IncludeManual, notEditing("a symlink")
 	case !st.Writable:
-		return IncludeManual, fmt.Sprintf("Not editing %s because it is not writable", path)
+		return IncludeManual, notEditing("not writable")
 	default:
-		return IncludeAsk, ""
+		return IncludeAsk, misplaced
 	}
 }
 
 // Alias is the ssh host name a VM on profile p is reachable by once its entry
 // is written. Providers describe how to reach a guest but do not name it; the
 // name is chosen here so that writing an entry (Prepare) and removing one
-// (the board's delete) cannot disagree. A Local VM keeps Lima's own name,
-// because its entry Includes Lima's per-instance ssh.config and only that
-// file's Host line matches it. Every other profile's VMs are namespaced by
-// the profile, since two profiles may each hold a VM of the same name.
+// (the cleanup functions below) cannot disagree. A Local VM keeps Lima's own
+// name, because its entry Includes Lima's per-instance ssh.config and only
+// that file's Host line matches it. Every other profile's VMs are namespaced
+// by the profile's immutable ID, since two profiles may each hold a VM of the
+// same name; a rename therefore changes no alias.
 func Alias(p profiles.Profile, vmName string) string {
 	if p.Type == profiles.TypeLocal {
 		return sshconfig.LimaAlias(vmName)
 	}
-	return sshconfig.ProfileAlias(p.Name, vmName)
+	return sshconfig.ProfileAlias(p.ID, vmName)
+}
+
+// vmOfAlias is Alias in reverse: the VM name alias names under p, and whether
+// it is in p's namespace at all. Local's namespace is every "lima-" block in
+// the managed file, which is sound because only sandbar writes that file and
+// it writes "lima-" blocks only for the Local profile. A non-local profile
+// without an ID (never stored that way) owns nothing, rather than every
+// "sandbar--" alias.
+func vmOfAlias(p profiles.Profile, alias string) (string, bool) {
+	var prefix string
+	switch {
+	case p.Type == profiles.TypeLocal:
+		prefix = sshconfig.LimaAlias("")
+	case p.ID != "":
+		prefix = sshconfig.ProfileAliasPrefix(p.ID)
+	default:
+		return "", false
+	}
+	name, ok := strings.CutPrefix(alias, prefix)
+	return name, ok && name != ""
+}
+
+// The cleanup functions below remove entries whose VMs are gone. It matters
+// most for Proxmox: its entry pins a DHCP address with host-key checking off,
+// and once the VM is gone that address may be handed to an unrelated machine
+// that VS Code's recent list would then connect to without a warning. Each is
+// one locked rewrite of the managed file, so the TUI runs them in a command.
+
+// RemoveProfileEntries removes every entry profile p owns: the profile is
+// being deleted, and a profile ID is never reused, so nothing would ever
+// rewrite or remove them later.
+func RemoveProfileEntries(p profiles.Profile) ([]string, error) {
+	return sshconfig.RemoveWhere(func(alias string) bool {
+		_, ok := vmOfAlias(p, alias)
+		return ok
+	})
+}
+
+// RemoveEntries removes the entries of the named VMs on profile p, which the
+// caller knows are deleted.
+func RemoveEntries(p profiles.Profile, names ...string) ([]string, error) {
+	gone := make(map[string]bool, len(names))
+	for _, n := range names {
+		gone[n] = true
+	}
+	return sshconfig.RemoveWhere(func(alias string) bool {
+		name, ok := vmOfAlias(p, alias)
+		return ok && gone[name]
+	})
+}
+
+// PruneEntries removes profile p's entries for VMs not in live, a listing of
+// p's VMs the caller took. An entry written after that listing for a VM
+// created after it would be removed too; it costs only a rewrite on the next
+// open, which is why callers prune with a listing taken moments before.
+func PruneEntries(p profiles.Profile, live []vm.VM) ([]string, error) {
+	present := make(map[string]bool, len(live))
+	for _, v := range live {
+		present[v.Name] = true
+	}
+	return sshconfig.RemoveWhere(func(alias string) bool {
+		name, ok := vmOfAlias(p, alias)
+		return ok && !present[name]
+	})
 }
 
 // macAppCode is where the VS Code app bundle ships its `code` shell command.
@@ -166,16 +274,18 @@ func findCode() string {
 	return ""
 }
 
-// Prepare writes v's host entry, under alias (see Alias), to the managed ssh
-// config and computes the folder and launch command. It does I/O (the
-// provider's EditorSSH may resolve a guest address or authorize a key), so
-// the TUI must run it in a command, not on the update goroutine. cloneURL is
-// the VM's recorded project URL, "" for none.
+// Prepare writes v's host entry, under Alias(prof, v.Name), to the managed
+// ssh config, prunes prof's entries for VMs that no longer exist, and
+// computes the folder and launch command. It does I/O (the provider's
+// EditorSSH may resolve a guest address or authorize a key, and the prune
+// lists the profile's VMs), so the TUI must run it in a command, not on the
+// update goroutine. cloneURL is the VM's recorded project URL, "" for none.
 //
 // It does not touch ~/.ssh/config: whether that may be edited is the user's
 // call, asked by the front end beforehand. Without the Include the entry is
 // still written, so adding the line later makes the alias work at once.
-func Prepare(ctx context.Context, g Guest, v vm.VM, alias, cloneURL string) (Result, error) {
+func Prepare(ctx context.Context, g Guest, prof profiles.Profile, v vm.VM, cloneURL string) (Result, error) {
+	alias := Alias(prof, v.Name)
 	entry, err := g.EditorSSH(ctx, v)
 	if err != nil {
 		return Result{}, err
@@ -198,11 +308,39 @@ func Prepare(ctx context.Context, g Guest, v vm.VM, alias, cloneURL string) (Res
 		Alias:         alias,
 		Folder:        folder,
 		AuthorizedKey: entry.AuthorizedKey,
+		Pruned:        pruneStale(g, prof, v.Name),
 	}
 	if code := FindCode(); code != "" {
 		res.LaunchArgv = []string{code, "--remote", "ssh-remote+" + alias, folder}
 	}
 	return res, nil
+}
+
+// pruneStale is Prepare's housekeeping: entries of prof's VMs that have gone
+// since they were opened (deleted from another machine, or outside sandbar)
+// are removed whenever any VM of the profile is opened. It never fails the
+// open. A listing that fails, including Lima's transient one while another
+// instance is mid-clone (lima.ErrListRacedInstanceDir), skips the prune; so
+// does one that omits the VM being opened, which EditorSSH has just reached,
+// because such a listing cannot be trusted to name the others. The entry
+// just written is kept regardless.
+func pruneStale(g Guest, prof profiles.Profile, opened string) []string {
+	live, err := g.List()
+	if err != nil {
+		return nil
+	}
+	found := false
+	for _, v := range live {
+		found = found || v.Name == opened
+	}
+	if !found {
+		return nil
+	}
+	pruned, err := PruneEntries(prof, live)
+	if err != nil {
+		return nil
+	}
+	return pruned
 }
 
 // Open is the whole operation both front ends run once the Include question
@@ -212,13 +350,15 @@ func Prepare(ctx context.Context, g Guest, v vm.VM, alias, cloneURL string) (Res
 // was started, for a front end that words that line differently. On error,
 // lines still holds anything already worth reporting, such as a key
 // authorized before the launch failed.
-func Open(ctx context.Context, g Guest, v vm.VM, alias, cloneURL string) (lines []string, launched bool, err error) {
-	res, err := Prepare(ctx, g, v, alias, cloneURL)
+func Open(ctx context.Context, g Guest, prof profiles.Profile, v vm.VM, cloneURL string) (lines []string, launched bool, err error) {
+	res, err := Prepare(ctx, g, prof, v, cloneURL)
 	if err != nil {
 		return nil, false, err
 	}
-	if msg := res.AuthorizedMessage(); msg != "" {
-		lines = append(lines, msg)
+	for _, msg := range []string{res.AuthorizedMessage(), res.PrunedMessage()} {
+		if msg != "" {
+			lines = append(lines, msg)
+		}
 	}
 	if len(res.LaunchArgv) == 0 {
 		return append(lines, res.NotFoundMessage()), false, nil

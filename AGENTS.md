@@ -43,8 +43,9 @@ it is not where prose belongs.
   exception to that no-I/O rule: it returns the `sshconfig.Entry` a
   workstation ssh client needs to reach the guest by name, and may do I/O, so
   the TUI calls it off the Update goroutine. The entry leaves `Alias` empty:
-  `vscode.Alias` names it from the owning profile, so the providers need
-  not know their profile's name and a profile rename stays metadata-only.
+  `vscode.Alias` names it from the owning profile's immutable ID, so the
+  providers need not know their profile and a profile rename changes no
+  alias.
   Local Lima returns an `Include` of the instance's own `ssh.config`
   (aliased `lima-<name>`, the only name that file's `Host` line matches),
   because Lima picks a new port at every start and a copied `Port` would go
@@ -58,6 +59,12 @@ it is not where prose belongs.
   the cache: the entry outlives the process, and the cache is cleared only
   by power transitions sandbar made itself. Its user, key and host-key
   posture come from `sshConfig`, the same source as `sandbar shell`'s ssh.
+  That posture (no host-key checking, on a DHCP address) in a file VS Code
+  reuses later is an ACCEPTED gap, documented in
+  `docs/reference/security-model.md#editor-entries-do-not-check-host-keys`.
+  Its mitigations are the fresh address on every open and removing entries
+  when sandbar sees a VM gone; do not drop either without revisiting that
+  section.
   An error means no entry; never return a guessed host, which could connect
   somewhere unintended. There is no
   process-global "the provider" anymore: `provider.BuildFleet`
@@ -168,8 +175,19 @@ it is not where prose belongs.
 - `sshconfig` — sandbar's managed ssh client config
   (`${XDG_CONFIG_HOME:-~/.config}/sandbar/ssh_config`, one
   `# sandbar begin/end <alias>` block per VM) and the one `Include` of it in
-  `~/.ssh/config`. Aliases are `lima-<name>` (Local) and
-  `sandbar-<profile-slug>-<name>`. The throwaway-guest host-key options
+  `~/.ssh/config`. Aliases are `lima-<name>` (Local; Lima's own `Host`
+  name, so it cannot change) and `sandbar-<profile ID>-<name>`. The ID, not
+  the display name, so a rename orphans nothing and a profile's entries can
+  be found to remove. `RemoveWhere` is the one bulk removal (a locked
+  `mutate`); `internal/vscode` owns which aliases belong to a profile. The
+  file always starts with a header and a `Host sandbar-include-check-*`
+  block (a wildcard, so VS Code's host picker omits it) that `mutate`
+  rewrites on every write. `IncludeApplied` resolves
+  `sandbar-include-check-probe` with `ssh -G -F ~/.ssh/config` (`-F`
+  because ssh finds that file through the passwd home, not `$HOME`, which
+  tests isolate) and checks the block's `HostName`: an `Include` line inside
+  a `Host`/`Match` block is present in the text but not applied, and only
+  ssh can say so. `QuerySSH` is the seam. The throwaway-guest host-key options
   are `sshx.EphemeralHostKeyOptions`, shared with sandbar's own ssh argv.
   Two OpenSSH scoping rules fail silently:
   an `Include` after a `Host`/`Match` line applies only inside that block,
@@ -180,7 +198,10 @@ it is not where prose belongs.
   atomic write), like the other stores. `AddInclude` is deliberately
   unlocked: a lock would leave `config.lock` in `~/.ssh`, which sandbar
   otherwise never touches, for a one-time edit the user just confirmed; it
-  re-reads immediately before its atomic write instead. It never edits a
+  re-reads immediately before its atomic write instead. It is a no-op only
+  when an `Include` of the file precedes every `Host`/`Match` line; a
+  misplaced one is left as the user wrote it and a correct line is
+  prepended. It never edits a
   symlinked `~/.ssh/config` (the rename would detach a dotfiles link), and
   never runs without the user's consent, which callers obtain.
 - `vscode` — the one "open this VM in VS Code" operation (`Open`: `Prepare`
@@ -188,10 +209,24 @@ it is not where prose belongs.
   including the macOS app-bundle copy), then the launch or the
   pick-this-host fallback, returning the lines to show), plus `CheckInclude`
   and the user-facing messages, shared by `c` and `sandbar code` so their
-  wording and branching cannot drift. Each front end only asks for the
+  wording and branching cannot drift. `CheckInclude` asks ssh
+  (`sshconfig.IncludeApplied`) and falls back to the textual check only
+  when ssh cannot answer; it runs a subprocess, so the board's `c` runs it
+  in a command and raises the consent overlay from the answer
+  (`codeIncludeCheckedMsg`, carrying the VM identity captured at the
+  keypress, and dropped with a log line if another question or screen is up
+  by then). Each front end only asks for the
   Include consent its own way (y/N prompt, which treats non-terminal stdin as
-  no; or a confirm overlay) and prints the lines. The board's delete removes
-  the VM's block under the same `Alias`, off the Update goroutine: a Proxmox
+  no; or a confirm overlay) and prints the lines. Entry cleanup lives here
+  too (`RemoveEntries`, `PruneEntries`, `RemoveProfileEntries`), because
+  only this package knows a profile's alias namespace (Local: every `lima-`
+  block, since only sandbar writes the file). Triggers: the board's delete,
+  the board's reconcile for the VMs `manage.Reconcile` dropped, profile
+  delete, all off the Update goroutine; and `Prepare`, which prunes the
+  profile against a fresh `List()` after writing the entry it opens. That
+  prune is skipped when the listing fails (including
+  `lima.ErrListRacedInstanceDir`) or lacks the VM being opened, never fails
+  the open, and keeps the entry just written. A Proxmox
   entry pins a DHCP address that may later belong to another machine. The
   project folder comes from `manage.RecordedCloneURL` (marker, then index)
   in both front ends.

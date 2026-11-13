@@ -1412,6 +1412,17 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for _, name := range dropped {
 			_ = m.sec.Remove(name, sc)
 		}
+		// Their VS Code host entries go too, for the reason the board's delete
+		// removes one: a Proxmox entry pins a DHCP address another machine may
+		// be handed next. Named under this member's profile, the same scoping
+		// as the secrets above, and written off this goroutine.
+		var entriesCmd tea.Cmd
+		if len(dropped) > 0 {
+			prof, names := mem.profile, append([]string(nil), dropped...)
+			entriesCmd = removeEditorEntriesCmd(prof.Name+": ssh host entries of VMs no longer present ("+strings.Join(names, ", ")+")", func() ([]string, error) {
+				return vscode.RemoveEntries(prof, names...)
+			})
+		}
 		// One-time (per process, per scope) provenance-adoption migration: stamp
 		// markers onto VMs the registry already recorded as managed under sc but
 		// that have not picked one up yet (e.g. created by a pre-provenance
@@ -1462,7 +1473,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// operand against them. Inlined, the repair's Messages-log line could be
 		// dropped depending on the compiler.
 		heals := m.healAbandonedMarkers(mem, time.Now())
-		return m, tea.Batch(append(heals, adoptCmd)...)
+		return m, tea.Batch(append(heals, adoptCmd, entriesCmd)...)
 
 	case markerHealedMsg:
 		m.applyMarkerHealed(msg)
@@ -1528,11 +1539,15 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// match a same-named VM under a different profile.
 			secErr := m.sec.Remove(msg.name, sc)
 			// The VM's VS Code host entry goes too — best effort, a warning at
-			// most, and off this goroutine (removeEditorEntryCmd). Named by the
+			// most, and off this goroutine (removeEditorEntriesCmd). Named by the
 			// same rule that wrote it; a member that is gone (its profile was
-			// deleted mid-action) leaves nothing to name.
+			// deleted mid-action, which removed the profile's entries) leaves
+			// nothing to name.
 			if mem, ok := m.memberByScope(sc); ok {
-				cleanup = removeEditorEntryCmd(msg.name, vscode.Alias(mem.profile, msg.name))
+				prof, name := mem.profile, msg.name
+				cleanup = removeEditorEntriesCmd("delete "+name+": ssh host entry "+vscode.Alias(prof, name), func() ([]string, error) {
+					return vscode.RemoveEntries(prof, name)
+				})
 			}
 			switch {
 			case regErr != nil && secErr != nil:
@@ -1577,9 +1592,12 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case codeResultMsg:
 		return m.handleCodeResult(msg)
 
-	case editorEntryRemovedMsg:
+	case codeIncludeCheckedMsg:
+		return m.handleCodeIncludeChecked(msg)
+
+	case editorEntriesRemovedMsg:
 		if msg.err != nil {
-			m.logWarn("delete " + msg.name + ": ssh host entry " + msg.alias + " not removed: " + msg.err.Error())
+			m.logWarn(msg.what + " not removed: " + msg.err.Error())
 		}
 		return m, nil
 

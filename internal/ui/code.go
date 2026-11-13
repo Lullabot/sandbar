@@ -3,8 +3,9 @@ package ui
 // code.go is the board's `c` verb: open the focused VM in VS Code's
 // Remote-SSH. The work itself is internal/vscode.Open, shared with `sandbar
 // code` so the two front ends cannot drift; this file adds only what the
-// board owns — the consent overlay for ~/.ssh/config, running the operation
-// off the Update goroutine, and laying the shared messages out as log lines.
+// board owns — the consent overlay for ~/.ssh/config, running the check and
+// the operation off the Update goroutine, and laying the shared messages out
+// as log lines.
 
 import (
 	"context"
@@ -15,6 +16,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/lullabot/sandbar/internal/manage"
+	"github.com/lullabot/sandbar/internal/profiles"
 	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/sshconfig"
@@ -53,12 +55,12 @@ func manualIncludeNote(why string) codeNote {
 	return codeNote{text: vscode.ManualIncludeMessage(why, " "), warn: true}
 }
 
-// openInCode is the `c` action. Whether ~/.ssh/config may be edited is the
-// user's decision, asked here — before any work — through the same overlay
-// every other confirmation uses; the editing and the launch happen in
-// codeCmd. A config sandbar will not edit (a symlink, unwritable, or
-// unreadable) gets no question, only the line to add, exactly as the CLI
-// does.
+// openInCode is the `c` action. It only starts the Include check: that runs
+// ssh (vscode.CheckInclude asks `ssh -G` whether ~/.ssh/config really applies
+// the managed file), so it belongs in a command, and handleCodeIncludeChecked
+// decides what happens next from its answer. Everything the rest needs is
+// captured here, by VM identity, so focus moving while ssh answers changes
+// nothing about which VM is opened.
 func (m *model) openInCode(v boardVM) tea.Cmd {
 	p := m.provFor(v.scope)
 	mem, ok := m.memberByScope(v.scope)
@@ -67,16 +69,61 @@ func (m *model) openInCode(v boardVM) tea.Cmd {
 		// listed it. Guarded so a direct call cannot hand Open a nil guest.
 		return nil
 	}
-	alias := vscode.Alias(mem.profile, v.Name)
-	cloneURL := m.recordedCloneURL(v.scope, v.Name)
-	working := "opening " + v.Name + " in VS Code…"
+	req := codeRequest{scope: v.scope, vm: v.VM, prof: mem.profile, cloneURL: m.recordedCloneURL(v.scope, v.Name)}
+	return func() tea.Msg {
+		action, why := vscode.CheckInclude(context.Background())
+		return codeIncludeCheckedMsg{req: req, action: action, why: why}
+	}
+}
+
+// codeRequest is one press of `c`: the VM it was pressed on and what opening
+// it needs, fixed at the keypress.
+type codeRequest struct {
+	scope    registry.Scope
+	vm       vm.VM
+	prof     profiles.Profile
+	cloneURL string
+}
+
+// codeIncludeCheckedMsg carries vscode.CheckInclude's answer for req.
+type codeIncludeCheckedMsg struct {
+	req    codeRequest
+	action vscode.IncludeAction
+	why    string
+}
+
+// handleCodeIncludeChecked acts on the Include check. Whether ~/.ssh/config
+// may be edited is the user's decision, asked here — before any work —
+// through the same overlay every other confirmation uses; the editing and the
+// launch happen in codeCmd. A config sandbar will not edit (a symlink,
+// unwritable, or unreadable) gets no question, only the line to add, exactly
+// as the CLI does.
+func (m model) handleCodeIncludeChecked(msg codeIncludeCheckedMsg) (tea.Model, tea.Cmd) {
+	req := msg.req
+	p := m.provFor(req.scope)
+	if p == nil {
+		// The profile was disabled or deleted while ssh answered.
+		m.logMsg("code " + req.vm.Name + ": its profile is no longer connected")
+		return m, nil
+	}
+	working := "opening " + req.vm.Name + " in VS Code…"
 
 	var notes []codeNote
-	switch action, why := vscode.CheckInclude(); action {
+	switch msg.action {
 	case vscode.IncludeManual:
-		notes = append(notes, manualIncludeNote(why))
+		notes = append(notes, manualIncludeNote(msg.why))
 	case vscode.IncludeAsk:
+		if m.confirm != nil || m.view != viewBoard {
+			// The user raised another question, or left the board, while ssh
+			// answered. Putting this one up now would replace theirs or appear
+			// on a screen it does not belong to; pressing c again asks afresh.
+			m.logMsg("code " + req.vm.Name + ": not asking about ~/.ssh/config while another screen or question is open; press c again")
+			return m, nil
+		}
 		path := sshconfig.UserConfigPath()
+		if msg.why != "" {
+			m.logWarn(msg.why + ".")
+		}
 		// The full line goes into the log as well as the prompt: the prompt is
 		// one row and may be clipped on a narrow terminal, and the user is being
 		// asked to agree to exactly this text.
@@ -85,24 +132,24 @@ func (m *model) openInCode(v boardVM) tea.Cmd {
 		m.confirm = &confirmState{
 			// Shortened for a prompt that has one row to spend; display only.
 			prompt:    fmt.Sprintf("Add %q to %s?", sshconfig.IncludeLine(), shortenGuestPath(path, home)),
-			run:       codeCmd(p, v.VM, alias, cloneURL, true, nil),
-			cancelRun: codeCmd(p, v.VM, alias, cloneURL, false, []codeNote{manualIncludeNote("Left ~/.ssh/config unchanged")}),
+			run:       codeCmd(p, req, true, nil),
+			cancelRun: codeCmd(p, req, false, []codeNote{manualIncludeNote("Left ~/.ssh/config unchanged")}),
 			working:   working,
-			scope:     v.scope,
-			vmName:    v.Name,
+			scope:     req.scope,
+			vmName:    req.vm.Name,
 		}
-		return nil
+		return m, nil
 	}
 	m.logMsg(working)
-	return m.beginAction(codeCmd(p, v.VM, alias, cloneURL, false, notes))
+	return m, m.beginAction(codeCmd(p, req, false, notes))
 }
 
 // codeCmd runs the operation off the Update goroutine: the consented Include
 // edit, then vscode.Open (which may be an ssh round trip, then the launch).
 // notes are lines decided before it ran, reported ahead of its own.
-func codeCmd(p provider.Provider, v vm.VM, alias, cloneURL string, addInclude bool, notes []codeNote) tea.Cmd {
+func codeCmd(p provider.Provider, req codeRequest, addInclude bool, notes []codeNote) tea.Cmd {
 	return func() tea.Msg {
-		out := codeResultMsg{name: v.Name, notes: append([]codeNote(nil), notes...)}
+		out := codeResultMsg{name: req.vm.Name, notes: append([]codeNote(nil), notes...)}
 		if addInclude {
 			if err := sshconfig.AddInclude(); err != nil {
 				out.notes = append(out.notes, manualIncludeNote(vscode.AddIncludeFailure(err)))
@@ -113,7 +160,7 @@ func codeCmd(p provider.Provider, v vm.VM, alias, cloneURL string, addInclude bo
 
 		ctx, cancel := context.WithTimeout(context.Background(), codeTimeout)
 		defer cancel()
-		lines, launched, err := vscode.Open(ctx, p, v, alias, cloneURL)
+		lines, launched, err := vscode.Open(ctx, p, req.prof, req.vm, req.cloneURL)
 		if err != nil {
 			for _, l := range lines {
 				out.notes = append(out.notes, codeNote{text: l})
@@ -169,19 +216,21 @@ func (m model) recordedCloneURL(sc registry.Scope, name string) string {
 	return manage.RecordedCloneURL(marker, m.reg, sc, name)
 }
 
-// editorEntryRemovedMsg reports removeEditorEntryCmd's outcome; only a
-// failure is logged.
-type editorEntryRemovedMsg struct {
-	name, alias string
-	err         error
+// editorEntriesRemovedMsg reports removeEditorEntriesCmd's outcome; only a
+// failure is logged. what names the entries, to read before "not removed".
+type editorEntriesRemovedMsg struct {
+	what string
+	err  error
 }
 
-// removeEditorEntryCmd drops a deleted VM's VS Code host entry, off the
-// Update goroutine because it locks and rewrites a file. It matters most for
-// Proxmox, whose entry names a DHCP address that may later belong to an
+// removeEditorEntriesCmd runs one of internal/vscode's entry cleanups (a
+// deleted VM's, the VMs a reconcile dropped, or a deleted profile's) off the
+// Update goroutine, because each locks and rewrites a file. It matters most
+// for Proxmox, whose entry names a DHCP address that may later belong to an
 // unrelated machine.
-func removeEditorEntryCmd(name, alias string) tea.Cmd {
+func removeEditorEntriesCmd(what string, remove func() ([]string, error)) tea.Cmd {
 	return func() tea.Msg {
-		return editorEntryRemovedMsg{name: name, alias: alias, err: sshconfig.Remove(alias)}
+		_, err := remove()
+		return editorEntriesRemovedMsg{what: what, err: err}
 	}
 }

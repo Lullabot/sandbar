@@ -87,16 +87,16 @@ than one connection profile, --profile picks which one to open.
 	if err := p.Preflight(); err != nil {
 		return err
 	}
-	return doCode(context.Background(), p, reg, scope, name, vscode.Alias(target, name), os.Stdin, isTerminal(os.Stdin), os.Stdout)
+	return doCode(context.Background(), p, reg, scope, target, name, os.Stdin, isTerminal(os.Stdin), os.Stdout)
 }
 
 // doCode is runCode after resolution, taking its terminal as parameters so
-// the consent branching is testable with canned input. alias is the ssh host
-// name to write (vscode.Alias for the resolved profile). interactive is
+// the consent branching is testable with canned input. prof is the resolved
+// profile, which names the VM's ssh host alias. interactive is
 // whether in is a real terminal: piped input is never taken as consent to
 // edit ~/.ssh/config, because a script answering "y" to every prompt did not
 // read this one.
-func doCode(ctx context.Context, p provider.Provider, reg manage.ConfigLookup, scope registry.Scope, name, alias string, in io.Reader, interactive bool, out io.Writer) error {
+func doCode(ctx context.Context, p provider.Provider, reg manage.ConfigLookup, scope registry.Scope, prof profiles.Profile, name string, in io.Reader, interactive bool, out io.Writer) error {
 	// Refused before anything is written: a stopped VM's entry could not be
 	// resolved (Proxmox has no address for it) and VS Code would only time out.
 	v, err := requireRunningVM(p, "code", name)
@@ -104,9 +104,9 @@ func doCode(ctx context.Context, p provider.Provider, reg manage.ConfigLookup, s
 		return err
 	}
 
-	ensureInclude(in, interactive, out)
+	ensureInclude(ctx, in, interactive, out)
 
-	lines, _, err := vscode.Open(ctx, p, v, alias, recordedCloneURL(ctx, p, reg, scope, name))
+	lines, _, err := vscode.Open(ctx, p, prof, v, recordedCloneURL(ctx, p, reg, scope, name))
 	for _, l := range lines {
 		fmt.Fprintln(out, l)
 	}
@@ -120,19 +120,25 @@ func doCode(ctx context.Context, p provider.Provider, reg manage.ConfigLookup, s
 // consent, or tells the user exactly what to add. It never fails the command:
 // without the line the alias does not resolve yet, but the entry is still
 // written, so adding the line later is all it takes.
-func ensureInclude(in io.Reader, interactive bool, out io.Writer) {
+func ensureInclude(ctx context.Context, in io.Reader, interactive bool, out io.Writer) {
 	path := sshconfig.UserConfigPath()
 	line := sshconfig.IncludeLine()
 	manual := func(why string) {
 		fmt.Fprintln(out, vscode.ManualIncludeMessage(why, "\n  "))
 	}
 
-	switch action, why := vscode.CheckInclude(); action {
+	action, why := vscode.CheckInclude(ctx)
+	switch action {
 	case vscode.IncludePresent:
 		return
 	case vscode.IncludeManual:
 		manual(why)
 		return
+	}
+	if why != "" {
+		// An Include line is there but ssh does not apply it; say so, or the
+		// offer to add one would look like sandbar had not seen it.
+		fmt.Fprintln(out, why+".")
 	}
 
 	if !interactive {
