@@ -2,7 +2,7 @@
 id: 6
 group: "docs"
 dependencies: [3, 4, 5]
-status: "pending"
+status: "completed"
 created: 2026-11-13
 skills:
   - technical-writing
@@ -17,10 +17,10 @@ Document the VS Code workflow for users and the new seams for agents.
 Technical writing (MkDocs Material).
 
 ## Acceptance Criteria
-- [ ] User docs on opening a VM in VS Code: `c` / `sandbar code`, prerequisites (VS Code + Remote-SSH extension, `code` command), the managed file and one-time Include, per-backend notes (local Lima tracks port changes; remote Lima authorizes which public key, re-added after reset, needs guest `AllowTcpForwarding`; Proxmox IP refresh — press `c` again), troubleshooting.
-- [ ] `cli-reference.md` documents `sandbar code`; `tui.md` lists `c`; `files-and-state.md` lists the managed `ssh_config` and the `~/.ssh/config` edit.
-- [ ] AGENTS.md: `EditorSSH` on the provider seam, `internal/sshconfig` (Match-all / prepend rule, lock discipline), `internal/vscode`, and the `c` ↔ `sandbar code` parity pair.
-- [ ] `uvx --with-requirements docs/requirements.txt mkdocs build --strict` exits 0.
+- [x] User docs on opening a VM in VS Code: `c` / `sandbar code`, prerequisites (VS Code + Remote-SSH extension, `code` command), the managed file and one-time Include, per-backend notes (local Lima tracks port changes; remote Lima authorizes which public key, re-added after reset, needs guest `AllowTcpForwarding`; Proxmox IP refresh — press `c` again), troubleshooting.
+- [x] `cli-reference.md` documents `sandbar code`; `tui.md` lists `c`; `files-and-state.md` lists the managed `ssh_config` and the `~/.ssh/config` edit.
+- [x] AGENTS.md: `EditorSSH` on the provider seam, `internal/sshconfig` (Match-all / prepend rule, lock discipline), `internal/vscode`, and the `c` ↔ `sandbar code` parity pair.
+- [x] `uvx --with-requirements docs/requirements.txt mkdocs build --strict` exits 0.
 
 Use your internal Todo tool to track these and keep on track.
 

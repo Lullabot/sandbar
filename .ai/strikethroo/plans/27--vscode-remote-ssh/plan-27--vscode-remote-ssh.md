@@ -212,9 +212,9 @@ graph TD
 **Parallel Tasks:**
 - ✔️ Task 5: TUI `c code` verb (depends on: 4)
 
-### Phase 5: Documentation
+### ✅ Phase 5: Documentation
 **Parallel Tasks:**
-- Task 6: Documentation and AGENTS.md (depends on: 3, 4, 5)
+- ✔️ Task 6: Documentation and AGENTS.md (depends on: 3, 4, 5)
 
 ### Post-phase Actions
 

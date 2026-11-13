@@ -39,7 +39,19 @@ it is not where prose belongs.
   SSH arguments targeting the guest directly. Like `AttachArgv` and
   `RunArgv`, this method performs no I/O; tests check its arguments without
   SSH, a network, or a VM. `internal/landreview` starts the returned command
-  and stops it when the review ends. There is no
+  and stops it when the review ends. `Provider.EditorSSH(ctx, v)` is the
+  exception to that no-I/O rule: it returns the `sshconfig.Entry` a
+  workstation ssh client needs to reach the guest by name, and may do I/O, so
+  the TUI calls it off the Update goroutine. Local Lima returns an `Include`
+  of the instance's own `ssh.config` under `lima-<name>`, because Lima picks
+  a new port at every start and a copied `Port` would go stale. Remote Lima
+  overrides it (the inherited one would name a path on the remote host):
+  it appends a workstation public key to the guest's `authorized_keys`
+  (sent on stdin, never as script text) and proxies through the remote host
+  with `ssh -F <instance>/ssh.config -W`, so Lima's key never leaves that
+  host. Proxmox resolves the guest IP through the agent. An error means no
+  entry; never return a guessed host, which could connect somewhere
+  unintended. There is no
   process-global "the provider" anymore: `provider.BuildFleet`
   constructs one `Binding` (provider + registry.Scope) **per enabled
   Connection Profile** from `internal/profiles`' persisted store, so a
@@ -145,6 +157,30 @@ it is not where prose belongs.
   away. It uses native APIs with no subprocess; see "What a reset preserves"
   below. It adds the only two module dependencies that are platform-specific:
   `github.com/ebitengine/purego` and `github.com/godbus/dbus/v5`.
+- `sshconfig` — sandbar's managed ssh client config
+  (`${XDG_CONFIG_HOME:-~/.config}/sandbar/ssh_config`, one
+  `# sandbar begin/end <alias>` block per VM) and the one `Include` of it in
+  `~/.ssh/config`. Aliases are `lima-<name>` (Local) and
+  `sandbar-<profile-slug>-<name>`. Two OpenSSH scoping rules fail silently:
+  an `Include` after a `Host`/`Match` line applies only inside that block,
+  so `AddInclude` PREPENDS to `~/.ssh/config` (most configs end inside a
+  `Host` block), and every managed block starts with `Match all` so a
+  local-Lima `Include` block is not made conditional on the `Host` before
+  it. Managed-file writes go through `mutate` (statelock, re-read, apply,
+  atomic write), like the other stores. `AddInclude` is deliberately
+  unlocked: a lock would leave `config.lock` in `~/.ssh`, which sandbar
+  otherwise never touches, for a one-time edit the user just confirmed; it
+  re-reads immediately before its atomic write instead. It never edits a
+  symlinked `~/.ssh/config` (the rename would detach a dotfiles link), and
+  never runs without the user's consent, which callers obtain.
+- `vscode` — the one "open this VM in VS Code" operation (`Prepare`:
+  `EditorSSH` → `sshconfig.Upsert` → folder → `code` lookup, including the
+  macOS app-bundle copy), plus `ClassifyInclude` and the user-facing
+  messages, shared by `c` and `sandbar code` so their wording and branching
+  cannot drift. Each front end only asks for the Include consent its own way
+  (y/N prompt, which treats non-terminal stdin as no; or a confirm overlay).
+  The board's delete removes the VM's block: a Proxmox entry pins a DHCP
+  address that may later belong to another machine.
 - `provision` — orchestrates create/reset (base build, `limactl clone`,
   finalize) and the Ansible run; `staging.go` moves data across a reset.
   Depends on `*lima.Client` and the `Host` seam (for base-image file access),
@@ -252,8 +288,8 @@ changing command branding.
 
 Entrypoint: `cmd/sandbar/main.go`. Keep CLI operations consistent with their
 TUI equivalents: `sandbar create` is `n`, `sandbar reset` is `R`, `sandbar shell` is
-`S`, `sandbar template snapshot` is `t`, `sandbar land` is `l`, and
-`sandbar paste-image` is `v`. Publishing is also
+`S`, `sandbar code` is `c`, `sandbar template snapshot` is `t`, `sandbar land`
+is `l`, and `sandbar paste-image` is `v`. Publishing is also
 available from the Landing pane. The CLI previously lacked the TUI's reset
 preserve options; shared operations prevent this kind of drift.
 
@@ -266,7 +302,7 @@ Create/reset checks and bookkeeping belong in `internal/manage`
 Create and the TUI build providers through `provider.BuildFleet` from the
 enabled profiles. A CLI create binds only its target profile; the TUI binds
 all enabled profiles. Commands acting on an existing VM
-(`reset`, `updates`, `shell`, `land`, `paste-image`) use `resolveVMProfile` to find its
+(`reset`, `updates`, `shell`, `code`, `land`, `paste-image`) use `resolveVMProfile` to find its
 owning profile through the marker, registry, then live listing.
 
 `sandbar updates NAME [--profile NAME] [--json]` reads the owning VM's marker
