@@ -1,6 +1,6 @@
 # CLI Reference
 
-There are nine entry points:
+There are ten entry points:
 
 - [`sandbar`](#sandbar) — no arguments — launches the interactive TUI.
 - [`sandbar create`](#sandbar-create) — headless, non-interactive VM provisioning.
@@ -12,6 +12,8 @@ There are nine entry points:
   templates.
 - [`sandbar shell NAME`](#sandbar-shell-name) — attach to a running VM's persistent
   tmux session.
+- [`sandbar code NAME`](#sandbar-code-name) — open a running VM in VS Code over
+  Remote-SSH.
 - [`sandbar paste-image NAME`](#sandbar-paste-image-name) — stage an image from the
   host clipboard on a running VM's guest clipboard.
 - [`sandbar land NAME`](#sandbar-land-name) — list a VM's git checkouts, or open a
@@ -24,7 +26,8 @@ There are nine entry points:
 Any other first argument is an unknown subcommand and exits `2`.
 
 The CLI commands also have TUI actions: `n` creates a VM, `R` resets it,
-`S` opens a shell, `l` opens Landing, and `v` pastes an image from the board.
+`S` opens a shell, `c` opens VS Code, `l` opens Landing, and `v` pastes an
+image from the board.
 The Landing pane also offers publishing to drupal.org. The CLI and TUI share
 the checks and operations behind these actions.
 
@@ -762,6 +765,41 @@ which one you mean like this:
    (the same name exists on two profiles) is an error asking you to pass
    `--profile` to disambiguate, and lists the profile names it's ambiguous
    between.
+
+## `sandbar code NAME`
+
+Open `NAME` in VS Code over Remote-SSH. This is the same operation as the
+TUI's `c` key. See [Opening a VM in VS Code](vscode.md) for prerequisites,
+what it writes, and per-backend notes.
+
+```
+Usage: sandbar code NAME [--profile <name>]
+
+Open NAME in VS Code over Remote-SSH, on the VM's project checkout (or its
+home directory when it was created without a repository).
+
+sandbar writes an ssh host entry for NAME to ~/.config/sandbar/ssh_config
+and runs: code --remote ssh-remote+<alias> <folder>
+If VS Code's "code" command is not found, it prints the host alias to choose
+in VS Code's "Remote-SSH: Connect to Host…" instead.
+
+ssh reads that file only once ~/.ssh/config includes it. The first time, on a
+terminal, sandbar asks before adding this line to the top of ~/.ssh/config:
+  Include "/home/you/.config/sandbar/ssh_config"
+It never edits a symlinked or unwritable ~/.ssh/config, or one it could not
+ask about (stdin is not a terminal); it prints the line to add instead.
+
+The named VM must already exist and be running. If NAME is managed under more
+than one connection profile, --profile picks which one to open.
+```
+
+The help prints the real absolute paths, which follow `XDG_CONFIG_HOME`.
+`NAME` is required (exactly one positional argument); `--profile` may appear
+before or after `NAME`. The command refuses a VM that does not exist or is
+not running, before writing anything. The `~/.ssh/config` question defaults
+to no, and declining does not fail the command: the entry is still written,
+and VS Code opens once you add the line. Profile resolution follows
+[`sandbar shell`'s rules](#cross-profile-resolution-for-sandbar-shell).
 
 ## `sandbar paste-image NAME`
 

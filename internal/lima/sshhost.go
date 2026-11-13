@@ -964,3 +964,9 @@ func (l *sshLock) Close() error { return l.Unlock() }
 func (h *SSHHost) RunArgv(name, workdir, expr, colorterm string) []string {
 	return h.conn.SSHArgv(true, RunArgv(name, workdir, expr, colorterm)...)
 }
+
+// Conn is the ssh connection this host's argv is built from, for a caller that
+// must describe the same hop somewhere sandbar does not run it itself (the
+// remote-Lima provider's editor ProxyCommand), so the two cannot disagree
+// about the host, user, port or identity.
+func (h *SSHHost) Conn() *sshx.Conn { return h.conn }

@@ -32,6 +32,7 @@ import (
 	"github.com/lullabot/sandbar/internal/releasecheck"
 	"github.com/lullabot/sandbar/internal/secrets"
 	"github.com/lullabot/sandbar/internal/vm"
+	"github.com/lullabot/sandbar/internal/vscode"
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
@@ -99,6 +100,16 @@ type confirmState struct {
 	// Landing panes use.
 	scope  registry.Scope
 	vmName string
+
+	// cancelRun, when set, is dispatched (via beginAction, like run) on `n`
+	// instead of simply closing the overlay. It exists for the one
+	// confirmation whose answers are not yes/cancel: the `c` verb's consent to
+	// edit ~/.ssh/config, where declining the edit is a decision about that
+	// file, not about opening the editor, so the operation still proceeds.
+	// `esc` still only closes the overlay: it is the key that means "back
+	// out", and without it there would be no way to abandon the verb once
+	// asked. Setting it also switches the key hint to add/skip/cancel.
+	cancelRun tea.Cmd
 }
 
 // view is the active screen the model renders and routes keys to. viewBoard is
@@ -1401,6 +1412,17 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for _, name := range dropped {
 			_ = m.sec.Remove(name, sc)
 		}
+		// Their VS Code host entries go too, for the reason the board's delete
+		// removes one: a Proxmox entry pins a DHCP address another machine may
+		// be handed next. Named under this member's profile, the same scoping
+		// as the secrets above, and written off this goroutine.
+		var entriesCmd tea.Cmd
+		if len(dropped) > 0 {
+			prof, names := mem.profile, append([]string(nil), dropped...)
+			entriesCmd = removeEditorEntriesCmd(prof.Name+": ssh host entries of VMs no longer present ("+strings.Join(names, ", ")+")", func() ([]string, error) {
+				return vscode.RemoveEntries(prof, names...)
+			})
+		}
 		// One-time (per process, per scope) provenance-adoption migration: stamp
 		// markers onto VMs the registry already recorded as managed under sc but
 		// that have not picked one up yet (e.g. created by a pre-provenance
@@ -1451,7 +1473,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// operand against them. Inlined, the repair's Messages-log line could be
 		// dropped depending on the compiler.
 		heals := m.healAbandonedMarkers(mem, time.Now())
-		return m, tea.Batch(append(heals, adoptCmd)...)
+		return m, tea.Batch(append(heals, adoptCmd, entriesCmd)...)
 
 	case markerHealedMsg:
 		m.applyMarkerHealed(msg)
@@ -1488,7 +1510,8 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.heartbeats.stop(sc, msg.name)
 		}
 		label := msg.action + " " + msg.name
-		var text string // built below, then logged ONCE at the end (see the warn append)
+		var text string     // built below, then logged ONCE at the end (see the warn append)
+		var cleanup tea.Cmd // follow-up work a delete hands off the Update goroutine
 		switch {
 		case msg.err != nil:
 			text = label + " failed: " + msg.err.Error()
@@ -1515,6 +1538,17 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Scoped to the deleted VM's own member: never a bare name that could
 			// match a same-named VM under a different profile.
 			secErr := m.sec.Remove(msg.name, sc)
+			// The VM's VS Code host entry goes too — best effort, a warning at
+			// most, and off this goroutine (removeEditorEntriesCmd). Named by the
+			// same rule that wrote it; a member that is gone (its profile was
+			// deleted mid-action, which removed the profile's entries) leaves
+			// nothing to name.
+			if mem, ok := m.memberByScope(sc); ok {
+				prof, name := mem.profile, msg.name
+				cleanup = removeEditorEntriesCmd("delete "+name+": ssh host entry "+vscode.Alias(prof, name), func() ([]string, error) {
+					return vscode.RemoveEntries(prof, name)
+				})
+			}
 			switch {
 			case regErr != nil && secErr != nil:
 				text = label + " ok (warning: managed index not updated: " + regErr.Error() + "; secrets not pruned: " + secErr.Error() + ")"
@@ -1553,7 +1587,19 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			text += " (warning: " + msg.warn + ")"
 		}
 		m.logMsg(text)
-		return m, m.refreshMemberCmd(sc) // refresh the acted member after every action
+		return m, tea.Batch(m.refreshMemberCmd(sc), cleanup) // refresh the acted member after every action
+
+	case codeResultMsg:
+		return m.handleCodeResult(msg)
+
+	case codeIncludeCheckedMsg:
+		return m.handleCodeIncludeChecked(msg)
+
+	case editorEntriesRemovedMsg:
+		if msg.err != nil {
+			m.logWarn(msg.what + " not removed: " + msg.err.Error())
+		}
+		return m, nil
 
 	case pasteResultMsg:
 		// A plain status-line result: no spinner to clear (pasteCmd never
@@ -1990,8 +2036,16 @@ func (m model) updateConfirm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.confirm = nil
 		return m, m.beginAction(run)
 	case key.Matches(msg, m.keys.Cancel): // n / esc
+		run := m.confirm.cancelRun
+		working := m.confirm.working
 		m.confirm = nil
-		return m, nil
+		if run == nil || msg.Code == tea.KeyEsc {
+			return m, nil
+		}
+		if working != "" {
+			m.logMsg(working)
+		}
+		return m, m.beginAction(run)
 	}
 	return m, nil
 }
@@ -2006,7 +2060,21 @@ func (m model) confirmView() string {
 		// say why rather than looking like a dead key. Cancel still works.
 		return m.clipLine(errStyle.Render(m.confirm.prompt + "  checking for recent changes…   [n] cancel"))
 	}
-	return m.clipLine(errStyle.Render(m.confirm.prompt + "  [y] yes   [n] cancel"))
+	choices := "[y] yes   [n] cancel"
+	if m.confirm.cancelRun != nil {
+		// `n` runs something too, so it cannot be labelled "cancel"; esc is.
+		choices = "[y] add   [n] skip   [esc] cancel"
+	}
+	// The prompt gives way, not the key hint: a prompt that names a path can
+	// outrun a narrow terminal, and a confirmation whose keys were clipped off
+	// is a question the user cannot see how to answer. A prompt that fits is
+	// rendered exactly as before.
+	hint := "  " + choices
+	prompt := m.confirm.prompt
+	if room := m.layout.ContentWidth - ansi.StringWidth(hint); room > 0 {
+		prompt = ansi.Truncate(prompt, room, "…")
+	}
+	return m.clipLine(errStyle.Render(prompt + hint))
 }
 
 // View renders the active screen. v2 moved the alt-screen toggle from a

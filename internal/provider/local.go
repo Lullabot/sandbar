@@ -2,14 +2,17 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/lullabot/sandbar/internal/guestsh"
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provision"
+	"github.com/lullabot/sandbar/internal/sshconfig"
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
@@ -228,6 +231,26 @@ func (p *limaProvider) RunArgv(v vm.VM, workdir, expr string) []string {
 // contract, and the remote provider's ForwardArgv for the ONE hop that same
 // auto-forward needs when the Lima host is not this machine.
 func (p *limaProvider) ForwardArgv(v vm.VM, hostPort, guestPort int) []string { return nil }
+
+// EditorSSH returns an Include of Lima's own per-instance ssh.config, not a
+// copy of its options: Lima picks a fresh forwarded
+// port on every start and rewrites that file, so a copied Port would go stale
+// at the next restart while an Include tracks it. The file is checked here
+// because ssh silently skips a missing Include, which would leave the user
+// with nothing better than "could not resolve hostname".
+//
+// Only correct when v.Dir is on THIS machine; the remote provider overrides
+// it. See Provider.EditorSSH.
+func (p *limaProvider) EditorSSH(_ context.Context, v vm.VM) (sshconfig.Entry, error) {
+	if v.Dir == "" {
+		return sshconfig.Entry{}, fmt.Errorf("lima: no instance directory known for %q", v.Name)
+	}
+	cfg := filepath.Join(v.Dir, "ssh.config")
+	if _, err := os.Stat(cfg); err != nil {
+		return sshconfig.Entry{}, fmt.Errorf("lima: ssh config for %q not found at %s (start the VM once so Lima writes it): %w", v.Name, cfg, err)
+	}
+	return sshconfig.Entry{Include: cfg}, nil
+}
 
 // HostUser returns this machine's user — for local Lima the limactl host IS this
 // machine, and Lima creates a guest account matching it (see Provider.HostUser).

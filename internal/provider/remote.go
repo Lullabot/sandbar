@@ -68,8 +68,9 @@ func (p *remoteLimaProvider) ForwardArgv(v vm.VM, hostPort, guestPort int) []str
 
 // GuestHome / GuestUser read v's instance files off the REMOTE host (via the SSH
 // HostFiles), not the local filesystem where they do not exist.
-func (p *remoteLimaProvider) GuestHome(v vm.VM) string { return lima.GuestHomeVia(p.host, v.Dir) }
-func (p *remoteLimaProvider) GuestUser(v vm.VM) string { return lima.GuestUserVia(p.host, v.Dir) }
+// They read through hostFiles, which NewRemoteLima sets to that same SSHHost.
+func (p *remoteLimaProvider) GuestHome(v vm.VM) string { return lima.GuestHomeVia(p.hostFiles, v.Dir) }
+func (p *remoteLimaProvider) GuestUser(v vm.VM) string { return lima.GuestUserVia(p.hostFiles, v.Dir) }
 
 // HostUser returns the REMOTE host's login user (over ssh) — the user Lima
 // creates the guest account for and that `limactl shell` logs into, so a new VM's

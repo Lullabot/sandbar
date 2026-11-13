@@ -111,8 +111,8 @@ These act on the board itself, regardless of which tile is focused.
 
 These fire on whichever tile the focus ring is currently on. Not every verb
 is offered on every tile — for example `s` (start) only appears when the VM
-isn't already running, and `S` (shell), `u` (upload), and `g` (download) all
-require the VM to be running.
+isn't already running, and `S` (shell), `c` (code), `u` (upload), and `g`
+(download) all require the VM to be running.
 
 | Key | Action | What it does |
 | --- | --- | --- |
@@ -123,8 +123,9 @@ require the VM to be running.
 | `R` | Reset | Delete this VM and clone it fresh from its base image, keeping its name and sizing. Everything inside the guest is lost; the create form opens pre-filled so you can change the settings first. Only offered for VMs sandbar created. |
 | `t` | Snapshot → template | Capture this managed VM as a reusable [golden template](golden-templates.md). A running source is stopped briefly and restored afterward. |
 | `S` | Shell | Attach a shell to the guest's persistent tmux session. Work keeps running after you detach (`C-a d`) or close the terminal. Inside a host tmux session this opens a new window and leaves the board live; otherwise it suspends the board until you detach. See [Files and Shells](files-and-shells.md). |
+| `c` | Code | Open the VM in VS Code over Remote-SSH, on its project checkout. The first time, sandbar asks before adding one `Include` line to `~/.ssh/config`. Running VMs only. See [Opening a VM in VS Code](vscode.md). |
 | `v` | Paste Image | Stage the host clipboard's image on the guest clipboard, ready for Ctrl-V inside any supported coding agent. |
-| `d` | Delete | Delete the VM and its disk, after a confirmation. Its host-stored secrets go with it. **Irreversible.** |
+| `d` | Delete | Delete the VM and its disk, after a confirmation. Its host-stored secrets and its VS Code ssh host entry go with it. **Irreversible.** |
 | `u` | Upload | Copy a file or directory from this machine into the guest. You pick the source, then the destination directory. See [Files and Shells](files-and-shells.md). |
 | `g` | Download | Copy a file or directory out of the guest onto this machine. See [Files and Shells](files-and-shells.md). |
 | `e` | Secrets | Edit this VM's secrets. Saving writes them into a running guest immediately; a stopped one gets them on its next start. See [Secrets](secrets.md). |

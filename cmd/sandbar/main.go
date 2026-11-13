@@ -4,11 +4,12 @@
 //
 // Its headless subcommands are the same verbs under the same names — `sandbar
 // create` is the form's `n`, `sandbar reset` is the board's `R`, `sandbar shell` is
-// `S`, `sandbar land` is `l`, `sandbar paste-image` is `v` — because a verb that
-// exists in only one of the two entrypoints is a verb users have to discover
-// twice. Each shares the TUI's implementation rather than reimplementing it
-// (internal/manage's gates and bookkeeping, provider.AttachArgv, internal/
-// checkouts' sweep), so the pairs cannot drift.
+// `S`, `sandbar land` is `l`, `sandbar paste-image` is `v`, `sandbar code` is
+// `c` — because a verb that exists in only one of the two entrypoints is a verb
+// users have to discover twice. Each shares the TUI's implementation rather
+// than reimplementing it (internal/manage's gates and bookkeeping,
+// provider.AttachArgv, internal/checkouts' sweep, internal/vscode.Prepare), so
+// the pairs cannot drift.
 package main
 
 import (
@@ -73,6 +74,12 @@ func main() {
 				os.Exit(1)
 			}
 			return
+		case "code":
+			if err := runCode(os.Args[2:]); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+			return
 		case "paste-image":
 			if err := runPasteImage(os.Args[2:]); err != nil {
 				fmt.Fprintln(os.Stderr, err)
@@ -94,7 +101,7 @@ func main() {
 			}
 			return
 		default:
-			fmt.Fprintf(os.Stderr, "sandbar: unknown subcommand %q\n\nUsage:\n  sandbar              interactive TUI\n  sandbar create ...   headless create (see 'sandbar create -h')\n  sandbar reset NAME   rebuild a VM from its base image (see 'sandbar reset -h')\n  sandbar updates NAME   inspect VM updates (see 'sandbar updates -h')\n  sandbar shell NAME   attach a shell to a VM (see 'sandbar shell -h')\n  sandbar land NAME    list/land a VM's git checkouts (see 'sandbar land -h')\n  sandbar publish NAME PATH ISSUE   publish a checkout's commits to a drupal.org issue fork (see 'sandbar publish -h')\n  sandbar paste-image NAME   stage the clipboard image on a VM (see 'sandbar paste-image -h')\n  sandbar template ... manage golden VM templates (see 'sandbar template -h')\n", os.Args[1])
+			fmt.Fprintf(os.Stderr, "sandbar: unknown subcommand %q\n\nUsage:\n  sandbar              interactive TUI\n  sandbar create ...   headless create (see 'sandbar create -h')\n  sandbar reset NAME   rebuild a VM from its base image (see 'sandbar reset -h')\n  sandbar updates NAME   inspect VM updates (see 'sandbar updates -h')\n  sandbar shell NAME   attach a shell to a VM (see 'sandbar shell -h')\n  sandbar code NAME    open a VM in VS Code over Remote-SSH (see 'sandbar code -h')\n  sandbar land NAME    list/land a VM's git checkouts (see 'sandbar land -h')\n  sandbar publish NAME PATH ISSUE   publish a checkout's commits to a drupal.org issue fork (see 'sandbar publish -h')\n  sandbar paste-image NAME   stage the clipboard image on a VM (see 'sandbar paste-image -h')\n  sandbar template ... manage golden VM templates (see 'sandbar template -h')\n", os.Args[1])
 			os.Exit(2)
 		}
 	}
