@@ -49,7 +49,9 @@ it is not where prose belongs.
   it appends a workstation public key to the guest's `authorized_keys`
   (sent on stdin, never as script text) and proxies through the remote host
   with `ssh -F <instance>/ssh.config -W`, so Lima's key never leaves that
-  host. Proxmox resolves the guest IP through the agent. An error means no
+  host. Proxmox resolves the guest IP through the agent, dropping the cached
+  address first: the entry outlives the process, and the cache is cleared
+  only by power transitions sandbar made itself. An error means no
   entry; never return a guessed host, which could connect somewhere
   unintended. There is no
   process-global "the provider" anymore: `provider.BuildFleet`
