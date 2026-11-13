@@ -141,6 +141,7 @@ func TargetConfigFor(p profiles.Profile) TargetConfig {
 	if p.Type == profiles.TypeProxmox {
 		return TargetConfig{
 			Provider:     ProxmoxProviderID,
+			ProfileName:  p.Name,
 			Host:         p.Host,
 			User:         p.User,
 			Node:         p.Node,
@@ -162,6 +163,7 @@ func TargetConfigFor(p profiles.Profile) TargetConfig {
 	}
 	return TargetConfig{
 		Provider:       RemoteLimaProviderID,
+		ProfileName:    p.Name,
 		Host:           p.Host,
 		User:           p.User,
 		Port:           p.Port,

@@ -199,9 +199,9 @@ graph TD
 **Parallel Tasks:**
 - ✔️ Task 1: Managed ssh config package
 
-### Phase 2: Provider seam
+### ✅ Phase 2: Provider seam
 **Parallel Tasks:**
-- Task 2: `Provider.EditorSSH` for local Lima and Proxmox (depends on: 1)
+- ✔️ Task 2: `Provider.EditorSSH` for local Lima and Proxmox (depends on: 1)
 
 ### Phase 3: Remote Lima and shared operation
 **Parallel Tasks:**

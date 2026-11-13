@@ -30,6 +30,7 @@ import (
 
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provision"
+	"github.com/lullabot/sandbar/internal/sshconfig"
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
@@ -173,6 +174,15 @@ type Provider interface {
 	// backend's behavior is asserted as an exact argv with no real ssh, network
 	// or VM.
 	ForwardArgv(v vm.VM, hostPort, guestPort int) []string
+	// EditorSSH describes how a WORKSTATION ssh client reaches v as a named
+	// host, for tools that open a VM over plain ssh (VS Code's Remote-SSH)
+	// rather than through sandbar's own argv. Unlike the *Argv methods it may
+	// do I/O — Proxmox resolves the guest address through its agent, local
+	// Lima checks that its ssh.config exists — so callers must run it off the
+	// TUI update goroutine. An error means there is no trustworthy entry; a
+	// backend never returns a guessed one, since the alias would then connect
+	// somewhere unintended.
+	EditorSSH(ctx context.Context, v vm.VM) (sshconfig.Entry, error)
 	// GuestHome returns v's guest login-user home directory, read from the backend's
 	// instance files (for local Lima, Lima's generated cloud-config.yaml). Returns
 	// "" when it cannot be determined so the caller can fall back.

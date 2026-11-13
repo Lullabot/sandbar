@@ -2,7 +2,7 @@
 id: 2
 group: "provider"
 dependencies: [1]
-status: "pending"
+status: "completed"
 created: 2026-11-13
 skills:
   - go
@@ -17,12 +17,12 @@ Add `EditorSSH(ctx context.Context, v vm.VM) (sshconfig.Entry, error)` to `provi
 Go (provider package).
 
 ## Acceptance Criteria
-- [ ] Interface method documented (may do I/O; callers run it off the TUI update goroutine).
-- [ ] Local Lima returns `Entry{Alias: sshconfig.LimaAlias(v.Name), Include: filepath.Join(v.Dir, "ssh.config")}` and errors clearly when that file does not exist.
-- [ ] Proxmox resolves the IP via the existing bounded `guestIP` and returns alias `sshconfig.ProfileAlias(<profile name>, v.Name)`, HostName ip, User ciUser, IdentityFile identityPath, IdentitiesOnly, EphemeralHostKeys.
-- [ ] Remote Lima overrides with a stub error so the embedded local implementation (which would point at a REMOTE path locally) is never used.
-- [ ] `providerfake` gains `EditorSSHFunc` following its zero-value defaulting contract.
-- [ ] `go build ./... && go test ./internal/provider ./internal/providerfake` pass, with tests asserting the local and Proxmox entries (Proxmox via the existing fake PVE harness in `proxmox_test.go`).
+- [x] Interface method documented (may do I/O; callers run it off the TUI update goroutine).
+- [x] Local Lima returns `Entry{Alias: sshconfig.LimaAlias(v.Name), Include: filepath.Join(v.Dir, "ssh.config")}` and errors clearly when that file does not exist.
+- [x] Proxmox resolves the IP via the existing bounded `guestIP` and returns alias `sshconfig.ProfileAlias(<profile name>, v.Name)`, HostName ip, User ciUser, IdentityFile identityPath, IdentitiesOnly, EphemeralHostKeys.
+- [x] Remote Lima overrides with a stub error so the embedded local implementation (which would point at a REMOTE path locally) is never used.
+- [x] `providerfake` gains `EditorSSHFunc` following its zero-value defaulting contract.
+- [x] `go build ./... && go test ./internal/provider ./internal/providerfake` pass, with tests asserting the local and Proxmox entries (Proxmox via the existing fake PVE harness in `proxmox_test.go`).
 
 Use your internal Todo tool to track these and keep on track.
 

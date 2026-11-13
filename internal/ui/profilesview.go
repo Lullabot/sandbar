@@ -573,7 +573,19 @@ func (m *model) deleteProfile(id string) {
 // never rebuilt the live binding against the new target. Every field
 // provider.TargetConfigFor reads has to be compared here, or that bug simply
 // comes back for whichever one is left out.
+//
+// That includes the NAME of a remote-ssh or Proxmox profile: TargetConfigFor
+// carries it so the provider can namespace the workstation ssh aliases it
+// hands out (provider.Provider.EditorSSH), and a provider left holding the
+// old name would keep writing aliases under it. So renaming one of those
+// rebuilds its binding (and is idle-gated like any other rebuild). Renaming
+// Local still does not: its provider is built without TargetConfigFor and its
+// aliases do not involve the profile at all.
 func connectionFieldsEqual(a, b profiles.Profile) bool {
+	nameMatters := a.Type != profiles.TypeLocal || b.Type != profiles.TypeLocal
+	if nameMatters && a.Name != b.Name {
+		return false
+	}
 	return a.Host == b.Host && a.User == b.User && a.Port == b.Port &&
 		a.IdentityPath == b.IdentityPath && a.LimaHome == b.LimaHome &&
 		a.Node == b.Node && a.Pool == b.Pool && a.Storage == b.Storage &&

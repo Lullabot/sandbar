@@ -50,6 +50,7 @@ import (
 	"github.com/lullabot/sandbar/internal/profiles"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/pve"
+	"github.com/lullabot/sandbar/internal/sshconfig"
 	"github.com/lullabot/sandbar/internal/sshx"
 	"github.com/lullabot/sandbar/internal/vm"
 )
@@ -152,6 +153,9 @@ type proxmoxProvider struct {
 	// identityPath is the private key file matching the public key cloud-init
 	// installs for ciUser. Never key material.
 	identityPath string
+	// profileName namespaces this profile's editor ssh aliases
+	// (sshconfig.ProfileAlias); see TargetConfig.ProfileName.
+	profileName string
 
 	// files is the local, per-endpoint state directory standing in for "the host
 	// where limactl runs" (proxmoxfiles.go).
@@ -299,6 +303,7 @@ func NewProxmox(cfg TargetConfig) (Provider, error) {
 		bridge:          cfg.Bridge,
 		ciUser:          ciUser,
 		identityPath:    identityPath,
+		profileName:     cfg.ProfileName,
 		files:           newProxmoxFiles(proxmoxStateRoot(cfg)),
 		runSSH:          execSSH,
 		vmids:           map[string]int{},
@@ -1558,6 +1563,35 @@ func (p *proxmoxProvider) ForwardArgv(v vm.VM, hostPort, guestPort int) []string
 		return failArgv(fmt.Sprintf("sandbar: cannot forward to %q: %v", v.Name, err))
 	}
 	return p.sshHost(ip).ForwardArgv(hostPort, guestPort)
+}
+
+// EditorSSH describes the guest as a plain ssh host with the same identity
+// sshHost gives sandbar's own connections — ciUser, the profile's key with
+// IdentitiesOnly, and the throwaway host-key posture — so an editor
+// connection succeeds and fails exactly when `sandbar shell` does. The
+// address is resolved through the same bounded guestIP lookup AttachArgv
+// uses, derived from the caller's ctx so a cancelled request stops waiting.
+// A resolution failure is an error, never an entry naming the VM itself: that
+// name could resolve to an unrelated host on the local network.
+//
+// The entry pins a DHCP address, so it is only as current as the lease; the
+// caller rewrites it each time the VM is opened.
+func (p *proxmoxProvider) EditorSSH(ctx context.Context, v vm.VM) (sshconfig.Entry, error) {
+	ctx, cancel := context.WithTimeout(ctx, attachResolveTimeout)
+	defer cancel()
+
+	ip, err := p.guestIP(ctx, v.Name)
+	if err != nil {
+		return sshconfig.Entry{}, fmt.Errorf("proxmox: cannot resolve %q's address: %w", v.Name, err)
+	}
+	return sshconfig.Entry{
+		Alias:             sshconfig.ProfileAlias(p.profileName, v.Name),
+		HostName:          ip,
+		User:              p.ciUser,
+		IdentityFile:      p.identityPath,
+		IdentitiesOnly:    true,
+		EphemeralHostKeys: true,
+	}, nil
 }
 
 // failArgv is a real, runnable command that prints msg and exits non-zero — the

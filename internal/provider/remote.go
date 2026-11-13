@@ -1,11 +1,14 @@
 package provider
 
 import (
+	"context"
+	"errors"
 	"os"
 
 	"github.com/lullabot/sandbar/internal/guestsh"
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provision"
+	"github.com/lullabot/sandbar/internal/sshconfig"
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
@@ -24,6 +27,9 @@ import (
 type remoteLimaProvider struct {
 	*limaProvider
 	host *lima.SSHHost
+	// profileName namespaces this profile's editor ssh aliases
+	// (sshconfig.ProfileAlias); see TargetConfig.ProfileName.
+	profileName string
 }
 
 var _ Provider = (*remoteLimaProvider)(nil)
@@ -64,6 +70,13 @@ func (p *remoteLimaProvider) RunArgv(v vm.VM, workdir, expr string) []string {
 // rather than a second hand-rolled one.
 func (p *remoteLimaProvider) ForwardArgv(v vm.VM, hostPort, guestPort int) []string {
 	return p.host.ForwardArgv(hostPort, guestPort)
+}
+
+// EditorSSH must be overridden even though it is not yet supported: the
+// embedded local implementation would Include v.Dir/ssh.config, a path on the
+// REMOTE host that names nothing (or something unrelated) on the workstation.
+func (p *remoteLimaProvider) EditorSSH(context.Context, vm.VM) (sshconfig.Entry, error) {
+	return sshconfig.Entry{}, errors.New("opening VS Code is not available for remote Lima profiles yet")
 }
 
 // GuestHome / GuestUser read v's instance files off the REMOTE host (via the SSH
@@ -111,5 +124,6 @@ func NewRemoteLima(cfg TargetConfig) (Provider, error) {
 	return &remoteLimaProvider{
 		limaProvider: &limaProvider{core: core, prov: prov, hostFiles: host},
 		host:         host,
+		profileName:  cfg.ProfileName,
 	}, nil
 }
