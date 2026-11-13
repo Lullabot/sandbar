@@ -60,7 +60,7 @@ func codeProvider(status string) (*providerfake.Provider, *bool) {
 		},
 		EditorSSHFunc: func(_ context.Context, v vm.VM) (sshconfig.Entry, error) {
 			called = true
-			return sshconfig.Entry{Alias: "lima-" + v.Name, Include: "/lima/" + v.Name + "/ssh.config"}, nil
+			return sshconfig.Entry{Include: "/lima/" + v.Name + "/ssh.config"}, nil
 		},
 		GuestHomeFunc: func(vm.VM) string { return "/home/dev.linux" },
 	}, &called
@@ -79,7 +79,7 @@ func TestCodeLaunchesOnProjectCheckout(t *testing.T) {
 	p, _ := codeProvider(limaRunning)
 
 	var out bytes.Buffer
-	if err := doCode(context.Background(), p, reg, registry.LocalScope, "web", strings.NewReader(""), false, &out); err != nil {
+	if err := doCode(context.Background(), p, reg, registry.LocalScope, "web", "lima-web", strings.NewReader(""), false, &out); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"/usr/bin/code", "--remote", "ssh-remote+lima-web", "/home/dev.linux/github.com/acme/widgets"}
@@ -124,7 +124,7 @@ func TestCodeReadsCloneURLFromMarkerFirst(t *testing.T) {
 	fake, _ := codeProvider(limaRunning)
 	p := markerProvider{Provider: fake, cloneURL: "https://gitlab.com/acme/api.git"}
 
-	if err := doCode(context.Background(), p, reg, registry.LocalScope, "web", strings.NewReader(""), false, &bytes.Buffer{}); err != nil {
+	if err := doCode(context.Background(), p, reg, registry.LocalScope, "web", "lima-web", strings.NewReader(""), false, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
 	if got := (*launched)[len(*launched)-1]; got != "/home/dev.linux/gitlab.com/acme/api" {
@@ -138,7 +138,7 @@ func TestCodeWithoutCodeCommandNamesAlias(t *testing.T) {
 	p, _ := codeProvider(limaRunning)
 
 	var out bytes.Buffer
-	if err := doCode(context.Background(), p, registry.NewEmpty(), registry.LocalScope, "web", strings.NewReader(""), false, &out); err != nil {
+	if err := doCode(context.Background(), p, registry.NewEmpty(), registry.LocalScope, "web", "lima-web", strings.NewReader(""), false, &out); err != nil {
 		t.Fatal(err)
 	}
 	if *launched != nil {
@@ -153,7 +153,7 @@ func TestCodeRefusesStoppedVM(t *testing.T) {
 	launched := codeEnv(t, "/usr/bin/code")
 	p, editorCalled := codeProvider("Stopped")
 
-	err := doCode(context.Background(), p, registry.NewEmpty(), registry.LocalScope, "web", strings.NewReader("y\n"), true, &bytes.Buffer{})
+	err := doCode(context.Background(), p, registry.NewEmpty(), registry.LocalScope, "web", "lima-web", strings.NewReader("y\n"), true, &bytes.Buffer{})
 	if err == nil || !strings.Contains(err.Error(), "start it first") {
 		t.Fatalf("err = %v, want a not-running refusal", err)
 	}
@@ -183,7 +183,7 @@ func TestCodeIncludeConsent(t *testing.T) {
 			codeEnv(t, "/usr/bin/code")
 			p, _ := codeProvider(limaRunning)
 			var out bytes.Buffer
-			if err := doCode(context.Background(), p, registry.NewEmpty(), registry.LocalScope, "web", strings.NewReader(c.input), c.interactive, &out); err != nil {
+			if err := doCode(context.Background(), p, registry.NewEmpty(), registry.LocalScope, "web", "lima-web", strings.NewReader(c.input), c.interactive, &out); err != nil {
 				t.Fatal(err)
 			}
 			st, err := sshconfig.IncludeStatus()
@@ -219,7 +219,7 @@ func TestCodeSymlinkedConfigIsNeverEdited(t *testing.T) {
 	p, _ := codeProvider(limaRunning)
 	var out bytes.Buffer
 	// "y" is offered but must never be read: a symlink is not asked about.
-	if err := doCode(context.Background(), p, registry.NewEmpty(), registry.LocalScope, "web", strings.NewReader("y\n"), true, &out); err != nil {
+	if err := doCode(context.Background(), p, registry.NewEmpty(), registry.LocalScope, "web", "lima-web", strings.NewReader("y\n"), true, &out); err != nil {
 		t.Fatal(err)
 	}
 	if data, _ := os.ReadFile(real); string(data) != "Host x\n" {

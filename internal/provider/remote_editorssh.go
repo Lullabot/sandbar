@@ -28,7 +28,11 @@ import (
 // A file whose last line has no newline gets one first: appending straight
 // onto it would fuse that key and this one into a single line sshd rejects,
 // revoking the existing key as well as failing to add the new one.
-const authorizeKeyScript = `set -e; umask 077; mkdir -p ~/.ssh; key=$(cat); f=~/.ssh/authorized_keys; touch "$f"; grep -qxF -- "$key" "$f" || { [ ! -s "$f" ] || [ -z "$(tail -c1 "$f")" ] || echo >> "$f"; printf '%s\n' "$key" >> "$f"; }; chmod 600 "$f"`
+//
+// Its last line of output is the guest's $HOME, printed only once the key is
+// in place: the folder VS Code opens is under it, and reporting it here saves
+// the caller another round trip to the remote host to read it.
+const authorizeKeyScript = `set -e; umask 077; mkdir -p ~/.ssh; key=$(cat); f=~/.ssh/authorized_keys; touch "$f"; grep -qxF -- "$key" "$f" || { [ ! -s "$f" ] || [ -z "$(tail -c1 "$f")" ] || echo >> "$f"; printf '%s\n' "$key" >> "$f"; }; chmod 600 "$f"; printf '%s\n' "$HOME"`
 
 // defaultWorkstationKeys are tried, in order, when the profile names no
 // identity: OpenSSH's own default key names, newest algorithm first.
@@ -48,22 +52,24 @@ var defaultWorkstationKeys = []string{"id_ed25519", "id_ecdsa", "id_rsa"}
 // private key never leaves the remote host.
 //
 // The outer hop carries only the profile's own host, user, port and identity,
-// leaving everything else to the workstation's ssh_config exactly as sandbar's
-// own connections to that host do (see sshx.Config on why the remote-Lima hop
-// does not force IdentitiesOnly).
+// read from the same sshx.Conn sandbar's own connections to that host are
+// built from, and leaves everything else to the workstation's ssh_config as
+// they do (see sshx.Config on why the remote-Lima hop does not force
+// IdentitiesOnly).
 func (p *remoteLimaProvider) EditorSSH(ctx context.Context, v vm.VM) (sshconfig.Entry, error) {
 	if v.Dir == "" {
 		return sshconfig.Entry{}, fmt.Errorf("remote lima: %q has no instance directory", v.Name)
 	}
+	hop := p.host.Conn().Config()
 	for _, f := range []struct{ name, value string }{
-		{"host", p.conn.Host}, {"user", p.conn.User},
-		{"identity path", p.conn.IdentityPath}, {"instance directory", v.Dir},
+		{"host", hop.Host}, {"user", hop.User},
+		{"identity path", hop.IdentityPath}, {"instance directory", v.Dir},
 	} {
 		if strings.ContainsAny(f.value, `'"\`) {
 			return sshconfig.Entry{}, fmt.Errorf("remote lima: the %s %q contains a quote or backslash, which cannot be written into an ssh ProxyCommand", f.name, f.value)
 		}
 	}
-	priv, pub, err := p.workstationKey()
+	priv, pub, err := p.workstationKey(hop.IdentityPath)
 	if err != nil {
 		return sshconfig.Entry{}, err
 	}
@@ -75,7 +81,7 @@ func (p *remoteLimaProvider) EditorSSH(ctx context.Context, v vm.VM) (sshconfig.
 	// the workstation's user, an account the guest does not have.
 	user := p.GuestUser(v)
 	if user == "" {
-		return sshconfig.Entry{}, fmt.Errorf("remote lima: cannot read %q's login user from %s/ssh.config on %s", v.Name, v.Dir, p.conn.Host)
+		return sshconfig.Entry{}, fmt.Errorf("remote lima: cannot read %q's login user from %s/ssh.config on %s", v.Name, v.Dir, hop.Host)
 	}
 
 	var out bytes.Buffer
@@ -84,7 +90,6 @@ func (p *remoteLimaProvider) EditorSSH(ctx context.Context, v vm.VM) (sshconfig.
 	}
 
 	return sshconfig.Entry{
-		Alias:             sshconfig.ProfileAlias(p.profileName, v.Name),
 		HostName:          "127.0.0.1",
 		User:              user,
 		IdentityFile:      priv,
@@ -92,7 +97,21 @@ func (p *remoteLimaProvider) EditorSSH(ctx context.Context, v vm.VM) (sshconfig.
 		IdentitiesOnly:    true,
 		EphemeralHostKeys: true,
 		AuthorizedKey:     pub,
+		GuestHome:         lastPathLine(out.String()),
 	}, nil
+}
+
+// lastPathLine is the guest home authorizeKeyScript printed last, or "" when
+// the output does not end in an absolute path — the caller then reads the home
+// from the instance files instead, so a guest that printed something
+// unexpected costs a round trip, not a wrong folder.
+func lastPathLine(out string) string {
+	lines := strings.Split(strings.TrimRight(out, "\r\n"), "\n")
+	home := strings.TrimRight(lines[len(lines)-1], "\r")
+	if !strings.HasPrefix(home, "/") || strings.ContainsFunc(home, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
+		return ""
+	}
+	return home
 }
 
 // proxyCommand builds the outer hop. Two shells parse it: the workstation's
@@ -116,27 +135,25 @@ func (p *remoteLimaProvider) proxyCommand(v vm.VM) string {
 		remote[i] = sshx.Quote(tok)
 	}
 
+	hop := p.host.Conn()
+	cfg := hop.Config()
 	argv := []string{"ssh"}
-	if p.conn.Port > 0 && p.conn.Port != 22 {
-		argv = append(argv, "-p", strconv.Itoa(p.conn.Port))
+	if cfg.Port > 0 && cfg.Port != 22 {
+		argv = append(argv, "-p", strconv.Itoa(cfg.Port))
 	}
-	if p.conn.IdentityPath != "" {
-		argv = append(argv, "-i", sshx.Quote(p.conn.IdentityPath))
+	if cfg.IdentityPath != "" {
+		argv = append(argv, "-i", sshx.Quote(cfg.IdentityPath))
 	}
-	target := p.conn.Host
-	if p.conn.User != "" {
-		target = p.conn.User + "@" + target
-	}
-	argv = append(argv, sshx.Quote(target), "--", sshx.Quote(strings.Join(remote, " ")))
+	argv = append(argv, sshx.Quote(hop.Target()), "--", sshx.Quote(strings.Join(remote, " ")))
 	return strings.ReplaceAll(strings.Join(argv, " "), "%", "%%")
 }
 
 // workstationKey picks the key pair the editor will log in with. The
-// profile's identity is preferred, since the user chose it for this host;
+// profile's identity (identityPath) is preferred, since the user chose it for this host;
 // otherwise the first OpenSSH default with BOTH halves present, because the
 // public half is what gets authorized and the private half what logs in.
-func (p *remoteLimaProvider) workstationKey() (priv, pub string, err error) {
-	if id := p.conn.IdentityPath; id != "" {
+func (p *remoteLimaProvider) workstationKey(identityPath string) (priv, pub string, err error) {
+	if id := identityPath; id != "" {
 		// sandbar's own connections hand this path to `ssh -i`, which expands a
 		// leading ~ itself, so a profile saved as "~/.ssh/key" works everywhere
 		// else. Here the .pub is read directly, with no ssh in between.

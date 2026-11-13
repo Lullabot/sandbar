@@ -24,13 +24,6 @@ import (
 type remoteLimaProvider struct {
 	*limaProvider
 	host *lima.SSHHost
-	// conn is the profile's connection to the remote host, kept so EditorSSH
-	// can write the same hop into a workstation ssh config: SSHHost builds
-	// argv from it but does not expose it.
-	conn lima.SSHConfig
-	// profileName namespaces this profile's editor ssh aliases
-	// (sshconfig.ProfileAlias); see TargetConfig.ProfileName.
-	profileName string
 }
 
 var _ Provider = (*remoteLimaProvider)(nil)
@@ -104,14 +97,13 @@ func (p *remoteLimaProvider) HostResources() HostResources {
 // provider can coexist in the same process without one's base-image touches
 // leaking onto the other's host.
 func NewRemoteLima(cfg TargetConfig) (Provider, error) {
-	conn := lima.SSHConfig{
+	host := lima.NewSSHHost(lima.SSHConfig{
 		Host:           cfg.Host,
 		User:           cfg.User,
 		Port:           cfg.Port,
 		IdentityPath:   cfg.IdentityPath,
 		RemoteLimaHome: cfg.RemoteLimaHome,
-	}
-	host := lima.NewSSHHost(conn)
+	})
 	// PlaybookDir left empty — located lazily on first create/reset (see
 	// NewDefault and Provisioner.playbookDir); a remote `sandbar shell` must not
 	// trigger playbook extraction either.
@@ -120,7 +112,5 @@ func NewRemoteLima(cfg TargetConfig) (Provider, error) {
 	return &remoteLimaProvider{
 		limaProvider: &limaProvider{core: core, prov: prov, hostFiles: host},
 		host:         host,
-		conn:         conn,
-		profileName:  cfg.ProfileName,
 	}, nil
 }

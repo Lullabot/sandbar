@@ -48,20 +48,20 @@ type vmRunningChecker interface {
 }
 
 // requireRunningVM looks up name and returns a clear, actionable error for an
-// unknown instance or one that is not Running, mirroring shellAttachArgv's
-// same two refusals (shell.go) so the two CLI entrypoints read identically
-// to a user, rather than drifting into two different phrasings for the same
-// fact.
-func requireRunningVM(g vmRunningChecker, name string) (vm.VM, error) {
+// unknown instance or one that is not Running, prefixed "sandbar <command>:".
+// Every CLI command that needs a live guest (shell, land, publish, code,
+// paste-image) refuses through it, so they read identically to a user rather
+// than drifting into different phrasings for the same fact.
+func requireRunningVM(g vmRunningChecker, command, name string) (vm.VM, error) {
 	found, err := g.Get(name)
 	if err != nil {
 		if errors.Is(err, vm.ErrNotFound) {
-			return vm.VM{}, fmt.Errorf("sandbar land: no VM named %q (run 'sandbar' to list instances)", name)
+			return vm.VM{}, fmt.Errorf("sandbar %s: no VM named %q (run 'sandbar' to list instances)", command, name)
 		}
-		return vm.VM{}, fmt.Errorf("sandbar land: %w", err)
+		return vm.VM{}, fmt.Errorf("sandbar %s: %w", command, err)
 	}
 	if found.Status != limaRunning {
-		return vm.VM{}, fmt.Errorf("sandbar land: VM %q is not running (status: %s); start it first", name, found.Status)
+		return vm.VM{}, fmt.Errorf("sandbar %s: VM %q is not running (status: %s); start it first", command, name, found.Status)
 	}
 	return found, nil
 }
@@ -251,7 +251,7 @@ func runLand(args []string) error {
 	if err := p.Preflight(); err != nil {
 		return err
 	}
-	target, err := requireRunningVM(p, name)
+	target, err := requireRunningVM(p, "land", name)
 	if err != nil {
 		return err
 	}

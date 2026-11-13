@@ -153,9 +153,6 @@ type proxmoxProvider struct {
 	// identityPath is the private key file matching the public key cloud-init
 	// installs for ciUser. Never key material.
 	identityPath string
-	// profileName namespaces this profile's editor ssh aliases
-	// (sshconfig.ProfileAlias); see TargetConfig.ProfileName.
-	profileName string
 
 	// files is the local, per-endpoint state directory standing in for "the host
 	// where limactl runs" (proxmoxfiles.go).
@@ -303,7 +300,6 @@ func NewProxmox(cfg TargetConfig) (Provider, error) {
 		bridge:          cfg.Bridge,
 		ciUser:          ciUser,
 		identityPath:    identityPath,
-		profileName:     cfg.ProfileName,
 		files:           newProxmoxFiles(proxmoxStateRoot(cfg)),
 		runSSH:          execSSH,
 		vmids:           map[string]int{},
@@ -1036,19 +1032,34 @@ func (p *proxmoxProvider) guestIP(ctx context.Context, name string) (string, err
 				return "", err
 			}
 		}
-		vmid, _, err := p.resolve(ctx, name)
-		if err != nil {
-			return "", err
-		}
-		if ip, err = p.resolveGuestIP(ctx, vmid, name); err != nil {
-			if isAgentFailure(err) {
-				p.noteAgentFailure(name, err)
-			}
-			return "", err
-		}
-		p.clearAgentFailure(name)
-		p.setGuestIP(name, ip)
+		return p.freshGuestIP(ctx, name)
 	}
+	if err := p.guardSharedAddress(ctx, name, ip); err != nil {
+		return "", err
+	}
+	return ip, nil
+}
+
+// freshGuestIP asks the guest agent for name's address regardless of the
+// cache, then stores the answer and applies the same shared-address guard as
+// guestIP. It overwrites the cached entry rather than dropping it first, so a
+// concurrent lookup never finds the cache empty in between and pays for an
+// agent round trip of its own. The result feeds the agent backoff like any
+// other lookup.
+func (p *proxmoxProvider) freshGuestIP(ctx context.Context, name string) (string, error) {
+	vmid, _, err := p.resolve(ctx, name)
+	if err != nil {
+		return "", err
+	}
+	ip, err := p.resolveGuestIP(ctx, vmid, name)
+	if err != nil {
+		if isAgentFailure(err) {
+			p.noteAgentFailure(name, err)
+		}
+		return "", err
+	}
+	p.clearAgentFailure(name)
+	p.setGuestIP(name, ip)
 	if err := p.guardSharedAddress(ctx, name, ip); err != nil {
 		return "", err
 	}
@@ -1242,7 +1253,14 @@ func firstRoutable(addrs []pve.IPAddress) string {
 // cloud-init provisions, on 22. TargetConfig.Port belongs to the remote-Lima
 // provider's hop, which has no counterpart here.
 func (p *proxmoxProvider) sshHost(host string) *sshx.Conn {
-	return sshx.New(sshx.Config{
+	return sshx.New(p.sshConfig(host))
+}
+
+// sshConfig is the guest connection identity behind sshHost, and the one
+// EditorSSH copies into the workstation's ssh config, so the two cannot
+// disagree about the user, the key or the host-key posture.
+func (p *proxmoxProvider) sshConfig(host string) sshx.Config {
+	return sshx.Config{
 		Host:         host,
 		User:         p.ciUser,
 		IdentityPath: p.identityPath,
@@ -1262,7 +1280,7 @@ func (p *proxmoxProvider) sshHost(host string) *sshx.Conn {
 		// hangs and then fails "Host key verification failed"), and a rebuilt VM on
 		// a recycled IP would trip the changed-key hard stop. See EphemeralHostKeys.
 		EphemeralHostKeys: true,
-	})
+	}
 }
 
 // guestArgv builds the ssh argv that runs argv inside name's guest, and returns
@@ -1566,37 +1584,34 @@ func (p *proxmoxProvider) ForwardArgv(v vm.VM, hostPort, guestPort int) []string
 }
 
 // EditorSSH describes the guest as a plain ssh host with the same identity
-// sshHost gives sandbar's own connections — ciUser, the profile's key with
-// IdentitiesOnly, and the throwaway host-key posture — so an editor
-// connection succeeds and fails exactly when `sandbar shell` does. The
-// address is resolved through the same bounded guestIP lookup AttachArgv
-// uses, derived from the caller's ctx so a cancelled request stops waiting.
-// A resolution failure is an error, never an entry naming the VM itself: that
-// name could resolve to an unrelated host on the local network.
+// sshHost gives sandbar's own connections — both read sshConfig — so an
+// editor connection succeeds and fails exactly when `sandbar shell` does. The
+// lookup is bounded like AttachArgv's, derived from the caller's ctx so a
+// cancelled request stops waiting. A resolution failure is an error, never an
+// entry naming the VM itself: that name could resolve to an unrelated host on
+// the local network.
 //
-// The entry pins a DHCP address, so it is only as current as the lease; the
-// caller rewrites it each time the VM is opened.
+// The address comes from freshGuestIP, not the cache: unlike an attach's, it
+// is written to a file that outlives the process, and the cache is only
+// cleared by power transitions sandbar itself made. A restart from the
+// Proxmox UI can move the lease without sandbar knowing. Even so, the entry is
+// only as current as the lease; the caller rewrites it each time the VM is
+// opened.
 func (p *proxmoxProvider) EditorSSH(ctx context.Context, v vm.VM) (sshconfig.Entry, error) {
 	ctx, cancel := context.WithTimeout(ctx, attachResolveTimeout)
 	defer cancel()
 
-	// Unlike an attach, this address is written to a file that outlives the
-	// process, and the cache is only cleared by power transitions sandbar
-	// itself made. A restart from the Proxmox UI can move the lease without
-	// sandbar knowing, so ask the guest agent again rather than persist a
-	// stale address.
-	p.invalidateGuest(v.Name)
-	ip, err := p.guestIP(ctx, v.Name)
+	ip, err := p.freshGuestIP(ctx, v.Name)
 	if err != nil {
 		return sshconfig.Entry{}, fmt.Errorf("proxmox: cannot resolve %q's address: %w", v.Name, err)
 	}
+	cfg := p.sshConfig(ip)
 	return sshconfig.Entry{
-		Alias:             sshconfig.ProfileAlias(p.profileName, v.Name),
-		HostName:          ip,
-		User:              p.ciUser,
-		IdentityFile:      p.identityPath,
-		IdentitiesOnly:    true,
-		EphemeralHostKeys: true,
+		HostName:          cfg.Host,
+		User:              cfg.User,
+		IdentityFile:      cfg.IdentityPath,
+		IdentitiesOnly:    cfg.IdentitiesOnly,
+		EphemeralHostKeys: cfg.EphemeralHostKeys,
 	}, nil
 }
 

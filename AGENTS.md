@@ -42,18 +42,24 @@ it is not where prose belongs.
   and stops it when the review ends. `Provider.EditorSSH(ctx, v)` is the
   exception to that no-I/O rule: it returns the `sshconfig.Entry` a
   workstation ssh client needs to reach the guest by name, and may do I/O, so
-  the TUI calls it off the Update goroutine. Local Lima returns an `Include`
-  of the instance's own `ssh.config` under `lima-<name>`, because Lima picks
-  a new port at every start and a copied `Port` would go stale. Remote Lima
-  overrides it (the inherited one would name a path on the remote host):
-  it appends a workstation public key to the guest's `authorized_keys`
-  (sent on stdin, never as script text) and proxies through the remote host
-  with `ssh -F <instance>/ssh.config -W`, so Lima's key never leaves that
-  host. Proxmox resolves the guest IP through the agent, dropping the cached
-  address first: the entry outlives the process, and the cache is cleared
-  only by power transitions sandbar made itself. An error means no
-  entry; never return a guessed host, which could connect somewhere
-  unintended. There is no
+  the TUI calls it off the Update goroutine. The entry leaves `Alias` empty:
+  `vscode.Alias` names it from the owning profile, so the providers need
+  not know their profile's name and a profile rename stays metadata-only.
+  Local Lima returns an `Include` of the instance's own `ssh.config`
+  (aliased `lima-<name>`, the only name that file's `Host` line matches),
+  because Lima picks a new port at every start and a copied `Port` would go
+  stale. Remote Lima overrides it (the inherited one would name a path on
+  the remote host): it appends a workstation public key to the guest's
+  `authorized_keys` (sent on stdin, never as script text), reports the
+  guest's `$HOME` back in the same round trip, and proxies through the
+  remote host with `ssh -F <instance>/ssh.config -W`, built from the
+  `SSHHost`'s own `sshx.Conn`, so Lima's key never leaves that host.
+  Proxmox asks the agent for the guest IP afresh (`freshGuestIP`), not from
+  the cache: the entry outlives the process, and the cache is cleared only
+  by power transitions sandbar made itself. Its user, key and host-key
+  posture come from `sshConfig`, the same source as `sandbar shell`'s ssh.
+  An error means no entry; never return a guessed host, which could connect
+  somewhere unintended. There is no
   process-global "the provider" anymore: `provider.BuildFleet`
   constructs one `Binding` (provider + registry.Scope) **per enabled
   Connection Profile** from `internal/profiles`' persisted store, so a
@@ -163,7 +169,9 @@ it is not where prose belongs.
   (`${XDG_CONFIG_HOME:-~/.config}/sandbar/ssh_config`, one
   `# sandbar begin/end <alias>` block per VM) and the one `Include` of it in
   `~/.ssh/config`. Aliases are `lima-<name>` (Local) and
-  `sandbar-<profile-slug>-<name>`. Two OpenSSH scoping rules fail silently:
+  `sandbar-<profile-slug>-<name>`. The throwaway-guest host-key options
+  are `sshx.EphemeralHostKeyOptions`, shared with sandbar's own ssh argv.
+  Two OpenSSH scoping rules fail silently:
   an `Include` after a `Host`/`Match` line applies only inside that block,
   so `AddInclude` PREPENDS to `~/.ssh/config` (most configs end inside a
   `Host` block), and every managed block starts with `Match all` so a
@@ -175,14 +183,18 @@ it is not where prose belongs.
   re-reads immediately before its atomic write instead. It never edits a
   symlinked `~/.ssh/config` (the rename would detach a dotfiles link), and
   never runs without the user's consent, which callers obtain.
-- `vscode` — the one "open this VM in VS Code" operation (`Prepare`:
-  `EditorSSH` → `sshconfig.Upsert` → folder → `code` lookup, including the
-  macOS app-bundle copy), plus `ClassifyInclude` and the user-facing
-  messages, shared by `c` and `sandbar code` so their wording and branching
-  cannot drift. Each front end only asks for the Include consent its own way
-  (y/N prompt, which treats non-terminal stdin as no; or a confirm overlay).
-  The board's delete removes the VM's block: a Proxmox entry pins a DHCP
-  address that may later belong to another machine.
+- `vscode` — the one "open this VM in VS Code" operation (`Open`: `Prepare`
+  (`EditorSSH` → `Alias` → `sshconfig.Upsert` → folder → `code` lookup,
+  including the macOS app-bundle copy), then the launch or the
+  pick-this-host fallback, returning the lines to show), plus `CheckInclude`
+  and the user-facing messages, shared by `c` and `sandbar code` so their
+  wording and branching cannot drift. Each front end only asks for the
+  Include consent its own way (y/N prompt, which treats non-terminal stdin as
+  no; or a confirm overlay) and prints the lines. The board's delete removes
+  the VM's block under the same `Alias`, off the Update goroutine: a Proxmox
+  entry pins a DHCP address that may later belong to another machine. The
+  project folder comes from `manage.RecordedCloneURL` (marker, then index)
+  in both front ends.
 - `provision` — orchestrates create/reset (base build, `limactl clone`,
   finalize) and the Ansible run; `staging.go` moves data across a reset.
   Depends on `*lima.Client` and the `Host` seam (for base-image file access),

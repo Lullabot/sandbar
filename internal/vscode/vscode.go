@@ -1,10 +1,11 @@
 // Package vscode is the one implementation of "open this VM in VS Code's
 // Remote-SSH", shared by the board's `c` verb and `sandbar code` so the two
-// front ends cannot drift. It writes the VM's host entry to sandbar's managed
-// ssh config, works out which guest folder to open, and finds and starts the
-// `code` command. Asking the user whether ~/.ssh/config may be edited is left
-// to each front end (a terminal prompt vs a TUI overlay); ClassifyInclude
-// gives them the same branching to ask from.
+// front ends cannot drift. It names the VM's ssh host (Alias), writes its
+// entry to sandbar's managed ssh config, works out which guest folder to
+// open, and finds and starts the `code` command. Asking the user whether
+// ~/.ssh/config may be edited is left to each front end (a terminal prompt vs
+// a TUI overlay); CheckInclude gives them the same branching to ask from, and
+// Open runs the rest.
 package vscode
 
 import (
@@ -16,6 +17,7 @@ import (
 	"runtime"
 	"syscall"
 
+	"github.com/lullabot/sandbar/internal/profiles"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/sshconfig"
 	"github.com/lullabot/sandbar/internal/vm"
@@ -37,11 +39,9 @@ type Result struct {
 	// Folder is the absolute guest path to open: the project checkout when
 	// the VM was created from a clone URL, else the guest home.
 	Folder string
-	// CodePath is the `code` command found on this workstation, "" when
-	// none was, in which case the caller tells the user to pick Alias in
-	// "Remote-SSH: Connect to Host…" instead.
-	CodePath string
-	// LaunchArgv is what Launch runs; nil when CodePath is "".
+	// LaunchArgv is what Launch runs, starting with the `code` command found
+	// on this workstation; nil when none was, in which case the user is told
+	// to pick Alias in "Remote-SSH: Connect to Host…" instead.
 	LaunchArgv []string
 	// AuthorizedKey is the workstation public key the provider authorized
 	// in the guest (remote Lima), so the user can be told which key now
@@ -82,35 +82,14 @@ func ManualIncludeMessage(why, sep string) string {
 		why, sshconfig.UserConfigPath(), sep, sshconfig.IncludeLine())
 }
 
-// The three reasons below are the `why` each front end hands
-// ManualIncludeMessage, kept here for the same reason as the messages above.
-
-// UnreadableReason explains an sshconfig.IncludeStatus error.
-func UnreadableReason(err error) string {
-	return fmt.Sprintf("Could not read %s (%v)", sshconfig.UserConfigPath(), err)
-}
-
-// ManualReason explains why ClassifyInclude returned IncludeManual for st.
-func ManualReason(st sshconfig.IncludeState) string {
-	path := sshconfig.UserConfigPath()
-	if st.Symlink {
-		return fmt.Sprintf("Not editing %s because it is a symlink", path)
-	}
-	return fmt.Sprintf("Not editing %s because it is not writable", path)
-}
-
-// AddIncludeFailure explains an sshconfig.AddInclude error, using the
-// ManualIncludeError's own path and reason when it is one.
+// AddIncludeFailure is the `why` ManualIncludeMessage takes after
+// sshconfig.AddInclude failed with err.
 func AddIncludeFailure(err error) string {
-	var me *sshconfig.ManualIncludeError
-	if errors.As(err, &me) {
-		return fmt.Sprintf("Could not edit %s (%s)", me.Path, me.Reason)
-	}
 	return fmt.Sprintf("Could not edit %s (%v)", sshconfig.UserConfigPath(), err)
 }
 
 // IncludeAction is what a front end should do about the Include line in
-// ~/.ssh/config before calling Prepare.
+// ~/.ssh/config before calling Open.
 type IncludeAction int
 
 const (
@@ -119,23 +98,45 @@ const (
 	// IncludeAsk: sandbar may add it, but only after the user agrees.
 	IncludeAsk
 	// IncludeManual: sandbar will not edit the file (a symlink, typically
-	// into a dotfiles repository, or not writable); show
-	// sshconfig.IncludeLine() for the user to add by hand.
+	// into a dotfiles repository, not writable, or unreadable); show
+	// ManualIncludeMessage so the user can add the line by hand.
 	IncludeManual
 )
 
-// ClassifyInclude maps ~/.ssh/config's state to the one decision both front
-// ends make. A symlink is manual even when its target is writable, because
-// AddInclude's atomic rewrite would replace the link with a regular file.
-func ClassifyInclude(st sshconfig.IncludeState) IncludeAction {
+// CheckInclude inspects ~/.ssh/config and returns the one decision both front
+// ends make. why is the explanation ManualIncludeMessage takes, set only for
+// IncludeManual. A symlink is manual even when its target is writable,
+// because AddInclude's atomic rewrite would replace the link with a regular
+// file.
+func CheckInclude() (action IncludeAction, why string) {
+	path := sshconfig.UserConfigPath()
+	st, err := sshconfig.IncludeStatus()
 	switch {
+	case err != nil:
+		return IncludeManual, fmt.Sprintf("Could not read %s (%v)", path, err)
 	case st.Present:
-		return IncludePresent
-	case st.Symlink || !st.Writable:
-		return IncludeManual
+		return IncludePresent, ""
+	case st.Symlink:
+		return IncludeManual, fmt.Sprintf("Not editing %s because it is a symlink", path)
+	case !st.Writable:
+		return IncludeManual, fmt.Sprintf("Not editing %s because it is not writable", path)
 	default:
-		return IncludeAsk
+		return IncludeAsk, ""
 	}
+}
+
+// Alias is the ssh host name a VM on profile p is reachable by once its entry
+// is written. Providers describe how to reach a guest but do not name it; the
+// name is chosen here so that writing an entry (Prepare) and removing one
+// (the board's delete) cannot disagree. A Local VM keeps Lima's own name,
+// because its entry Includes Lima's per-instance ssh.config and only that
+// file's Host line matches it. Every other profile's VMs are namespaced by
+// the profile, since two profiles may each hold a VM of the same name.
+func Alias(p profiles.Profile, vmName string) string {
+	if p.Type == profiles.TypeLocal {
+		return sshconfig.LimaAlias(vmName)
+	}
+	return sshconfig.ProfileAlias(p.Name, vmName)
 }
 
 // macAppCode is where the VS Code app bundle ships its `code` shell command.
@@ -165,51 +166,79 @@ func findCode() string {
 	return ""
 }
 
-// Prepare writes v's host entry to the managed ssh config and computes the
-// folder and launch command. It does I/O (the provider's EditorSSH may
-// resolve a guest address or authorize a key), so the TUI must run it in a
-// command, not on the update goroutine. cloneURL is the VM's recorded
-// project URL, "" for none.
+// Prepare writes v's host entry, under alias (see Alias), to the managed ssh
+// config and computes the folder and launch command. It does I/O (the
+// provider's EditorSSH may resolve a guest address or authorize a key), so
+// the TUI must run it in a command, not on the update goroutine. cloneURL is
+// the VM's recorded project URL, "" for none.
 //
 // It does not touch ~/.ssh/config: whether that may be edited is the user's
 // call, asked by the front end beforehand. Without the Include the entry is
 // still written, so adding the line later makes the alias work at once.
-func Prepare(ctx context.Context, g Guest, v vm.VM, cloneURL string) (Result, error) {
+func Prepare(ctx context.Context, g Guest, v vm.VM, alias, cloneURL string) (Result, error) {
 	entry, err := g.EditorSSH(ctx, v)
 	if err != nil {
 		return Result{}, err
 	}
-	if entry.Alias == "" {
-		// A zero Entry would render nothing useful and leave the user with a
-		// message naming an empty host.
+	if entry.Include == "" && entry.HostName == "" {
+		// An entry with nothing to connect to would render a bare Host line
+		// and leave the user with an alias that goes nowhere.
 		return Result{}, fmt.Errorf("no ssh host entry for %q", v.Name)
 	}
+	entry.Alias = alias
 	if err := sshconfig.Upsert(entry); err != nil {
 		return Result{}, fmt.Errorf("write %s: %w", sshconfig.ManagedPath(), err)
 	}
 
-	folder, err := guestFolder(g, v, cloneURL)
+	folder, err := guestFolder(g, v, entry.GuestHome, cloneURL)
 	if err != nil {
 		return Result{}, err
 	}
 	res := Result{
-		Alias:         entry.Alias,
+		Alias:         alias,
 		Folder:        folder,
-		CodePath:      FindCode(),
 		AuthorizedKey: entry.AuthorizedKey,
 	}
-	if res.CodePath != "" {
-		res.LaunchArgv = []string{res.CodePath, "--remote", "ssh-remote+" + res.Alias, folder}
+	if code := FindCode(); code != "" {
+		res.LaunchArgv = []string{code, "--remote", "ssh-remote+" + alias, folder}
 	}
 	return res, nil
 }
 
+// Open is the whole operation both front ends run once the Include question
+// is settled: Prepare, then start VS Code or, with no `code` command, tell the
+// user which host to pick in VS Code instead. lines are the messages to show,
+// in order, the last one being the outcome; launched reports whether VS Code
+// was started, for a front end that words that line differently. On error,
+// lines still holds anything already worth reporting, such as a key
+// authorized before the launch failed.
+func Open(ctx context.Context, g Guest, v vm.VM, alias, cloneURL string) (lines []string, launched bool, err error) {
+	res, err := Prepare(ctx, g, v, alias, cloneURL)
+	if err != nil {
+		return nil, false, err
+	}
+	if msg := res.AuthorizedMessage(); msg != "" {
+		lines = append(lines, msg)
+	}
+	if len(res.LaunchArgv) == 0 {
+		return append(lines, res.NotFoundMessage()), false, nil
+	}
+	if err := Launch(res.LaunchArgv); err != nil {
+		return lines, false, fmt.Errorf("start %s: %w", res.LaunchArgv[0], err)
+	}
+	return append(lines, res.OpeningMessage()), true, nil
+}
+
 // guestFolder mirrors the project role's checkout layout (~/<host>/<org>/<repo>)
-// so VS Code opens straight onto the code the VM exists for. The /home/<user>
-// fallback matches the TUI's transfer default for a backend that cannot read
-// the home from its instance files.
-func guestFolder(g Guest, v vm.VM, cloneURL string) (string, error) {
-	home := g.GuestHome(v)
+// so VS Code opens straight onto the code the VM exists for. home is the
+// guest home the provider already reported while building the entry, if any;
+// otherwise it is read from the backend. The /home/<user> fallback matches
+// the TUI's transfer default for a backend that cannot read the home from its
+// instance files.
+func guestFolder(g Guest, v vm.VM, home, cloneURL string) (string, error) {
+	if home == "" {
+		home = g.GuestHome(v)
+	}
 	if home == "" {
 		user := g.GuestUser(v)
 		if user == "" {

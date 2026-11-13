@@ -30,14 +30,8 @@ const ProxmoxProviderID = "proxmox"
 type TargetConfig struct {
 	// Provider is "" (local Lima, the default) or RemoteLimaProviderID.
 	Provider string
-	// ProfileName is the owning profile's display name. It is NOT connection
-	// identity and is deliberately absent from Scope, which the registry
-	// persists and which a rename must not change. It exists because a
-	// workstation ssh alias for a remote VM is namespaced by profile (see
-	// Provider.EditorSSH): two profiles may each hold a VM of the same name.
-	ProfileName string
-	Host        string
-	User        string
+	Host     string
+	User     string
 	// Port is only meaningful for the remote provider.
 	Port int
 	// IdentityPath is a path to a private key file, or "" to fall back to the

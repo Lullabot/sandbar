@@ -23,13 +23,11 @@ package ui
 // DISABLE, DELETE and a CONNECTION-FIELD edit are gated on the profile being
 // IDLE: reusing the job registry's per-scope running check (jobs.go's
 // runningInScope), the profile-level generalization of the existing per-VM
-// Delete gate (commandreg.go's notBuilding/vmBuilding). A metadata-only edit
-// that leaves the binding unchanged — see connectionFieldsEqual — is NOT
-// gated and rebuilds nothing: the profile's immutable id and derived scope
-// are untouched, so its member, tiles, jobs and last-used pointer all follow
-// it. Renaming LOCAL is such an edit; renaming a remote-ssh or Proxmox
-// profile is not, because its provider namespaces editor ssh aliases by the
-// name, so it rebuilds and is gated like a connection-field edit.
+// Delete gate (commandreg.go's notBuilding/vmBuilding). A pure RENAME (or any
+// metadata-only edit that leaves the target unchanged — see
+// connectionFieldsEqual) is NOT gated and rebuilds nothing: the profile's
+// immutable id and derived scope are untouched, so its member, tiles, jobs
+// and last-used pointer all follow it across the rename.
 
 import (
 	"fmt"
@@ -575,19 +573,7 @@ func (m *model) deleteProfile(id string) {
 // never rebuilt the live binding against the new target. Every field
 // provider.TargetConfigFor reads has to be compared here, or that bug simply
 // comes back for whichever one is left out.
-//
-// That includes the NAME of a remote-ssh or Proxmox profile: TargetConfigFor
-// carries it so the provider can namespace the workstation ssh aliases it
-// hands out (provider.Provider.EditorSSH), and a provider left holding the
-// old name would keep writing aliases under it. So renaming one of those
-// rebuilds its binding (and is idle-gated like any other rebuild). Renaming
-// Local still does not: its provider is built without TargetConfigFor and its
-// aliases do not involve the profile at all.
 func connectionFieldsEqual(a, b profiles.Profile) bool {
-	nameMatters := a.Type != profiles.TypeLocal || b.Type != profiles.TypeLocal
-	if nameMatters && a.Name != b.Name {
-		return false
-	}
 	return a.Host == b.Host && a.User == b.User && a.Port == b.Port &&
 		a.IdentityPath == b.IdentityPath && a.LimaHome == b.LimaHome &&
 		a.Node == b.Node && a.Pool == b.Pool && a.Storage == b.Storage &&
@@ -597,15 +583,14 @@ func connectionFieldsEqual(a, b profiles.Profile) bool {
 }
 
 // submitProfileEdit persists an edited profile (from the create/edit form)
-// and, only when its CONNECTION fields changed, tears
+// and, only when its CONNECTION fields changed (not a pure rename), tears
 // down and rebuilds its live binding — gated on the profile being idle
 // exactly like disable/delete, since a rebuild replaces the provider a job
-// might be mid-flight against. (A remote-ssh or Proxmox rename counts as a
-// connection change; see connectionFieldsEqual.) A Local rename (or an edit
-// to a currently DISABLED profile, which has no live binding to rebuild)
-// skips both the gate and the rebuild: it just persists and, if a stale
-// member entry exists (a disabled profile still carries one), refreshes its
-// label so the header shows the new name immediately.
+// might be mid-flight against. A pure rename (or an edit to a currently
+// DISABLED profile, which has no live binding to rebuild) skips both the
+// gate and the rebuild: it just persists and, if a stale member entry exists
+// (a disabled profile still carries one), refreshes its label so the header
+// shows the new name immediately.
 func (m *model) submitProfileEdit(p profiles.Profile) tea.Cmd {
 	if m.profileStore == nil {
 		m.profileFormErr = fmt.Errorf("profile store unavailable")

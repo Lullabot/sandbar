@@ -1,7 +1,6 @@
 package sshconfig
 
 import (
-	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -298,9 +297,8 @@ func TestAddIncludeRefusesSymlinkAndUnwritable(t *testing.T) {
 	if !st.Symlink || !st.Exists {
 		t.Fatalf("symlink not reported: %+v", st)
 	}
-	var mie *ManualIncludeError
-	if err := AddInclude(); !errors.As(err, &mie) || mie.Line != IncludeLine() {
-		t.Fatalf("symlink: want ManualIncludeError carrying the line, got %v", err)
+	if err := AddInclude(); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("symlink: want an error naming the symlink, got %v", err)
 	}
 	if readFile(t, real) != "Host x\n" {
 		t.Fatal("the symlink target was modified")
@@ -319,8 +317,8 @@ func TestAddIncludeRefusesSymlinkAndUnwritable(t *testing.T) {
 	if st, _ := IncludeStatus(); st.Writable {
 		t.Fatal("read-only config reported writable")
 	}
-	if err := AddInclude(); !errors.As(err, &mie) || !strings.Contains(err.Error(), IncludeLine()) {
-		t.Fatalf("unwritable: want ManualIncludeError naming the line, got %v", err)
+	if err := AddInclude(); err == nil || !strings.Contains(err.Error(), "not writable") {
+		t.Fatalf("unwritable: want an error saying it is not writable, got %v", err)
 	}
 }
 

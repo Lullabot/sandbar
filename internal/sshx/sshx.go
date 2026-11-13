@@ -205,6 +205,9 @@ func Quote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
+// Config returns the destination this Conn was built for.
+func (c *Conn) Config() Config { return c.cfg }
+
 // Target is the ssh/scp destination: user@host, or host when no user is set.
 func (c *Conn) Target() string {
 	if c.cfg.User != "" {
@@ -358,10 +361,28 @@ func (c *Conn) ephemeralHostKeyFlags() []string {
 	if !c.cfg.EphemeralHostKeys {
 		return nil
 	}
-	return []string{
-		"-o", "StrictHostKeyChecking=no",
-		"-o", "UserKnownHostsFile=/dev/null",
-		"-o", "LogLevel=ERROR",
+	var a []string
+	for _, o := range EphemeralHostKeyOptions() {
+		a = append(a, "-o", o.Key+"="+o.Value)
+	}
+	return a
+}
+
+// Option is one ssh configuration option, usable as `-o Key=Value` on a
+// command line or as a `Key Value` line in an ssh_config file.
+type Option struct{ Key, Value string }
+
+// EphemeralHostKeyOptions is the throwaway-guest host-key posture (see
+// Config.EphemeralHostKeys), in order. It is the single spelling of it:
+// sandbar's own argv uses it as -o flags, and internal/sshconfig writes the
+// same options into the workstation entry an editor connects with, so the
+// two cannot disagree about how a guest's host key is treated. A fresh slice
+// each call, so no caller can change it for the others.
+func EphemeralHostKeyOptions() []Option {
+	return []Option{
+		{"StrictHostKeyChecking", "no"},
+		{"UserKnownHostsFile", "/dev/null"},
+		{"LogLevel", "ERROR"},
 	}
 }
 

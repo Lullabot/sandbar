@@ -70,8 +70,7 @@ func newRemoteForEditorTest(t *testing.T, conn lima.SSHConfig) (*remoteLimaProvi
 	}
 	p := &remoteLimaProvider{
 		limaProvider: &limaProvider{core: core, hostFiles: lima.LocalFiles()},
-		conn:         conn,
-		profileName:  "Mac Mini",
+		host:         lima.NewSSHHost(conn),
 	}
 	return p, r, vm.VM{Name: "web", Dir: dir}
 }
@@ -121,7 +120,6 @@ func TestRemoteLimaEditorSSHAuthorizesKeyAndProxies(t *testing.T) {
 
 	wantProxy := `ssh -p 2222 -i '` + key + `' andrew@mini.local -- 'ssh -F /Users/andrew/.lima/web/ssh.config -W 127.0.0.1:22 lima-web'`
 	want := sshconfig.Entry{
-		Alias:             "sandbar-mac-mini-web",
 		HostName:          "127.0.0.1",
 		User:              "dev",
 		IdentityFile:      key,
@@ -129,6 +127,8 @@ func TestRemoteLimaEditorSSHAuthorizesKeyAndProxies(t *testing.T) {
 		IdentitiesOnly:    true,
 		EphemeralHostKeys: true,
 		AuthorizedKey:     key + ".pub",
+		// Reported by the authorize script, so the caller need not read it.
+		GuestHome: r.guestHome,
 	}
 	if got != want {
 		t.Fatalf("EditorSSH =\n %+v\nwant\n %+v", got, want)
@@ -160,6 +160,7 @@ func TestRemoteLimaEditorSSHAuthorizesKeyAndProxies(t *testing.T) {
 		}
 	}
 
+	got.Alias = "sandbar-mac-mini-web"
 	if _, err := got.Render(); err != nil {
 		t.Fatalf("the entry must render: %v", err)
 	}
@@ -191,6 +192,7 @@ func TestRemoteLimaEditorSSHProxyCommandResolves(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EditorSSH: %v", err)
 	}
+	e.Alias = "sandbar-mac-mini-web"
 	block, err := e.Render()
 	if err != nil {
 		t.Fatalf("Render: %v", err)
@@ -419,19 +421,34 @@ func TestRemoteLimaEditorSSHUnknownGuestUser(t *testing.T) {
 	}
 }
 
-// TestNewRemoteLimaKeepsProfileConnection pins that the constructor stores the
-// fields EditorSSH builds its outer hop from.
+// TestNewRemoteLimaKeepsProfileConnection pins that the constructor builds
+// the host connection EditorSSH reads its outer hop from out of the profile's
+// own fields.
 func TestNewRemoteLimaKeepsProfileConnection(t *testing.T) {
-	p, err := NewRemoteLima(TargetConfig{Provider: RemoteLimaProviderID, Host: "example.com", User: "dev", Port: 2200, IdentityPath: "/k/id", ProfileName: "mini"})
+	p, err := NewRemoteLima(TargetConfig{Provider: RemoteLimaProviderID, Host: "example.com", User: "dev", Port: 2200, IdentityPath: "/k/id"})
 	if err != nil {
 		t.Fatalf("NewRemoteLima: %v", err)
 	}
-	rp := p.(*remoteLimaProvider)
-	if rp.profileName != "mini" {
-		t.Fatalf("profileName = %q", rp.profileName)
+	cfg := p.(*remoteLimaProvider).host.Conn().Config()
+	if cfg.Host != "example.com" || cfg.User != "dev" || cfg.Port != 2200 || cfg.IdentityPath != "/k/id" {
+		t.Fatalf("hop = %+v", cfg)
 	}
-	if rp.conn.Host != "example.com" || rp.conn.User != "dev" || rp.conn.Port != 2200 || rp.conn.IdentityPath != "/k/id" {
-		t.Fatalf("conn = %+v", rp.conn)
+}
+
+// TestLastPathLine covers reading the guest home off the authorize script's
+// output: only a final absolute path counts, so anything else falls back to
+// the instance files rather than opening a wrong folder.
+func TestLastPathLine(t *testing.T) {
+	for in, want := range map[string]string{
+		"/home/dev.linux\n":                 "/home/dev.linux",
+		"warning: something\n/home/dev\r\n": "/home/dev",
+		"":                                  "",
+		"not a path\n":                      "",
+		"/home/dev\n\x1b[0m\n":              "",
+	} {
+		if got := lastPathLine(in); got != want {
+			t.Errorf("lastPathLine(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 

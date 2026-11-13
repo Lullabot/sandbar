@@ -31,8 +31,8 @@ import (
 	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/releasecheck"
 	"github.com/lullabot/sandbar/internal/secrets"
-	"github.com/lullabot/sandbar/internal/sshconfig"
 	"github.com/lullabot/sandbar/internal/vm"
+	"github.com/lullabot/sandbar/internal/vscode"
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
@@ -101,17 +101,14 @@ type confirmState struct {
 	scope  registry.Scope
 	vmName string
 
-	// choices replaces the "[y] yes   [n] cancel" key hint, for the one
-	// confirmation whose answers are not yes/cancel: the `c` verb's consent to
-	// edit ~/.ssh/config, where `n` still opens VS Code, just without the edit.
-	// "" keeps the default hint.
-	choices string
 	// cancelRun, when set, is dispatched (via beginAction, like run) on `n`
-	// instead of simply closing the overlay. It exists for the same
-	// confirmation: declining the edit is a decision about ~/.ssh/config, not
-	// about opening the editor, so the operation still proceeds. `esc` still
-	// only closes the overlay: it is the key that means "back out", and
-	// without it there would be no way to abandon the verb once asked.
+	// instead of simply closing the overlay. It exists for the one
+	// confirmation whose answers are not yes/cancel: the `c` verb's consent to
+	// edit ~/.ssh/config, where declining the edit is a decision about that
+	// file, not about opening the editor, so the operation still proceeds.
+	// `esc` still only closes the overlay: it is the key that means "back
+	// out", and without it there would be no way to abandon the verb once
+	// asked. Setting it also switches the key hint to add/skip/cancel.
 	cancelRun tea.Cmd
 }
 
@@ -1502,7 +1499,8 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.heartbeats.stop(sc, msg.name)
 		}
 		label := msg.action + " " + msg.name
-		var text string // built below, then logged ONCE at the end (see the warn append)
+		var text string     // built below, then logged ONCE at the end (see the warn append)
+		var cleanup tea.Cmd // follow-up work a delete hands off the Update goroutine
 		switch {
 		case msg.err != nil:
 			text = label + " failed: " + msg.err.Error()
@@ -1530,12 +1528,11 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// match a same-named VM under a different profile.
 			secErr := m.sec.Remove(msg.name, sc)
 			// The VM's VS Code host entry goes too — best effort, a warning at
-			// most. It matters most for Proxmox, whose entry names a DHCP address
-			// that may later belong to an unrelated machine.
-			if alias, ok := m.editorAlias(sc, msg.name); ok {
-				if err := sshconfig.Remove(alias); err != nil {
-					m.logWarn("delete " + msg.name + ": ssh host entry " + alias + " not removed: " + err.Error())
-				}
+			// most, and off this goroutine (removeEditorEntryCmd). Named by the
+			// same rule that wrote it; a member that is gone (its profile was
+			// deleted mid-action) leaves nothing to name.
+			if mem, ok := m.memberByScope(sc); ok {
+				cleanup = removeEditorEntryCmd(msg.name, vscode.Alias(mem.profile, msg.name))
 			}
 			switch {
 			case regErr != nil && secErr != nil:
@@ -1575,10 +1572,16 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			text += " (warning: " + msg.warn + ")"
 		}
 		m.logMsg(text)
-		return m, m.refreshMemberCmd(sc) // refresh the acted member after every action
+		return m, tea.Batch(m.refreshMemberCmd(sc), cleanup) // refresh the acted member after every action
 
 	case codeResultMsg:
 		return m.handleCodeResult(msg)
+
+	case editorEntryRemovedMsg:
+		if msg.err != nil {
+			m.logWarn("delete " + msg.name + ": ssh host entry " + msg.alias + " not removed: " + msg.err.Error())
+		}
+		return m, nil
 
 	case pasteResultMsg:
 		// A plain status-line result: no spinner to clear (pasteCmd never
@@ -2039,9 +2042,10 @@ func (m model) confirmView() string {
 		// say why rather than looking like a dead key. Cancel still works.
 		return m.clipLine(errStyle.Render(m.confirm.prompt + "  checking for recent changes…   [n] cancel"))
 	}
-	choices := m.confirm.choices
-	if choices == "" {
-		choices = "[y] yes   [n] cancel"
+	choices := "[y] yes   [n] cancel"
+	if m.confirm.cancelRun != nil {
+		// `n` runs something too, so it cannot be labelled "cancel"; esc is.
+		choices = "[y] add   [n] skip   [esc] cancel"
 	}
 	// The prompt gives way, not the key hint: a prompt that names a path can
 	// outrun a narrow terminal, and a confirmation whose keys were clipped off

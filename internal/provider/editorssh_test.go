@@ -8,14 +8,13 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lullabot/sandbar/internal/profiles"
 	"github.com/lullabot/sandbar/internal/sshconfig"
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
 // TestLocalProviderEditorSSHIncludesLimaConfig proves local Lima hands back an
-// Include of Lima's own per-instance ssh.config under Lima's own alias rather
-// than a copy of its options: Lima picks a fresh forwarded port on every start
+// Include of Lima's own per-instance ssh.config rather than a copy of its
+// options: Lima picks a fresh forwarded port on every start
 // and rewrites that file, so only an Include stays correct across restarts.
 func TestLocalProviderEditorSSHIncludesLimaConfig(t *testing.T) {
 	p := &limaProvider{}
@@ -29,7 +28,7 @@ func TestLocalProviderEditorSSHIncludesLimaConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EditorSSH: %v", err)
 	}
-	want := sshconfig.Entry{Alias: "lima-web", Include: cfg}
+	want := sshconfig.Entry{Include: cfg}
 	if got != want {
 		t.Fatalf("EditorSSH = %+v, want %+v", got, want)
 	}
@@ -58,15 +57,14 @@ func TestLocalProviderEditorSSHMissingConfig(t *testing.T) {
 
 // TestProxmoxEditorSSHEntry proves the editor entry reaches the guest the way
 // sandbar's own ssh does — resolved address, cloud-init user, the profile's key
-// and the throwaway host-key posture — under an alias namespaced by the
-// profile, since two profiles can each hold a VM called "web".
+// and the throwaway host-key posture.
 func TestProxmoxEditorSSHEntry(t *testing.T) {
 	m := newPVEMock(t)
 	m.data("/cluster/resources", clusterResources)
 	m.data("/nodes/pve1/qemu/100/status/current", `{"vmid":100,"name":"web","status":"running"}`)
 	m.data("/nodes/pve1/qemu/100/config", fmt.Sprintf(`{"net0":"virtio=%s,bridge=vmbr0"}`, testMAC))
 	m.data("/nodes/pve1/qemu/100/agent/network-get-interfaces", agentInterfaces)
-	p := newProxmoxForTest(t, m, func(c *TargetConfig) { c.ProfileName = "Home PVE" })
+	p := newProxmoxForTest(t, m)
 	if _, err := p.List(); err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -80,7 +78,6 @@ func TestProxmoxEditorSSHEntry(t *testing.T) {
 		t.Fatalf("EditorSSH: %v", err)
 	}
 	want := sshconfig.Entry{
-		Alias:             "sandbar-home-pve-web",
 		HostName:          "192.168.1.50",
 		User:              "dev",
 		IdentityFile:      "/keys/id_ed25519",
@@ -90,6 +87,12 @@ func TestProxmoxEditorSSHEntry(t *testing.T) {
 	if got != want {
 		t.Fatalf("EditorSSH = %+v, want %+v", got, want)
 	}
+	// The fresh answer replaced the stale one in the cache, so the next attach
+	// connects where the editor does.
+	if ip, _ := p.cachedGuestIP("web"); ip != "192.168.1.50" {
+		t.Fatalf("cached address = %q after EditorSSH, want the fresh one", ip)
+	}
+	got.Alias = "sandbar-home-pve-web"
 	if _, err := got.Render(); err != nil {
 		t.Fatalf("the entry must render: %v", err)
 	}
@@ -109,24 +112,5 @@ func TestProxmoxEditorSSHUnresolvable(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "ghost") {
 		t.Fatalf("error %q does not name the VM", err)
-	}
-}
-
-// TestTargetConfigForCarriesProfileName pins the one non-connection field
-// TargetConfigFor maps: the profile's name, which the remote providers need to
-// namespace editor ssh aliases. It must stay out of Scope, which the registry
-// persists and which a rename must not change.
-func TestTargetConfigForCarriesProfileName(t *testing.T) {
-	for _, typ := range []profiles.Type{profiles.TypeRemoteSSH, profiles.TypeProxmox} {
-		p := profiles.Profile{Name: "Home PVE", Type: typ, Host: "h", User: "u", Node: "n", Pool: "p"}
-		cfg := TargetConfigFor(p)
-		if cfg.ProfileName != p.Name {
-			t.Fatalf("%s: ProfileName = %q, want %q", typ, cfg.ProfileName, p.Name)
-		}
-		renamed := p
-		renamed.Name = "other"
-		if TargetConfigFor(renamed).Scope() != cfg.Scope() {
-			t.Fatalf("%s: a rename changed the scope", typ)
-		}
 	}
 }

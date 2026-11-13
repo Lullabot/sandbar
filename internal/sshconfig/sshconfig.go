@@ -19,8 +19,9 @@
 //     "Match all" to reset the scope, so a local-Lima Include entry that
 //     follows a Host entry is not made conditional on that Host.
 //
-// The package has no dependency beyond the standard library and
-// internal/statelock.
+// The package has no dependency beyond the standard library,
+// internal/statelock and internal/sshx (for the host-key options it shares
+// with sandbar's own ssh argv).
 package sshconfig
 
 import (
@@ -34,6 +35,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/lullabot/sandbar/internal/sshx"
 	"github.com/lullabot/sandbar/internal/statelock"
 )
 
@@ -41,6 +43,10 @@ import (
 // reaches one VM. Either Include is set (local Lima, whose own per-instance
 // ssh.config already holds everything, including the port Lima picks afresh
 // on every start) or the Host options are.
+//
+// A provider describes how to reach its guest and leaves Alias empty; the
+// name a VM is reachable by is chosen in one place (internal/vscode.Alias),
+// which sets it before the entry is written.
 type Entry struct {
 	Alias string
 
@@ -69,6 +75,10 @@ type Entry struct {
 	// provider authorized in the guest, so the user can be told). It is
 	// never rendered.
 	AuthorizedKey string
+	// GuestHome is informational too, never rendered: the guest login
+	// user's home directory, when the provider learned it while building the
+	// entry, so the caller need not ask the guest again. "" means unknown.
+	GuestHome string
 }
 
 // aliasRe is deliberately narrower than what ssh accepts as a Host pattern:
@@ -106,7 +116,9 @@ func (e Entry) Render() (string, error) {
 			fmt.Fprintf(&b, "  ProxyCommand %s\n", e.ProxyCommand)
 		}
 		if e.EphemeralHostKeys {
-			b.WriteString("  StrictHostKeyChecking no\n  UserKnownHostsFile /dev/null\n  LogLevel ERROR\n")
+			for _, o := range sshx.EphemeralHostKeyOptions() {
+				fmt.Fprintf(&b, "  %s %s\n", o.Key, o.Value)
+			}
 		}
 	}
 	fmt.Fprintf(&b, "%s%s\n", endMarker, e.Alias)
@@ -264,12 +276,10 @@ func Upsert(e Entry) error {
 	}
 	return mutate(func(lines []string) []string {
 		out, at := removeBlock(lines, e.Alias)
-		blockLines := strings.SplitAfter(block, "\n")
-		blockLines = blockLines[:len(blockLines)-1] // trailing "" after the final newline
+		blockLines := splitLines(block)
 		if at < 0 {
 			if len(out) == 0 {
-				out = strings.SplitAfter(managedHeader, "\n")
-				out = out[:len(out)-1]
+				out = splitLines(managedHeader)
 			}
 			return append(out, blockLines...)
 		}
@@ -307,20 +317,24 @@ func mutate(apply func(lines []string) []string) error {
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("read %s: %w", path, err)
 	}
-	var lines []string
-	if len(data) > 0 {
-		s := string(data)
-		if !strings.HasSuffix(s, "\n") {
-			s += "\n"
-		}
-		lines = strings.SplitAfter(s, "\n")
-		lines = lines[:len(lines)-1]
-	}
-	next := strings.Join(apply(lines), "")
+	next := strings.Join(apply(splitLines(string(data))), "")
 	if next == string(data) {
 		return nil
 	}
 	return writeAtomic(path, []byte(next), 0o600)
+}
+
+// splitLines splits s into lines that each keep their "\n", so joining them
+// reproduces s; a final line without one gains it. "" is no lines at all.
+func splitLines(s string) []string {
+	if s == "" {
+		return nil
+	}
+	if !strings.HasSuffix(s, "\n") {
+		s += "\n"
+	}
+	lines := strings.SplitAfter(s, "\n")
+	return lines[:len(lines)-1] // the "" after the final newline
 }
 
 // removeBlock drops every block for alias and reports the line index where
@@ -500,24 +514,14 @@ func canCreate(sshDir string) bool {
 	return dirWritable(filepath.Dir(sshDir))
 }
 
-// ManualIncludeError means sandbar will not (or cannot) edit ~/.ssh/config
-// and the user must add Line themselves. Callers show Line verbatim.
-type ManualIncludeError struct {
-	Path   string
-	Line   string
-	Reason string
-}
-
-func (e *ManualIncludeError) Error() string {
-	return fmt.Sprintf("not editing %s (%s); add this line at the top of it yourself: %s", e.Path, e.Reason, e.Line)
-}
-
 const includeComment = "# Added by sandbar: VM host entries for VS Code Remote-SSH (sandbar code).\n"
 
 // AddInclude prepends the Include of the managed file to ~/.ssh/config,
 // creating ~/.ssh (0700) and the file (0600) if needed and preserving an
 // existing file's mode. It is a no-op when the line is already present.
 // Callers must have the user's consent first; this function does not ask.
+// An error is the reason the file was left alone, worded to follow "could
+// not edit ~/.ssh/config"; the user then adds IncludeLine() by hand.
 //
 // It takes no statelock: that would leave a "config.lock" file in ~/.ssh, a
 // directory sandbar otherwise never touches, to guard a one-time edit the
@@ -525,24 +529,20 @@ const includeComment = "# Added by sandbar: VM host entries for VS Code Remote-S
 // the atomic write instead.
 func AddInclude() error {
 	path := UserConfigPath()
-	line := IncludeLine()
-	manual := func(reason string) error {
-		return &ManualIncludeError{Path: path, Line: line, Reason: reason}
-	}
 	if err := checkPath("Include", ManagedPath()); err != nil {
-		return manual(err.Error())
+		return err
 	}
 	st, err := IncludeStatus()
 	if err != nil {
-		return manual(err.Error())
+		return err
 	}
 	switch {
 	case st.Present:
 		return nil
 	case st.Symlink:
-		return manual("it is a symlink")
+		return errors.New("it is a symlink")
 	case !st.Writable:
-		return manual("it is not writable")
+		return errors.New("it is not writable")
 	}
 
 	mode := os.FileMode(0o600)
@@ -550,19 +550,16 @@ func AddInclude() error {
 	if st.Exists {
 		fi, err := os.Stat(path)
 		if err != nil {
-			return manual(err.Error())
+			return err
 		}
 		mode = fi.Mode().Perm()
 		if existing, err = os.ReadFile(path); err != nil {
-			return manual(err.Error())
+			return err
 		}
 	} else if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return manual(err.Error())
+		return err
 	}
 
-	content := includeComment + line + "\n\n" + string(existing)
-	if err := writeAtomic(path, []byte(content), mode); err != nil {
-		return manual(err.Error())
-	}
-	return nil
+	content := includeComment + IncludeLine() + "\n\n" + string(existing)
+	return writeAtomic(path, []byte(content), mode)
 }

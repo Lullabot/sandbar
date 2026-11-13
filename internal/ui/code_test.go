@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -47,7 +48,7 @@ func codeModel(t *testing.T) model {
 	t.Helper()
 	p := &providerfake.Provider{
 		EditorSSHFunc: func(_ context.Context, v vm.VM) (sshconfig.Entry, error) {
-			return sshconfig.Entry{Alias: sshconfig.LimaAlias(v.Name), Include: "/lima/" + v.Name + "/ssh.config"}, nil
+			return sshconfig.Entry{Include: "/lima/" + v.Name + "/ssh.config"}, nil
 		},
 		GuestHomeFunc: func(vm.VM) string { return "/home/tester" },
 	}
@@ -307,9 +308,45 @@ func TestCodeVerbOfferedOnlyOnRunningIdleVM(t *testing.T) {
 	}
 }
 
-// A board delete removes the VM's host entry, by the alias its own provider
-// wrote: Lima's name on the Local profile, the profile-namespaced one
-// elsewhere — and never a same-named VM's entry under the other profile.
+// deliverCleanup runs what a delete result handed off the Update goroutine
+// and feeds the entry-removal outcome back through Update, as the program
+// would. The refresh batched beside it runs against the fakes and is dropped.
+func deliverCleanup(t *testing.T, m model, cmd tea.Cmd) model {
+	t.Helper()
+	if cmd == nil {
+		t.Fatal("the delete result dispatched nothing; the entry cleanup is missing")
+	}
+	// Update batches its own follow-ups around the handler's, so the removal
+	// can be nested a level or two down.
+	var find func(tea.Cmd) (editorEntryRemovedMsg, bool)
+	find = func(c tea.Cmd) (editorEntryRemovedMsg, bool) {
+		if c == nil {
+			return editorEntryRemovedMsg{}, false
+		}
+		switch msg := c().(type) {
+		case editorEntryRemovedMsg:
+			return msg, true
+		case tea.BatchMsg:
+			for _, inner := range msg {
+				if res, ok := find(inner); ok {
+					return res, true
+				}
+			}
+		}
+		return editorEntryRemovedMsg{}, false
+	}
+	res, ok := find(cmd)
+	if !ok {
+		t.Fatal("no editorEntryRemovedMsg came out of the delete result")
+	}
+	next, _ := m.Update(res)
+	return next.(model)
+}
+
+// A board delete removes the VM's host entry, by the alias it was written
+// under (vscode.Alias): Lima's name on the Local profile, the
+// profile-namespaced one elsewhere — and never a same-named VM's entry under
+// the other profile.
 func TestDeleteRemovesTheVMsSSHEntry(t *testing.T) {
 	codeEnv(t, "")
 	remote := registry.Scope{Provider: "lima-remote", RemoteTarget: "u@mini:22"}
@@ -327,8 +364,8 @@ func TestDeleteRemovesTheVMsSSHEntry(t *testing.T) {
 		}
 	}
 
-	next, _ := m.Update(actionDoneMsg{action: "delete", name: "web", scope: remote})
-	m = next.(model)
+	next, cmd := m.Update(actionDoneMsg{action: "delete", name: "web", scope: remote})
+	m = deliverCleanup(t, next.(model), cmd)
 	managed := readFile(t, sshconfig.ManagedPath())
 	if strings.Contains(managed, sshconfig.ProfileAlias("Mac Mini", "web")) {
 		t.Fatalf("the remote VM's entry should be gone, got:\n%s", managed)
@@ -337,12 +374,23 @@ func TestDeleteRemovesTheVMsSSHEntry(t *testing.T) {
 		t.Fatalf("the local same-named VM's entry must survive, got:\n%s", managed)
 	}
 
-	next, _ = m.Update(actionDoneMsg{action: "delete", name: "web", scope: registry.LocalScope})
-	m = next.(model)
+	next, cmd = m.Update(actionDoneMsg{action: "delete", name: "web", scope: registry.LocalScope})
+	m = deliverCleanup(t, next.(model), cmd)
 	if strings.Contains(readFile(t, sshconfig.ManagedPath()), "lima-web") {
 		t.Fatal("the local VM's entry should be gone after its delete")
 	}
 	if got := m.lastMessage(); got != "delete web ok" {
 		t.Fatalf("a clean delete should report plainly, got %q", got)
+	}
+}
+
+// A failed entry removal is a warning naming the alias, never silence: the
+// stale entry may point at an address another machine now holds.
+func TestDeleteEntryRemovalFailureWarns(t *testing.T) {
+	codeEnv(t, "")
+	m := codeModel(t)
+	next, _ := m.Update(editorEntryRemovedMsg{name: "web", alias: "lima-web", err: errors.New("disk full")})
+	if got := loggedText(next.(model)); !strings.Contains(got, "ssh host entry lima-web not removed: disk full") {
+		t.Fatalf("log = %q", got)
 	}
 }

@@ -189,15 +189,9 @@ func shellAttachArgv(l vmGetter, name string, controlMode bool) ([]string, error
 		return nil, errors.New("sandbar shell: --cc does not work inside tmux — a tmux pane strips the control-mode handshake before your terminal can see it; detach (C-a d) and run this from a plain terminal window")
 	}
 
-	found, err := l.Get(name)
+	found, err := requireRunningVM(l, "shell", name)
 	if err != nil {
-		if errors.Is(err, vm.ErrNotFound) {
-			return nil, fmt.Errorf("sandbar shell: no VM named %q (run 'sandbar' to list instances)", name)
-		}
-		return nil, fmt.Errorf("sandbar shell: %w", err)
-	}
-	if found.Status != limaRunning {
-		return nil, fmt.Errorf("sandbar shell: VM %q is not running (status: %s); start it first", name, found.Status)
+		return nil, err
 	}
 
 	if controlMode {

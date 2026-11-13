@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/lullabot/sandbar/internal/manage"
 	"github.com/lullabot/sandbar/internal/profiles"
 	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/registry"
@@ -86,51 +87,32 @@ than one connection profile, --profile picks which one to open.
 	if err := p.Preflight(); err != nil {
 		return err
 	}
-	return doCode(context.Background(), p, reg, scope, name, os.Stdin, isTerminal(os.Stdin), os.Stdout)
-}
-
-// configLookup is the registry surface recordedCloneURL needs, satisfied by
-// *registry.Registry.
-type configLookup interface {
-	ConfigInScope(name string, scope registry.Scope) (vm.CreateConfig, bool)
+	return doCode(context.Background(), p, reg, scope, name, vscode.Alias(target, name), os.Stdin, isTerminal(os.Stdin), os.Stdout)
 }
 
 // doCode is runCode after resolution, taking its terminal as parameters so
-// the consent branching is testable with canned input. interactive is whether
-// in is a real terminal: piped input is never taken as consent to edit
-// ~/.ssh/config, because a script answering "y" to every prompt did not read
-// this one.
-func doCode(ctx context.Context, p provider.Provider, reg configLookup, scope registry.Scope, name string, in io.Reader, interactive bool, out io.Writer) error {
-	v, err := p.Get(name)
-	if err != nil {
-		if errors.Is(err, vm.ErrNotFound) {
-			return fmt.Errorf("sandbar code: no VM named %q (run 'sandbar' to list instances)", name)
-		}
-		return fmt.Errorf("sandbar code: %w", err)
-	}
+// the consent branching is testable with canned input. alias is the ssh host
+// name to write (vscode.Alias for the resolved profile). interactive is
+// whether in is a real terminal: piped input is never taken as consent to
+// edit ~/.ssh/config, because a script answering "y" to every prompt did not
+// read this one.
+func doCode(ctx context.Context, p provider.Provider, reg manage.ConfigLookup, scope registry.Scope, name, alias string, in io.Reader, interactive bool, out io.Writer) error {
 	// Refused before anything is written: a stopped VM's entry could not be
 	// resolved (Proxmox has no address for it) and VS Code would only time out.
-	if v.Status != limaRunning {
-		return fmt.Errorf("sandbar code: VM %q is not running (status: %s); start it first", name, v.Status)
+	v, err := requireRunningVM(p, "code", name)
+	if err != nil {
+		return err
 	}
 
 	ensureInclude(in, interactive, out)
 
-	res, err := vscode.Prepare(ctx, p, v, recordedCloneURL(ctx, p, reg, scope, name))
+	lines, _, err := vscode.Open(ctx, p, v, alias, recordedCloneURL(ctx, p, reg, scope, name))
+	for _, l := range lines {
+		fmt.Fprintln(out, l)
+	}
 	if err != nil {
 		return fmt.Errorf("sandbar code: %w", err)
 	}
-	if msg := res.AuthorizedMessage(); msg != "" {
-		fmt.Fprintln(out, msg)
-	}
-	if res.LaunchArgv == nil {
-		fmt.Fprintln(out, res.NotFoundMessage())
-		return nil
-	}
-	if err := vscode.Launch(res.LaunchArgv); err != nil {
-		return fmt.Errorf("sandbar code: start %s: %w", res.CodePath, err)
-	}
-	fmt.Fprintln(out, res.OpeningMessage())
 	return nil
 }
 
@@ -145,16 +127,11 @@ func ensureInclude(in io.Reader, interactive bool, out io.Writer) {
 		fmt.Fprintln(out, vscode.ManualIncludeMessage(why, "\n  "))
 	}
 
-	st, err := sshconfig.IncludeStatus()
-	if err != nil {
-		manual(vscode.UnreadableReason(err))
-		return
-	}
-	switch vscode.ClassifyInclude(st) {
+	switch action, why := vscode.CheckInclude(); action {
 	case vscode.IncludePresent:
 		return
 	case vscode.IncludeManual:
-		manual(vscode.ManualReason(st))
+		manual(why)
 		return
 	}
 
@@ -176,19 +153,16 @@ func ensureInclude(in io.Reader, interactive bool, out io.Writer) {
 	fmt.Fprintf(out, "Added the line to %s.\n", path)
 }
 
-// recordedCloneURL is the project the VM was created for, read the way reset
-// reads a VM's recorded config: the provenance marker first (it lives with
-// the VM, so it is right even for a VM another controller created), then the
-// managed index. "" — open the home directory — when neither knows, which is
-// also the honest answer for a VM created without a repository.
-func recordedCloneURL(ctx context.Context, p provider.Provider, reg configLookup, scope registry.Scope, name string) string {
+// recordedCloneURL reads the VM's project through manage.RecordedCloneURL,
+// the board's rule too, with the provider's own marker read as the first
+// source. A marker that cannot be read falls through to the managed index.
+func recordedCloneURL(ctx context.Context, p provider.Provider, reg manage.ConfigLookup, scope registry.Scope, name string) string {
+	var marker func() (vm.CreateConfig, bool)
 	if pv, ok := p.(provider.Provenancer); ok {
-		if m, found, err := pv.ProvenanceOf(ctx, name); err == nil && found && m.Config.CloneURL != "" {
-			return m.Config.CloneURL
+		marker = func() (vm.CreateConfig, bool) {
+			m, found, err := pv.ProvenanceOf(ctx, name)
+			return m.Config, err == nil && found
 		}
 	}
-	if cfg, ok := reg.ConfigInScope(name, scope); ok {
-		return cfg.CloneURL
-	}
-	return ""
+	return manage.RecordedCloneURL(marker, reg, scope, name)
 }

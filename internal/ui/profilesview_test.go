@@ -298,9 +298,6 @@ func TestConnectionFieldsEqualProxmoxFields(t *testing.T) {
 		{"token_file", func(p profiles.Profile) profiles.Profile { p.TokenFile = "/etc/sandbar/other-token"; return p }},
 		{"insecure", func(p profiles.Profile) profiles.Profile { p.Insecure = true; return p }},
 		{"ca_file", func(p profiles.Profile) profiles.Profile { p.CAFile = "/etc/sandbar/other-ca.pem"; return p }},
-		// The name namespaces the provider's editor ssh aliases, so a provider
-		// built under the old name must be rebuilt.
-		{"name", func(p profiles.Profile) profiles.Profile { p.Name = "renamed"; return p }},
 	}
 	for _, m := range mutations {
 		t.Run(m.name, func(t *testing.T) {
@@ -309,25 +306,6 @@ func TestConnectionFieldsEqualProxmoxFields(t *testing.T) {
 				t.Fatalf("a %s change must not be treated as a pure rename", m.name)
 			}
 		})
-	}
-}
-
-// TestConnectionFieldsEqualNameScope pins which profile types a rename
-// rebuilds: a remote-ssh one (its provider namespaces ssh aliases by the
-// name, like Proxmox) but never Local, whose provider does not carry it — so
-// renaming Local stays an ungated, in-place edit.
-func TestConnectionFieldsEqualNameScope(t *testing.T) {
-	remote := profiles.Profile{Name: "mini", Type: profiles.TypeRemoteSSH, Host: "mini.lan"}
-	renamed := remote
-	renamed.Name = "studio"
-	if connectionFieldsEqual(remote, renamed) {
-		t.Fatal("renaming a remote-ssh profile must rebuild its binding")
-	}
-	local := profiles.Profile{Name: "Local", Type: profiles.TypeLocal}
-	renamedLocal := local
-	renamedLocal.Name = "my-laptop"
-	if !connectionFieldsEqual(local, renamedLocal) {
-		t.Fatal("renaming Local must stay a pure rename")
 	}
 }
 

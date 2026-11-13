@@ -1,23 +1,20 @@
 package ui
 
 // code.go is the board's `c` verb: open the focused VM in VS Code's
-// Remote-SSH. The work itself is internal/vscode.Prepare, shared with
-// `sandbar code` so the two front ends cannot drift; this file adds only what
-// the board owns — the consent overlay for ~/.ssh/config, running the
-// operation off the Update goroutine, and the messages, worded as the CLI
-// words them.
+// Remote-SSH. The work itself is internal/vscode.Open, shared with `sandbar
+// code` so the two front ends cannot drift; this file adds only what the
+// board owns — the consent overlay for ~/.ssh/config, running the operation
+// off the Update goroutine, and laying the shared messages out as log lines.
 
 import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/lullabot/sandbar/internal/profiles"
+	"github.com/lullabot/sandbar/internal/manage"
 	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/sshconfig"
@@ -25,7 +22,7 @@ import (
 	"github.com/lullabot/sandbar/internal/vscode"
 )
 
-// codeTimeout bounds the whole operation. Prepare's EditorSSH is a network
+// codeTimeout bounds the whole operation. Open's EditorSSH is a network
 // round trip on remote Lima (authorizing the key) and Proxmox (resolving the
 // guest address); the board shows a spinner for it, and a wedged host must
 // end in an error the user can read rather than a spinner that never stops.
@@ -64,32 +61,32 @@ func manualIncludeNote(why string) codeNote {
 // does.
 func (m *model) openInCode(v boardVM) tea.Cmd {
 	p := m.provFor(v.scope)
-	if p == nil {
+	mem, ok := m.memberByScope(v.scope)
+	if p == nil || !ok {
 		// Unreachable via dispatch: a VM gets a tile only from a member that
-		// listed it. Guarded so a direct call cannot hand Prepare a nil guest.
+		// listed it. Guarded so a direct call cannot hand Open a nil guest.
 		return nil
 	}
+	alias := vscode.Alias(mem.profile, v.Name)
 	cloneURL := m.recordedCloneURL(v.scope, v.Name)
 	working := "opening " + v.Name + " in VS Code…"
-	path := sshconfig.UserConfigPath()
 
 	var notes []codeNote
-	st, err := sshconfig.IncludeStatus()
-	switch {
-	case err != nil:
-		notes = append(notes, manualIncludeNote(vscode.UnreadableReason(err)))
-	case vscode.ClassifyInclude(st) == vscode.IncludeManual:
-		notes = append(notes, manualIncludeNote(vscode.ManualReason(st)))
-	case vscode.ClassifyInclude(st) == vscode.IncludeAsk:
+	switch action, why := vscode.CheckInclude(); action {
+	case vscode.IncludeManual:
+		notes = append(notes, manualIncludeNote(why))
+	case vscode.IncludeAsk:
+		path := sshconfig.UserConfigPath()
 		// The full line goes into the log as well as the prompt: the prompt is
 		// one row and may be clipped on a narrow terminal, and the user is being
 		// asked to agree to exactly this text.
 		m.logMsg(fmt.Sprintf("ssh reads sandbar's VM host entries only once %s includes them, with this line at the top: %s", path, sshconfig.IncludeLine()))
+		home, _ := os.UserHomeDir()
 		m.confirm = &confirmState{
-			prompt:    fmt.Sprintf("Add %q to %s?", sshconfig.IncludeLine(), tildePath(path)),
-			choices:   "[y] add   [n] skip   [esc] cancel",
-			run:       codeCmd(p, v.VM, cloneURL, true, nil),
-			cancelRun: codeCmd(p, v.VM, cloneURL, false, []codeNote{manualIncludeNote("Left ~/.ssh/config unchanged")}),
+			// Shortened for a prompt that has one row to spend; display only.
+			prompt:    fmt.Sprintf("Add %q to %s?", sshconfig.IncludeLine(), shortenGuestPath(path, home)),
+			run:       codeCmd(p, v.VM, alias, cloneURL, true, nil),
+			cancelRun: codeCmd(p, v.VM, alias, cloneURL, false, []codeNote{manualIncludeNote("Left ~/.ssh/config unchanged")}),
 			working:   working,
 			scope:     v.scope,
 			vmName:    v.Name,
@@ -97,13 +94,13 @@ func (m *model) openInCode(v boardVM) tea.Cmd {
 		return nil
 	}
 	m.logMsg(working)
-	return m.beginAction(codeCmd(p, v.VM, cloneURL, false, notes))
+	return m.beginAction(codeCmd(p, v.VM, alias, cloneURL, false, notes))
 }
 
 // codeCmd runs the operation off the Update goroutine: the consented Include
-// edit, then Prepare (which may be an ssh round trip), then the launch. notes
-// are lines decided before it ran, reported ahead of its own.
-func codeCmd(p provider.Provider, v vm.VM, cloneURL string, addInclude bool, notes []codeNote) tea.Cmd {
+// edit, then vscode.Open (which may be an ssh round trip, then the launch).
+// notes are lines decided before it ran, reported ahead of its own.
+func codeCmd(p provider.Provider, v vm.VM, alias, cloneURL string, addInclude bool, notes []codeNote) tea.Cmd {
 	return func() tea.Msg {
 		out := codeResultMsg{name: v.Name, notes: append([]codeNote(nil), notes...)}
 		if addInclude {
@@ -116,23 +113,23 @@ func codeCmd(p provider.Provider, v vm.VM, cloneURL string, addInclude bool, not
 
 		ctx, cancel := context.WithTimeout(context.Background(), codeTimeout)
 		defer cancel()
-		res, err := vscode.Prepare(ctx, p, v, cloneURL)
+		lines, launched, err := vscode.Open(ctx, p, v, alias, cloneURL)
 		if err != nil {
+			for _, l := range lines {
+				out.notes = append(out.notes, codeNote{text: l})
+			}
 			out.err = err
 			return out
 		}
-		if msg := res.AuthorizedMessage(); msg != "" {
-			out.notes = append(out.notes, codeNote{text: msg})
+		last := len(lines) - 1
+		for _, l := range lines[:last] {
+			out.notes = append(out.notes, codeNote{text: l})
 		}
-		if res.LaunchArgv == nil {
-			out.text = res.NotFoundMessage()
-			return out
+		out.text = lines[last]
+		if launched {
+			// VS Code is still connecting when the log says this.
+			out.text += "…"
 		}
-		if err := vscode.Launch(res.LaunchArgv); err != nil {
-			out.err = fmt.Errorf("start %s: %w", res.CodePath, err)
-			return out
-		}
-		out.text = res.OpeningMessage() + "…"
 		return out
 	}
 }
@@ -156,48 +153,35 @@ func (m model) handleCodeResult(msg codeResultMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// recordedCloneURL is the project the VM was created for, read the way
-// `sandbar code` reads it: the provenance marker first (it lives with the VM,
-// so it is right even for a VM another controller created), then the managed
-// index. The board already holds the member's batched marker read, so this is
-// a map lookup, not a round trip. "" opens the guest home.
+// recordedCloneURL is the project the VM was created for, by the same rule
+// `sandbar code` uses (manage.RecordedCloneURL). The board already holds the
+// member's batched marker read, so the marker source is a map lookup, not a
+// round trip. "" opens the guest home.
 func (m model) recordedCloneURL(sc registry.Scope, name string) string {
-	if mem, ok := m.memberByScope(sc); ok {
-		if pv, found := mem.provenance[name]; found && pv.Config.CloneURL != "" {
-			return pv.Config.CloneURL
+	marker := func() (vm.CreateConfig, bool) {
+		mem, ok := m.memberByScope(sc)
+		if !ok {
+			return vm.CreateConfig{}, false
 		}
+		pv, found := mem.provenance[name]
+		return pv.Config, found
 	}
-	if cfg, ok := m.reg.ConfigInScope(name, sc); ok {
-		return cfg.CloneURL
-	}
-	return ""
+	return manage.RecordedCloneURL(marker, m.reg, sc, name)
 }
 
-// editorAlias is the ssh alias the VM's provider writes for it, by the same
-// helpers the providers use: Lima's own name for the Local profile, a
-// profile-namespaced one otherwise. ok is false when no member owns sc any
-// more (its profile was deleted mid-action), leaving nothing to name.
-func (m model) editorAlias(sc registry.Scope, name string) (string, bool) {
-	mem, ok := m.memberByScope(sc)
-	if !ok {
-		return "", false
-	}
-	if mem.profile.Type == profiles.TypeLocal {
-		return sshconfig.LimaAlias(name), true
-	}
-	return sshconfig.ProfileAlias(mem.profile.Name, name), true
+// editorEntryRemovedMsg reports removeEditorEntryCmd's outcome; only a
+// failure is logged.
+type editorEntryRemovedMsg struct {
+	name, alias string
+	err         error
 }
 
-// tildePath shortens a path under the home directory to its ~/ form, for a
-// prompt that has one row to spend. Display only: what is written is always
-// the absolute path.
-func tildePath(p string) string {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return p
+// removeEditorEntryCmd drops a deleted VM's VS Code host entry, off the
+// Update goroutine because it locks and rewrites a file. It matters most for
+// Proxmox, whose entry names a DHCP address that may later belong to an
+// unrelated machine.
+func removeEditorEntryCmd(name, alias string) tea.Cmd {
+	return func() tea.Msg {
+		return editorEntryRemovedMsg{name: name, alias: alias, err: sshconfig.Remove(alias)}
 	}
-	if rel, err := filepath.Rel(home, p); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
-		return "~/" + rel
-	}
-	return p
 }

@@ -232,8 +232,8 @@ func (p *limaProvider) RunArgv(v vm.VM, workdir, expr string) []string {
 // auto-forward needs when the Lima host is not this machine.
 func (p *limaProvider) ForwardArgv(v vm.VM, hostPort, guestPort int) []string { return nil }
 
-// EditorSSH returns an Include of Lima's own per-instance ssh.config under
-// Lima's own alias, not a copy of its options: Lima picks a fresh forwarded
+// EditorSSH returns an Include of Lima's own per-instance ssh.config, not a
+// copy of its options: Lima picks a fresh forwarded
 // port on every start and rewrites that file, so a copied Port would go stale
 // at the next restart while an Include tracks it. The file is checked here
 // because ssh silently skips a missing Include, which would leave the user
@@ -249,7 +249,7 @@ func (p *limaProvider) EditorSSH(_ context.Context, v vm.VM) (sshconfig.Entry, e
 	if _, err := os.Stat(cfg); err != nil {
 		return sshconfig.Entry{}, fmt.Errorf("lima: ssh config for %q not found at %s (start the VM once so Lima writes it): %w", v.Name, cfg, err)
 	}
-	return sshconfig.Entry{Alias: sshconfig.LimaAlias(v.Name), Include: cfg}, nil
+	return sshconfig.Entry{Include: cfg}, nil
 }
 
 // HostUser returns this machine's user — for local Lima the limactl host IS this
