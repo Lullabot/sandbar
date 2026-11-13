@@ -76,12 +76,20 @@ func requireRunningVM(g vmRunningChecker, name string) (vm.VM, error) {
 // directly. A package-level var (like fleet.go's newDefault/newRemoteLima
 // seam) so tests can force both the TTY and pipe branch deterministically
 // without a real terminal.
+//
+// /dev/null is itself a character device, so the mode bit alone reads a
+// `< /dev/null` redirect — the usual way to run a command unattended — as a
+// terminal, and a prompt would then read EOF and print a question nobody
+// can answer. It is ruled out by identity.
 var isTerminal = func(f *os.File) bool {
 	info, err := f.Stat()
-	if err != nil {
+	if err != nil || info.Mode()&os.ModeCharDevice == 0 {
 		return false
 	}
-	return info.Mode()&os.ModeCharDevice != 0
+	if null, err := os.Stat(os.DevNull); err == nil && os.SameFile(info, null) {
+		return false
+	}
+	return true
 }
 
 // confirmOpenPrompt asks the user, on the real terminal, whether to open a

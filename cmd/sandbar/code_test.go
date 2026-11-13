@@ -229,3 +229,26 @@ func TestCodeSymlinkedConfigIsNeverEdited(t *testing.T) {
 		t.Fatalf("want the line printed without a prompt:\n%s", out.String())
 	}
 }
+
+// TestIsTerminalRejectsDevNull pins the case the character-device bit gets
+// wrong: stdin redirected from /dev/null must not be taken for a terminal, or
+// an unattended run asks a question it can never get an answer to. A regular
+// file is the plain non-terminal control.
+func TestIsTerminalRejectsDevNull(t *testing.T) {
+	null, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Skipf("no %s: %v", os.DevNull, err)
+	}
+	defer null.Close()
+	if isTerminal(null) {
+		t.Fatalf("isTerminal(%s) = true; want false", os.DevNull)
+	}
+	f, err := os.CreateTemp(t.TempDir(), "plain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if isTerminal(f) {
+		t.Fatal("isTerminal(regular file) = true; want false")
+	}
+}
