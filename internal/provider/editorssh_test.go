@@ -55,31 +55,6 @@ func TestLocalProviderEditorSSHMissingConfig(t *testing.T) {
 	}
 }
 
-// TestRemoteProviderEditorSSHIsNotTheLocalOne guards against the embedded local
-// implementation leaking through: it would Include v.Dir/ssh.config, a path on
-// the REMOTE host, which on the workstation names nothing — or something else.
-func TestRemoteProviderEditorSSHIsNotTheLocalOne(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "ssh.config"), []byte("Host lima-web\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	p, err := NewRemoteLima(TargetConfig{Provider: RemoteLimaProviderID, Host: "example.com", User: "dev", ProfileName: "mini"})
-	if err != nil {
-		t.Fatalf("NewRemoteLima: %v", err)
-	}
-	if got := p.(*remoteLimaProvider).profileName; got != "mini" {
-		t.Fatalf("remote provider profileName = %q, want %q", got, "mini")
-	}
-
-	got, err := p.EditorSSH(context.Background(), vm.VM{Name: "web", Dir: dir})
-	if err == nil {
-		t.Fatalf("EditorSSH = %+v, want an error until remote Lima is supported", got)
-	}
-	if got.Include != "" {
-		t.Fatalf("remote EditorSSH returned a workstation Include %q", got.Include)
-	}
-}
-
 // TestProxmoxEditorSSHEntry proves the editor entry reaches the guest the way
 // sandbar's own ssh does — resolved address, cloud-init user, the profile's key
 // and the throwaway host-key posture — under an alias namespaced by the

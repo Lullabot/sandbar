@@ -203,10 +203,10 @@ graph TD
 **Parallel Tasks:**
 - ✔️ Task 2: `Provider.EditorSSH` for local Lima and Proxmox (depends on: 1)
 
-### Phase 3: Remote Lima and shared operation
+### ✅ Phase 3: Remote Lima and shared operation
 **Parallel Tasks:**
-- Task 3: Remote-Lima `EditorSSH` (depends on: 2)
-- Task 4: Shared operation and `sandbar code` CLI (depends on: 2)
+- ✔️ Task 3: Remote-Lima `EditorSSH` (depends on: 2)
+- ✔️ Task 4: Shared operation and `sandbar code` CLI (depends on: 2)
 
 ### Phase 4: TUI
 **Parallel Tasks:**

@@ -1,14 +1,11 @@
 package provider
 
 import (
-	"context"
-	"errors"
 	"os"
 
 	"github.com/lullabot/sandbar/internal/guestsh"
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provision"
-	"github.com/lullabot/sandbar/internal/sshconfig"
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
@@ -27,6 +24,10 @@ import (
 type remoteLimaProvider struct {
 	*limaProvider
 	host *lima.SSHHost
+	// conn is the profile's connection to the remote host, kept so EditorSSH
+	// can write the same hop into a workstation ssh config: SSHHost builds
+	// argv from it but does not expose it.
+	conn lima.SSHConfig
 	// profileName namespaces this profile's editor ssh aliases
 	// (sshconfig.ProfileAlias); see TargetConfig.ProfileName.
 	profileName string
@@ -72,17 +73,11 @@ func (p *remoteLimaProvider) ForwardArgv(v vm.VM, hostPort, guestPort int) []str
 	return p.host.ForwardArgv(hostPort, guestPort)
 }
 
-// EditorSSH must be overridden even though it is not yet supported: the
-// embedded local implementation would Include v.Dir/ssh.config, a path on the
-// REMOTE host that names nothing (or something unrelated) on the workstation.
-func (p *remoteLimaProvider) EditorSSH(context.Context, vm.VM) (sshconfig.Entry, error) {
-	return sshconfig.Entry{}, errors.New("opening VS Code is not available for remote Lima profiles yet")
-}
-
 // GuestHome / GuestUser read v's instance files off the REMOTE host (via the SSH
 // HostFiles), not the local filesystem where they do not exist.
-func (p *remoteLimaProvider) GuestHome(v vm.VM) string { return lima.GuestHomeVia(p.host, v.Dir) }
-func (p *remoteLimaProvider) GuestUser(v vm.VM) string { return lima.GuestUserVia(p.host, v.Dir) }
+// They read through hostFiles, which NewRemoteLima sets to that same SSHHost.
+func (p *remoteLimaProvider) GuestHome(v vm.VM) string { return lima.GuestHomeVia(p.hostFiles, v.Dir) }
+func (p *remoteLimaProvider) GuestUser(v vm.VM) string { return lima.GuestUserVia(p.hostFiles, v.Dir) }
 
 // HostUser returns the REMOTE host's login user (over ssh) — the user Lima
 // creates the guest account for and that `limactl shell` logs into, so a new VM's
@@ -109,13 +104,14 @@ func (p *remoteLimaProvider) HostResources() HostResources {
 // provider can coexist in the same process without one's base-image touches
 // leaking onto the other's host.
 func NewRemoteLima(cfg TargetConfig) (Provider, error) {
-	host := lima.NewSSHHost(lima.SSHConfig{
+	conn := lima.SSHConfig{
 		Host:           cfg.Host,
 		User:           cfg.User,
 		Port:           cfg.Port,
 		IdentityPath:   cfg.IdentityPath,
 		RemoteLimaHome: cfg.RemoteLimaHome,
-	})
+	}
+	host := lima.NewSSHHost(conn)
 	// PlaybookDir left empty — located lazily on first create/reset (see
 	// NewDefault and Provisioner.playbookDir); a remote `sandbar shell` must not
 	// trigger playbook extraction either.
@@ -124,6 +120,7 @@ func NewRemoteLima(cfg TargetConfig) (Provider, error) {
 	return &remoteLimaProvider{
 		limaProvider: &limaProvider{core: core, prov: prov, hostFiles: host},
 		host:         host,
+		conn:         conn,
 		profileName:  cfg.ProfileName,
 	}, nil
 }

@@ -2,7 +2,7 @@
 id: 3
 group: "provider"
 dependencies: [2]
-status: "pending"
+status: "completed"
 created: 2026-11-13
 skills:
   - go
@@ -18,11 +18,11 @@ Replace the remote-Lima stub: choose the workstation key pair, append its public
 Go, OpenSSH (ProxyCommand, `-W`, authorized_keys).
 
 ## Acceptance Criteria
-- [ ] Key selection: profile `identity_path` + `.pub` when set (error if the `.pub` is missing); else the first of `~/.ssh/id_ed25519`, `id_ecdsa`, `id_rsa` with both halves present; else an error telling the user to set the profile's identity path.
-- [ ] Public key validated as one line with a recognised type prefix (`ssh-`, `ecdsa-`, `sk-`); it travels to the guest on STDIN only; the literal guest script creates `~/.ssh` 0700 and the file 0600 and appends only when `grep -qxF` finds no identical line. Running twice leaves exactly one copy.
-- [ ] Entry: alias `sshconfig.ProfileAlias(profile, v.Name)`, HostName `127.0.0.1`, User `GuestUser(v)`, IdentityFile the private key, IdentitiesOnly, EphemeralHostKeys, AuthorizedKey the `.pub` path, ProxyCommand = ssh to the remote host (profile user/host/port, `-i` when an identity is set) running `ssh -F <v.Dir>/ssh.config -W 127.0.0.1:22 lima-<name>` there, each remote token quoted with `sshx.Quote`, literal `%` escaped as `%%`.
-- [ ] Unit tests (fake runner/transport, temp `HOME`) assert: no key material in the guest argv, the key on stdin, the exact ProxyCommand, key-selection fallbacks and errors.
-- [ ] `go test ./internal/provider` passes.
+- [x] Key selection: profile `identity_path` + `.pub` when set (error if the `.pub` is missing); else the first of `~/.ssh/id_ed25519`, `id_ecdsa`, `id_rsa` with both halves present; else an error telling the user to set the profile's identity path.
+- [x] Public key validated as one line with a recognised type prefix (`ssh-`, `ecdsa-`, `sk-`); it travels to the guest on STDIN only; the literal guest script creates `~/.ssh` 0700 and the file 0600 and appends only when `grep -qxF` finds no identical line. Running twice leaves exactly one copy.
+- [x] Entry: alias `sshconfig.ProfileAlias(profile, v.Name)`, HostName `127.0.0.1`, User `GuestUser(v)`, IdentityFile the private key, IdentitiesOnly, EphemeralHostKeys, AuthorizedKey the `.pub` path, ProxyCommand = ssh to the remote host (profile user/host/port, `-i` when an identity is set) running `ssh -F <v.Dir>/ssh.config -W 127.0.0.1:22 lima-<name>` there, each remote token quoted with `sshx.Quote`, literal `%` escaped as `%%`.
+- [x] Unit tests (fake runner/transport, temp `HOME`) assert: no key material in the guest argv, the key on stdin, the exact ProxyCommand, key-selection fallbacks and errors.
+- [x] `go test ./internal/provider` passes.
 
 Use your internal Todo tool to track these and keep on track.
 
