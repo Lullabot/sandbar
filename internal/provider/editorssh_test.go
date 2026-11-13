@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -62,11 +63,17 @@ func TestLocalProviderEditorSSHMissingConfig(t *testing.T) {
 func TestProxmoxEditorSSHEntry(t *testing.T) {
 	m := newPVEMock(t)
 	m.data("/cluster/resources", clusterResources)
+	m.data("/nodes/pve1/qemu/100/status/current", `{"vmid":100,"name":"web","status":"running"}`)
+	m.data("/nodes/pve1/qemu/100/config", fmt.Sprintf(`{"net0":"virtio=%s,bridge=vmbr0"}`, testMAC))
+	m.data("/nodes/pve1/qemu/100/agent/network-get-interfaces", agentInterfaces)
 	p := newProxmoxForTest(t, m, func(c *TargetConfig) { c.ProfileName = "Home PVE" })
 	if _, err := p.List(); err != nil {
 		t.Fatalf("List: %v", err)
 	}
-	p.setGuestIP("web", "192.168.1.50")
+	// A stale cached address, as left by a restart made outside sandbar: the
+	// entry outlives this process, so it must carry what the guest agent
+	// reports now (192.168.1.50), not what was cached.
+	p.setGuestIP("web", "192.168.1.99")
 
 	got, err := p.EditorSSH(context.Background(), vm.VM{Name: "web"})
 	if err != nil {

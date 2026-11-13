@@ -1580,6 +1580,12 @@ func (p *proxmoxProvider) EditorSSH(ctx context.Context, v vm.VM) (sshconfig.Ent
 	ctx, cancel := context.WithTimeout(ctx, attachResolveTimeout)
 	defer cancel()
 
+	// Unlike an attach, this address is written to a file that outlives the
+	// process, and the cache is only cleared by power transitions sandbar
+	// itself made. A restart from the Proxmox UI can move the lease without
+	// sandbar knowing, so ask the guest agent again rather than persist a
+	// stale address.
+	p.invalidateGuest(v.Name)
 	ip, err := p.guestIP(ctx, v.Name)
 	if err != nil {
 		return sshconfig.Entry{}, fmt.Errorf("proxmox: cannot resolve %q's address: %w", v.Name, err)
