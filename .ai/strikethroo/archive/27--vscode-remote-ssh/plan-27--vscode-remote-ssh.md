@@ -221,3 +221,32 @@ graph TD
 ### Execution Summary
 - Total Phases: 5
 - Total Tasks: 6
+
+## Execution Summary
+
+**Status**: ✅ Completed Successfully
+**Completed Date**: 2026-11-13
+
+### Results
+- `internal/sshconfig`: a sandbar-managed ssh config (`${XDG_CONFIG_HOME:-~/.config}/sandbar/ssh_config`) with one delimited, `Match all`-scoped block per VM, locked writes, value validation, and consent-gated prepending of the `Include` line to `~/.ssh/config` (never for a symlinked or unwritable file).
+- `Provider.EditorSSH` on every backend: local Lima includes Lima's per-instance `ssh.config` (`lima-<name>`); Proxmox writes a fresh guest-agent address with the profile key and throwaway host-key posture; remote Lima authorizes the workstation public key (stdin only, idempotent) and tunnels through the remote host with `ssh -F <instance>/ssh.config -W 127.0.0.1:22`.
+- `internal/vscode` shared operation and messages; `sandbar code NAME [--profile NAME]`; board verb `c code` with a y/n consent overlay; board delete removes the VM's entry.
+- Docs: new "Opening in VS Code" page, CLI/TUI/files reference updates, AGENTS.md seams.
+- Gates: `gofmt`, `go vet ./...`, `go test ./... -race` all green; CI-equivalent coverage 90.3% ≥ floor 90.2%; `mkdocs build --strict` exit 0.
+- Self validation on a real Lima 2.2.0 VM: `sandbar code` wrote the entry, `ssh lima-<name>` connected; after a restart moved the ssh port (38567 → 41209) the unchanged entry still connected, and an existing `Host` block in the user config still resolved.
+
+### Noteworthy Events
+- Code review gate: the `st-code-review` skill is not installed in this repository, so no review result was produced (recorded as Failed below).
+- Real-VM validation exposed a pre-existing bug: `isTerminal` (shared with `land`/`publish`) treated a `/dev/null` stdin as a terminal, so an unattended run printed an unanswerable prompt. Fixed with an identity check and a test.
+- Documentation review exposed that Proxmox's guest-address cache is cleared only by sandbar's own power actions, so a restart from the Proxmox UI could have persisted a stale address into the entry. `EditorSSH` now drops the cached address first; the test seeds a stale address to prove it.
+- Duplicate user-facing wording between the CLI and TUI was consolidated into `internal/vscode`.
+- A sub-agent's concern that profile renames would not reach the provider was checked and did not hold: non-Local renames now rebuild the binding.
+
+### Necessary follow-ups
+- Renaming a remote-ssh/Proxmox profile leaves that profile's old alias blocks in the managed file until removed by hand.
+- VMs deleted outside the board (`limactl delete`, the Proxmox UI) keep their block; harmless for local Lima (missing Include is ignored), stale for Proxmox.
+- The remote-Lima ProxyCommand's outer hop carries no keepalive options; consider adding them if idle VS Code sessions drop behind NAT.
+- Not tested against real remote-Lima or Proxmox hosts, nor with VS Code itself installed; those paths are covered by unit tests and `ssh -G`/fake-ssh checks only.
+
+### Code Review
+Failed: the st-code-review skill is not installed in this repository, so the review gate produced no result.
