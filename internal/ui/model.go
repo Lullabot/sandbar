@@ -31,6 +31,7 @@ import (
 	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/releasecheck"
 	"github.com/lullabot/sandbar/internal/secrets"
+	"github.com/lullabot/sandbar/internal/sshconfig"
 	"github.com/lullabot/sandbar/internal/vm"
 
 	"charm.land/bubbles/v2/help"
@@ -99,6 +100,17 @@ type confirmState struct {
 	// Landing panes use.
 	scope  registry.Scope
 	vmName string
+
+	// choices replaces the "[y] yes   [n] cancel" key hint, for the one
+	// confirmation whose answers are not yes/cancel: the `c` verb's consent to
+	// edit ~/.ssh/config, where `n` still opens VS Code, just without the edit.
+	// "" keeps the default hint.
+	choices string
+	// cancelRun, when set, is dispatched (via beginAction, like run) on `n`/esc
+	// instead of simply closing the overlay. It exists for the same
+	// confirmation: declining the edit is a decision about ~/.ssh/config, not
+	// about opening the editor, so the operation still proceeds.
+	cancelRun tea.Cmd
 }
 
 // view is the active screen the model renders and routes keys to. viewBoard is
@@ -1515,6 +1527,14 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Scoped to the deleted VM's own member: never a bare name that could
 			// match a same-named VM under a different profile.
 			secErr := m.sec.Remove(msg.name, sc)
+			// The VM's VS Code host entry goes too — best effort, a warning at
+			// most. It matters most for Proxmox, whose entry names a DHCP address
+			// that may later belong to an unrelated machine.
+			if alias, ok := m.editorAlias(sc, msg.name); ok {
+				if err := sshconfig.Remove(alias); err != nil {
+					m.logWarn("delete " + msg.name + ": ssh host entry " + alias + " not removed: " + err.Error())
+				}
+			}
 			switch {
 			case regErr != nil && secErr != nil:
 				text = label + " ok (warning: managed index not updated: " + regErr.Error() + "; secrets not pruned: " + secErr.Error() + ")"
@@ -1554,6 +1574,9 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.logMsg(text)
 		return m, m.refreshMemberCmd(sc) // refresh the acted member after every action
+
+	case codeResultMsg:
+		return m.handleCodeResult(msg)
 
 	case pasteResultMsg:
 		// A plain status-line result: no spinner to clear (pasteCmd never
@@ -1990,8 +2013,16 @@ func (m model) updateConfirm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.confirm = nil
 		return m, m.beginAction(run)
 	case key.Matches(msg, m.keys.Cancel): // n / esc
+		run := m.confirm.cancelRun
+		working := m.confirm.working
 		m.confirm = nil
-		return m, nil
+		if run == nil {
+			return m, nil
+		}
+		if working != "" {
+			m.logMsg(working)
+		}
+		return m, m.beginAction(run)
 	}
 	return m, nil
 }
@@ -2006,7 +2037,20 @@ func (m model) confirmView() string {
 		// say why rather than looking like a dead key. Cancel still works.
 		return m.clipLine(errStyle.Render(m.confirm.prompt + "  checking for recent changes…   [n] cancel"))
 	}
-	return m.clipLine(errStyle.Render(m.confirm.prompt + "  [y] yes   [n] cancel"))
+	choices := m.confirm.choices
+	if choices == "" {
+		choices = "[y] yes   [n] cancel"
+	}
+	// The prompt gives way, not the key hint: a prompt that names a path can
+	// outrun a narrow terminal, and a confirmation whose keys were clipped off
+	// is a question the user cannot see how to answer. A prompt that fits is
+	// rendered exactly as before.
+	hint := "  " + choices
+	prompt := m.confirm.prompt
+	if room := m.layout.ContentWidth - ansi.StringWidth(hint); room > 0 {
+		prompt = ansi.Truncate(prompt, room, "…")
+	}
+	return m.clipLine(errStyle.Render(prompt + hint))
 }
 
 // View renders the active screen. v2 moved the alt-screen toggle from a

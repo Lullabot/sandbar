@@ -49,6 +49,39 @@ type Result struct {
 	AuthorizedKey string
 }
 
+// The messages below are shared by the board and `sandbar code` so the two
+// front ends tell the user the same thing; each caller only decides how to
+// lay them out (a log line or a terminal line).
+
+// AuthorizedMessage names the workstation key that now opens the guest, or ""
+// when the provider authorized none.
+func (r Result) AuthorizedMessage() string {
+	if r.AuthorizedKey == "" {
+		return ""
+	}
+	return fmt.Sprintf("Authorized %s in the guest.", r.AuthorizedKey)
+}
+
+// NotFoundMessage is what to do when no `code` command was found: the entry
+// is written, so VS Code's own host picker can open it.
+func (r Result) NotFoundMessage() string {
+	return fmt.Sprintf("VS Code's \"code\" command was not found. In VS Code, run \"Remote-SSH: Connect to Host…\" and choose %s.", r.Alias)
+}
+
+// OpeningMessage reports a successful launch.
+func (r Result) OpeningMessage() string {
+	return fmt.Sprintf("Opening VS Code on %s (%s)", r.Alias, r.Folder)
+}
+
+// ManualIncludeMessage explains, after why, that the user must add the
+// Include line to ~/.ssh/config themselves. sep separates the explanation
+// from the line, so the CLI can put the line on its own row and the board's
+// one-line log can keep it inline.
+func ManualIncludeMessage(why, sep string) string {
+	return fmt.Sprintf("%s; ssh will not find the VM's host alias until you add this line at the top of %s:%s%s",
+		why, sshconfig.UserConfigPath(), sep, sshconfig.IncludeLine())
+}
+
 // IncludeAction is what a front end should do about the Include line in
 // ~/.ssh/config before calling Prepare.
 type IncludeAction int

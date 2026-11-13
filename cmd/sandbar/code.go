@@ -120,17 +120,17 @@ func doCode(ctx context.Context, p provider.Provider, reg configLookup, scope re
 	if err != nil {
 		return fmt.Errorf("sandbar code: %w", err)
 	}
-	if res.AuthorizedKey != "" {
-		fmt.Fprintf(out, "Authorized %s in the guest.\n", res.AuthorizedKey)
+	if msg := res.AuthorizedMessage(); msg != "" {
+		fmt.Fprintln(out, msg)
 	}
 	if res.LaunchArgv == nil {
-		fmt.Fprintf(out, "VS Code's \"code\" command was not found. In VS Code, run \"Remote-SSH: Connect to Host…\" and choose %s.\n", res.Alias)
+		fmt.Fprintln(out, res.NotFoundMessage())
 		return nil
 	}
 	if err := vscode.Launch(res.LaunchArgv); err != nil {
 		return fmt.Errorf("sandbar code: start %s: %w", res.CodePath, err)
 	}
-	fmt.Fprintf(out, "Opening VS Code on %s (%s)\n", res.Alias, res.Folder)
+	fmt.Fprintln(out, res.OpeningMessage())
 	return nil
 }
 
@@ -142,7 +142,7 @@ func ensureInclude(in io.Reader, interactive bool, out io.Writer) {
 	path := sshconfig.UserConfigPath()
 	line := sshconfig.IncludeLine()
 	manual := func(why string) {
-		fmt.Fprintf(out, "%s; ssh will not find the VM's host alias until you add this line at the top of %s:\n  %s\n", why, path, line)
+		fmt.Fprintln(out, vscode.ManualIncludeMessage(why, "\n  "))
 	}
 
 	st, err := sshconfig.IncludeStatus()

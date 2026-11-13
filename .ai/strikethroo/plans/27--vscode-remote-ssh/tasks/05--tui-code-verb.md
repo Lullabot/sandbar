@@ -2,7 +2,7 @@
 id: 5
 group: "tui"
 dependencies: [4]
-status: "pending"
+status: "completed"
 created: 2026-11-13
 skills:
   - go
@@ -19,12 +19,12 @@ Expose the shared operation on the board as `c code`, with a y/n consent overlay
 Go, Bubble Tea v2 (`charm.land/...`).
 
 ## Acceptance Criteria
-- [ ] `vmCommands` gains `c` / "code" with an `about` sentence; enabled only for a running, non-building VM.
-- [ ] Missing + writable Include → overlay naming the file and exact line; `y` adds it then proceeds; `n`/`esc` proceeds without it and the result notes the alias will not resolve until the line is added. Symlink/unwritable → no overlay; the result includes the line to add.
-- [ ] The operation runs as an async `tea.Cmd`; the result message shows "Opening VS Code on <alias>…" or the Remote-SSH fallback; errors appear in the message log.
-- [ ] Successful board delete calls `sshconfig.Remove` for that VM's alias (best effort; error logged, not fatal), using the same alias helpers as the providers.
-- [ ] Tests isolate host state (`isolateHostState(t)` plus `HOME`/`XDG_CONFIG_HOME`), fake the launcher, and assert the far side: the managed file contains the entry, the user config gained the Include after `y`, the launcher received the expected argv. Goldens regenerated with `go test ./internal/ui -run TestTUI -update` and the diff limited to the new help/footer text.
-- [ ] `go test ./internal/ui` passes.
+- [x] `vmCommands` gains `c` / "code" with an `about` sentence; enabled only for a running, non-building VM.
+- [x] Missing + writable Include → overlay naming the file and exact line; `y` adds it then proceeds; `n`/`esc` proceeds without it and the result notes the alias will not resolve until the line is added. Symlink/unwritable → no overlay; the result includes the line to add.
+- [x] The operation runs as an async `tea.Cmd`; the result message shows "Opening VS Code on <alias>…" or the Remote-SSH fallback; errors appear in the message log.
+- [x] Successful board delete calls `sshconfig.Remove` for that VM's alias (best effort; error logged, not fatal), using the same alias helpers as the providers.
+- [x] Tests isolate host state (`isolateHostState(t)` plus `HOME`/`XDG_CONFIG_HOME`), fake the launcher, and assert the far side: the managed file contains the entry, the user config gained the Include after `y`, the launcher received the expected argv. Goldens regenerated with `go test ./internal/ui -run TestTUI -update` and the diff limited to the new help/footer text.
+- [x] `go test ./internal/ui` passes.
 
 Use your internal Todo tool to track these and keep on track.
 

@@ -208,9 +208,9 @@ graph TD
 - ✔️ Task 3: Remote-Lima `EditorSSH` (depends on: 2)
 - ✔️ Task 4: Shared operation and `sandbar code` CLI (depends on: 2)
 
-### Phase 4: TUI
+### ✅ Phase 4: TUI
 **Parallel Tasks:**
-- Task 5: TUI `c code` verb (depends on: 4)
+- ✔️ Task 5: TUI `c code` verb (depends on: 4)
 
 ### Phase 5: Documentation
 **Parallel Tasks:**
