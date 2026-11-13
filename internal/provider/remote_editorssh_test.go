@@ -356,6 +356,52 @@ func TestRemoteLimaEditorSSHGuestFailure(t *testing.T) {
 	}
 }
 
+// TestRemoteLimaEditorSSHExpandsTildeIdentity proves a profile identity saved
+// as "~/…" works: sandbar's other remote connections pass it to `ssh -i`,
+// which expands the tilde itself, but the public half is read directly here.
+func TestRemoteLimaEditorSSHExpandsTildeIdentity(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	key := filepath.Join(home, "keys", "mini")
+	writeKeyPair(t, key, testPubKey)
+	p, _, v := newRemoteForEditorTest(t, lima.SSHConfig{Host: "mini.local", IdentityPath: "~/keys/mini"})
+	got, err := p.EditorSSH(context.Background(), v)
+	if err != nil {
+		t.Fatalf("EditorSSH: %v", err)
+	}
+	if got.IdentityFile != key || got.AuthorizedKey != key+".pub" {
+		t.Fatalf("key = %q / %q, want %q", got.IdentityFile, got.AuthorizedKey, key)
+	}
+}
+
+// TestRemoteLimaEditorSSHAppendsAfterUnterminatedLine proves the guest script
+// does not fuse the new key onto an authorized_keys whose last line lacks a
+// newline, which would break that existing key as well as the new one.
+func TestRemoteLimaEditorSSHAppendsAfterUnterminatedLine(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeKeyPair(t, filepath.Join(home, ".ssh", "id_ed25519"), testPubKey)
+	p, r, v := newRemoteForEditorTest(t, lima.SSHConfig{Host: "mini.local"})
+	const existing = "ssh-ed25519 AAAAexisting lima"
+	ak := filepath.Join(r.guestHome, ".ssh", "authorized_keys")
+	if err := os.MkdirAll(filepath.Dir(ak), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ak, []byte(existing), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.EditorSSH(context.Background(), v); err != nil {
+		t.Fatalf("EditorSSH: %v", err)
+	}
+	data, err := os.ReadFile(ak)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := existing + "\n" + testPubKey + "\n"; string(data) != want {
+		t.Fatalf("authorized_keys = %q, want %q", data, want)
+	}
+}
+
 // TestRemoteLimaEditorSSHUnknownGuestUser proves an unreadable guest user is
 // an error: an entry with no User would log in as the workstation's user,
 // which the guest does not have.

@@ -106,10 +106,12 @@ type confirmState struct {
 	// edit ~/.ssh/config, where `n` still opens VS Code, just without the edit.
 	// "" keeps the default hint.
 	choices string
-	// cancelRun, when set, is dispatched (via beginAction, like run) on `n`/esc
+	// cancelRun, when set, is dispatched (via beginAction, like run) on `n`
 	// instead of simply closing the overlay. It exists for the same
 	// confirmation: declining the edit is a decision about ~/.ssh/config, not
-	// about opening the editor, so the operation still proceeds.
+	// about opening the editor, so the operation still proceeds. `esc` still
+	// only closes the overlay: it is the key that means "back out", and
+	// without it there would be no way to abandon the verb once asked.
 	cancelRun tea.Cmd
 }
 
@@ -2016,7 +2018,7 @@ func (m model) updateConfirm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		run := m.confirm.cancelRun
 		working := m.confirm.working
 		m.confirm = nil
-		if run == nil {
+		if run == nil || msg.Code == tea.KeyEsc {
 			return m, nil
 		}
 		if working != "" {

@@ -82,6 +82,33 @@ func ManualIncludeMessage(why, sep string) string {
 		why, sshconfig.UserConfigPath(), sep, sshconfig.IncludeLine())
 }
 
+// The three reasons below are the `why` each front end hands
+// ManualIncludeMessage, kept here for the same reason as the messages above.
+
+// UnreadableReason explains an sshconfig.IncludeStatus error.
+func UnreadableReason(err error) string {
+	return fmt.Sprintf("Could not read %s (%v)", sshconfig.UserConfigPath(), err)
+}
+
+// ManualReason explains why ClassifyInclude returned IncludeManual for st.
+func ManualReason(st sshconfig.IncludeState) string {
+	path := sshconfig.UserConfigPath()
+	if st.Symlink {
+		return fmt.Sprintf("Not editing %s because it is a symlink", path)
+	}
+	return fmt.Sprintf("Not editing %s because it is not writable", path)
+}
+
+// AddIncludeFailure explains an sshconfig.AddInclude error, using the
+// ManualIncludeError's own path and reason when it is one.
+func AddIncludeFailure(err error) string {
+	var me *sshconfig.ManualIncludeError
+	if errors.As(err, &me) {
+		return fmt.Sprintf("Could not edit %s (%s)", me.Path, me.Reason)
+	}
+	return fmt.Sprintf("Could not edit %s (%v)", sshconfig.UserConfigPath(), err)
+}
+
 // IncludeAction is what a front end should do about the Include line in
 // ~/.ssh/config before calling Prepare.
 type IncludeAction int

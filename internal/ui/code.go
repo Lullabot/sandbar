@@ -9,7 +9,6 @@ package ui
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -78,13 +77,9 @@ func (m *model) openInCode(v boardVM) tea.Cmd {
 	st, err := sshconfig.IncludeStatus()
 	switch {
 	case err != nil:
-		notes = append(notes, manualIncludeNote(fmt.Sprintf("Could not read %s (%v)", path, err)))
+		notes = append(notes, manualIncludeNote(vscode.UnreadableReason(err)))
 	case vscode.ClassifyInclude(st) == vscode.IncludeManual:
-		if st.Symlink {
-			notes = append(notes, manualIncludeNote(fmt.Sprintf("Not editing %s because it is a symlink", path)))
-		} else {
-			notes = append(notes, manualIncludeNote(fmt.Sprintf("Not editing %s because it is not writable", path)))
-		}
+		notes = append(notes, manualIncludeNote(vscode.ManualReason(st)))
 	case vscode.ClassifyInclude(st) == vscode.IncludeAsk:
 		// The full line goes into the log as well as the prompt: the prompt is
 		// one row and may be clipped on a narrow terminal, and the user is being
@@ -92,7 +87,7 @@ func (m *model) openInCode(v boardVM) tea.Cmd {
 		m.logMsg(fmt.Sprintf("ssh reads sandbar's VM host entries only once %s includes them, with this line at the top: %s", path, sshconfig.IncludeLine()))
 		m.confirm = &confirmState{
 			prompt:    fmt.Sprintf("Add %q to %s?", sshconfig.IncludeLine(), tildePath(path)),
-			choices:   "[y] add   [n] skip",
+			choices:   "[y] add   [n] skip   [esc] cancel",
 			run:       codeCmd(p, v.VM, cloneURL, true, nil),
 			cancelRun: codeCmd(p, v.VM, cloneURL, false, []codeNote{manualIncludeNote("Left ~/.ssh/config unchanged")}),
 			working:   working,
@@ -112,16 +107,10 @@ func codeCmd(p provider.Provider, v vm.VM, cloneURL string, addInclude bool, not
 	return func() tea.Msg {
 		out := codeResultMsg{name: v.Name, notes: append([]codeNote(nil), notes...)}
 		if addInclude {
-			path := sshconfig.UserConfigPath()
 			if err := sshconfig.AddInclude(); err != nil {
-				var me *sshconfig.ManualIncludeError
-				if errors.As(err, &me) {
-					out.notes = append(out.notes, manualIncludeNote(fmt.Sprintf("Could not edit %s (%s)", me.Path, me.Reason)))
-				} else {
-					out.notes = append(out.notes, manualIncludeNote(fmt.Sprintf("Could not edit %s (%v)", path, err)))
-				}
+				out.notes = append(out.notes, manualIncludeNote(vscode.AddIncludeFailure(err)))
 			} else {
-				out.notes = append(out.notes, codeNote{text: "Added the line to " + path + "."})
+				out.notes = append(out.notes, codeNote{text: "Added the line to " + sshconfig.UserConfigPath() + "."})
 			}
 		}
 

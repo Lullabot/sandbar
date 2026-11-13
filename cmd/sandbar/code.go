@@ -147,18 +147,14 @@ func ensureInclude(in io.Reader, interactive bool, out io.Writer) {
 
 	st, err := sshconfig.IncludeStatus()
 	if err != nil {
-		manual(fmt.Sprintf("Could not read %s (%v)", path, err))
+		manual(vscode.UnreadableReason(err))
 		return
 	}
 	switch vscode.ClassifyInclude(st) {
 	case vscode.IncludePresent:
 		return
 	case vscode.IncludeManual:
-		if st.Symlink {
-			manual(fmt.Sprintf("Not editing %s because it is a symlink", path))
-		} else {
-			manual(fmt.Sprintf("Not editing %s because it is not writable", path))
-		}
+		manual(vscode.ManualReason(st))
 		return
 	}
 
@@ -174,12 +170,7 @@ func ensureInclude(in io.Reader, interactive bool, out io.Writer) {
 		return
 	}
 	if err := sshconfig.AddInclude(); err != nil {
-		var me *sshconfig.ManualIncludeError
-		if errors.As(err, &me) {
-			manual(fmt.Sprintf("Could not edit %s (%s)", me.Path, me.Reason))
-			return
-		}
-		manual(fmt.Sprintf("Could not edit %s (%v)", path, err))
+		manual(vscode.AddIncludeFailure(err))
 		return
 	}
 	fmt.Fprintf(out, "Added the line to %s.\n", path)

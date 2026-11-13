@@ -49,7 +49,8 @@ Include "/home/you/.config/sandbar/ssh_config"
 It has to go at the top: an `Include` placed after a `Host` block applies
 only inside that block. If you decline, sandbar still writes the entry and
 opens VS Code, but the alias will not resolve until you add the line
-yourself. sandbar does not offer to edit `~/.ssh/config` when it is a
+yourself. On the board, `esc` instead backs out without writing anything or
+opening VS Code. sandbar does not offer to edit `~/.ssh/config` when it is a
 symlink (often into a dotfiles repository) or is not writable, or when
 `sandbar code` is not run from a terminal. In those cases it prints the line
 for you to add by hand.

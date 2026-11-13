@@ -199,6 +199,38 @@ func TestCodeVerbDeclineLeavesConfigAndStillLaunches(t *testing.T) {
 	}
 }
 
+// esc backs out of the verb entirely: unlike `n`, which only declines the
+// edit, it writes nothing and opens nothing — otherwise a user who pressed
+// `c` by mistake would have no key that stops VS Code from opening.
+func TestCodeVerbEscAbandonsTheVerb(t *testing.T) {
+	home, launched := codeEnv(t, "/fake/bin/code")
+	m := codeModel(t)
+
+	m, _ = pressDispatch(t, m, runeKey('c'))
+	if m.confirm == nil {
+		t.Fatal("a missing ~/.ssh/config that can be created should raise the overlay")
+	}
+	m, cmd := pressDispatch(t, m, tea.KeyPressMsg{Code: tea.KeyEsc})
+	if m.confirm != nil {
+		t.Fatal("esc should close the overlay")
+	}
+	if cmd != nil {
+		t.Fatal("esc must not dispatch the operation")
+	}
+	if m.acting {
+		t.Fatal("esc must not start the spinner")
+	}
+	if len(*launched) != 0 {
+		t.Fatalf("VS Code must not be launched, got %v", *launched)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".ssh", "config")); !os.IsNotExist(err) {
+		t.Fatalf("esc must not create ~/.ssh/config (stat err %v)", err)
+	}
+	if _, err := os.Stat(sshconfig.ManagedPath()); !os.IsNotExist(err) {
+		t.Fatalf("esc must not write the managed file (stat err %v)", err)
+	}
+}
+
 // A symlinked ~/.ssh/config (a dotfiles checkout) is never offered for
 // editing: no overlay, the target is untouched, and the result carries the
 // line to add by hand.

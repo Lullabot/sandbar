@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/lullabot/sandbar/internal/profiles"
 	"github.com/lullabot/sandbar/internal/sshconfig"
 	"github.com/lullabot/sandbar/internal/sshx"
 	"github.com/lullabot/sandbar/internal/vm"
@@ -24,7 +25,10 @@ import (
 // material stays out of process listings and ssh debug logs. umask 077 gives
 // a freshly created ~/.ssh 0700 and the file 0600; the chmod repairs a file
 // that existed with looser permissions, which sshd's StrictModes would refuse.
-const authorizeKeyScript = `set -e; umask 077; mkdir -p ~/.ssh; key=$(cat); touch ~/.ssh/authorized_keys; grep -qxF -- "$key" ~/.ssh/authorized_keys || printf '%s\n' "$key" >> ~/.ssh/authorized_keys; chmod 600 ~/.ssh/authorized_keys`
+// A file whose last line has no newline gets one first: appending straight
+// onto it would fuse that key and this one into a single line sshd rejects,
+// revoking the existing key as well as failing to add the new one.
+const authorizeKeyScript = `set -e; umask 077; mkdir -p ~/.ssh; key=$(cat); f=~/.ssh/authorized_keys; touch "$f"; grep -qxF -- "$key" "$f" || { [ ! -s "$f" ] || [ -z "$(tail -c1 "$f")" ] || echo >> "$f"; printf '%s\n' "$key" >> "$f"; }; chmod 600 "$f"`
 
 // defaultWorkstationKeys are tried, in order, when the profile names no
 // identity: OpenSSH's own default key names, newest algorithm first.
@@ -133,6 +137,13 @@ func (p *remoteLimaProvider) proxyCommand(v vm.VM) string {
 // public half is what gets authorized and the private half what logs in.
 func (p *remoteLimaProvider) workstationKey() (priv, pub string, err error) {
 	if id := p.conn.IdentityPath; id != "" {
+		// sandbar's own connections hand this path to `ssh -i`, which expands a
+		// leading ~ itself, so a profile saved as "~/.ssh/key" works everywhere
+		// else. Here the .pub is read directly, with no ssh in between.
+		id, err := profiles.ExpandHome(id)
+		if err != nil {
+			return "", "", fmt.Errorf("remote lima: identity path: %w", err)
+		}
 		if _, err := os.Stat(id + ".pub"); err != nil {
 			return "", "", fmt.Errorf("remote lima: the profile's identity has no public key at %s: %w", id+".pub", err)
 		}
