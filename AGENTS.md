@@ -1350,8 +1350,22 @@ shared rules.
   confirm the text diff is the change you intended.
 
 Dashboard monitoring retains its authenticated SSH streams after five minutes
-of inactivity and requests guest metrics and checkout scans once per minute.
-Focus or keyboard input wakes the existing streams. Host-driven Bash loops
-read requests from SSH stdin and exit on EOF or 120 seconds without a request;
-they do not rotate healthy connections on a fixed TTL. The legacy autonomous
-loop wrapper remains bounded for callers without host-driven pacing.
+of inactivity, then requests guest metrics once per minute and checkout scans
+once every ten minutes. Focus or keyboard input wakes the existing streams.
+Host-driven Bash loops read requests from SSH stdin and exit on EOF or a
+request gap longer than the host's idle interval (`guestLoop.reapAfter`); each
+registry's `start` passes one idle value to both the pacing and the script, so
+the two cannot drift. They do not rotate healthy connections on a fixed TTL.
+The legacy autonomous loop wrapper remains bounded for callers without
+host-driven pacing.
+
+Three independent bounds keep a probe stream from flooding a guest; keep all
+three. The rationale is in `probeRequests`' doc comment
+(`internal/ui/guestloop.go`), and `probepacing_test.go` pins each one:
+
+- **One clock for idleness.** Judge `lastInput`'s age only with `idleAt`
+  (wall clock), never `time.Since`, and wake only on a changed input time.
+- **One request in flight.** `probeRequests.Read` waits for the writer's
+  `passDone`, counted per delimiter, not per sample.
+- **Guest-side coalescing and floor.** The driven loop drains queued
+  requests with `read -t 0` and sleeps a floor when more are waiting.

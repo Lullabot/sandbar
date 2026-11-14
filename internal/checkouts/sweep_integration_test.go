@@ -577,3 +577,51 @@ func TestSweepAgainstRealGitLocalOnlyIsZeroWithoutRemotes(t *testing.T) {
 		t.Errorf("LocalOnly = %d, want 0 — with no remotes there is no honest count, only the whole history", got.LocalOnly)
 	}
 }
+
+// TestSweepAgainstRealGitBranchEdgeCases pins the two branch states the
+// sweep reads from `status --porcelain=v2 --branch`'s header rather than from
+// `symbolic-ref`: a detached HEAD has no branch (the header says
+// "(detached)", which must not leak through as a branch name), and a branch
+// with no commits yet still has its name. Dirty must be counted in both.
+func TestSweepAgainstRealGitBranchEdgeCases(t *testing.T) {
+	requireGitTools(t)
+
+	home := t.TempDir()
+	unborn := filepath.Join(home, "unborn")
+	detached := filepath.Join(home, "detached")
+
+	runGit(t, home, home, "init", "-q", "-b", "trunk", unborn)
+	if err := os.WriteFile(filepath.Join(unborn, "a.txt"), []byte("one\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, unborn, home, "add", "a.txt")
+
+	runGit(t, home, home, "init", "-q", "-b", "main", detached)
+	for _, body := range []string{"one\n", "two\n"} {
+		if err := os.WriteFile(filepath.Join(detached, "a.txt"), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, detached, home, "add", "a.txt")
+		runGit(t, detached, home, "commit", "-qm", strings.TrimSpace(body))
+	}
+	runGit(t, detached, home, "checkout", "-q", "--detach", "HEAD~1")
+	if err := os.WriteFile(filepath.Join(detached, "b.txt"), []byte("new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	vc := runSweep(t, home)
+	got := findCheckout(t, vc, unborn)
+	if got.Branch != "trunk" {
+		t.Errorf("unborn: Branch = %q, want %q", got.Branch, "trunk")
+	}
+	if got.Dirty != 1 {
+		t.Errorf("unborn: Dirty = %d, want 1 (one staged file)", got.Dirty)
+	}
+	got = findCheckout(t, vc, detached)
+	if got.Branch != "" {
+		t.Errorf("detached: Branch = %q, want none", got.Branch)
+	}
+	if got.Dirty != 1 {
+		t.Errorf("detached: Dirty = %d, want 1 (one untracked file)", got.Dirty)
+	}
+}

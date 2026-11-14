@@ -28,9 +28,11 @@ package ui
 //     loop kills the recorded one first — but only after confirming, through
 //     /proc/<pid>/cmdline, that the pid really is a sandbar probe of the same kind
 //     and not whatever unrelated process has since inherited that number.
-//  2. Host-driven loops exit on stdin EOF or 120 seconds without a request.
-//     Healthy streams stay authenticated indefinitely. Legacy autonomous loops
-//     instead count passes and exit after guestLoopTTL.
+//  2. Host-driven loops exit on stdin EOF or after a gap with no request
+//     (guestLoop.reapAfter: 120 seconds, or longer for a probe whose host
+//     idles longer than that). Healthy streams stay authenticated
+//     indefinitely. Legacy autonomous loops instead count passes and exit
+//     after guestLoopTTL.
 //
 // Two sandbar processes watching the SAME guest will take turns killing each
 // other's probe (each reconnect kills the incumbent), costing each side a
@@ -95,6 +97,35 @@ type guestLoop struct {
 
 	// driven waits for host requests instead of polling independently.
 	driven bool
+
+	// floor is the shortest gap the driven loop leaves between the end of one
+	// pass and the start of the next, whatever the host sends. The host already
+	// keeps at most one request in flight (probeRequests), so in normal running
+	// this never binds. It is the guest's own guarantee: a host bug that floods
+	// requests can cost this guest at most one pass per floor, never a pass per
+	// newline as fast as bash can loop. Whole seconds; zero disables it.
+	floor time.Duration
+
+	// requestGap is the longest the host may leave between two requests on a
+	// healthy stream: its idle interval (probeRequests.idle). The driven loop
+	// must wait longer than this for its next request before treating the
+	// stream as abandoned, or an idle host's healthy stream is reaped between
+	// requests and reconnected — a fresh ssh handshake and an unrequested full
+	// pass each time. See reapAfter.
+	requestGap time.Duration
+}
+
+// guestLoopReapAfter is how long a driven loop waits for a request before it
+// treats its stream as abandoned, when the host never idles longer than that.
+const guestLoopReapAfter = 120 * time.Second
+
+// reapAfter is the driven loop's `read -t` timeout: guestLoopReapAfter, or
+// requestGap plus a minute of slack when the host idles longer than that.
+func (l guestLoop) reapAfter() time.Duration {
+	if gap := l.requestGap + time.Minute; l.requestGap > 0 && gap > guestLoopReapAfter {
+		return gap
+	}
+	return guestLoopReapAfter
 }
 
 // script renders the loop as a POSIX sh program for `sh -c`.
@@ -131,8 +162,20 @@ func (l guestLoop) script() string {
 		b.WriteString("ionice -c3 -p $$ >/dev/null 2>&1\n")
 	}
 	if l.driven {
-		b.WriteString("while IFS= read -r -t 120 request; do\n")
+		b.WriteString("while IFS= read -r -t " + strconv.Itoa(int(l.reapAfter()/time.Second)) + " request; do\n")
+		// Coalesce: requests that queued while the previous pass ran (or while
+		// the floor slept) are answered by ONE pass, not one each. `read -t 0`
+		// consumes nothing; it only reports whether a line is waiting. Without
+		// this, a backlog of N newlines is N back-to-back passes — which is how
+		// a burst of host wakes once kept a guest busy for minutes after the
+		// burst itself had stopped.
+		b.WriteString("while read -r -t 0; do IFS= read -r request || break; done\n")
 		b.WriteString(l.body)
+		if secs := int(l.floor / time.Second); secs > 0 {
+			// Only when a request is already waiting: with one request in
+			// flight none is, so normal running pays no `sleep` process.
+			b.WriteString("read -r -t 0 && sleep " + strconv.Itoa(secs) + "\n")
+		}
 		b.WriteString("done")
 		return b.String()
 	}
@@ -160,28 +203,91 @@ func backoff(base time.Duration, n int, max time.Duration) time.Duration {
 	return retry.Doubling(base, n, max)
 }
 
-// probeRequests paces guest work over the existing SSH stdin. EOF or a two-minute
-// gap reaps an abandoned guest loop without rotating healthy SSH connections.
-// Read is called by the subprocess stdin copier; activity is updated by Update.
+// probeRequests paces guest work over the existing SSH stdin. EOF or a gap
+// longer than the host's idle interval (guestLoop.reapAfter) reaps an abandoned
+// guest loop without rotating healthy SSH connections.
+// Read is called by the subprocess stdin copier; activity is updated by Update;
+// passDone is called by the stream's writer when a pass's delimiter arrives.
+//
+// # At most one request in flight
+//
+// Each newline written here makes the guest run one full pass. Read therefore
+// does not write the next newline until the previous pass has been answered
+// (passDone), however much time has passed or however many wakes arrived. A
+// timer-driven writer that ignored answers would let requests pile up wherever
+// the reply path was slower than the request path — a stalled Update loop, a
+// sweep pass slower than its interval on a busy guest — and the guest would
+// later replay every one of them back to back.
+//
+// No timeout re-arms a request whose answer never comes. The guest loop reads
+// its next request with a `read -t` timeout (guestLoop.reapAfter), so a stream
+// left waiting here ends on its own that long after the last pass and is
+// reconnected through the registry's ordinary backoff — the right outcome for a
+// guest that stopped answering.
+//
+// # One clock
+//
+// lastInput is stored as wall-clock nanoseconds, and every idle judgement goes
+// through idleAt, which compares wall-clock nanoseconds only. Mixing in the
+// monotonic clock is not a harmless approximation: on macOS (and on Linux
+// across suspend) the monotonic clock stops while the machine sleeps and the
+// wall clock does not, so after a sleep one unchanged input time can be both
+// "over five minutes ago" and "under five minutes ago" at once. activity used to
+// compare one age on each clock, and from that state EVERY Update — which runs
+// activity for every stream — counted as the user returning from idle, woke
+// every stream, and each pass's answer produced another Update: a feedback loop
+// that drove a guest at well over a hundred passes a second.
 type probeRequests struct {
 	ctx       context.Context
 	lastInput atomic.Int64
 	wake      chan struct{}
+	answered  chan struct{}
 	every     time.Duration
-	first     bool
+	idle      time.Duration
+	// sent is when the last request was written; zero until the first. Touched
+	// only by Read, which os/exec's single stdin-copier goroutine calls serially.
+	sent time.Time
 }
 
+// idleAt reports whether an input at lastNanos (wall-clock Unix nanoseconds)
+// is at least heartbeatIdleAfter old. It is the one idle predicate for the
+// probe streams and the listing poll, on the wall clock only — see
+// probeRequests for why the monotonic clock must not take part.
+func idleAt(lastNanos int64) bool {
+	return time.Now().UnixNano()-lastNanos >= int64(heartbeatIdleAfter)
+}
+
+// idleProbeInterval is the heartbeat's request interval once the user has been
+// idle for heartbeatIdleAfter. refresh.go's listing poll uses it as well.
 const idleProbeInterval = time.Minute
 
-func newProbeRequests(ctx context.Context, every time.Duration) *probeRequests {
-	p := &probeRequests{ctx: ctx, every: every, wake: make(chan struct{}, 1), first: true}
+// newProbeRequests paces requests every `every` while the user is active and
+// every `idle` once they have been idle for heartbeatIdleAfter.
+func newProbeRequests(ctx context.Context, every, idle time.Duration) *probeRequests {
+	if idle < every {
+		idle = every
+	}
+	p := &probeRequests{
+		ctx:      ctx,
+		every:    every,
+		idle:     idle,
+		wake:     make(chan struct{}, 1),
+		answered: make(chan struct{}, 1),
+	}
 	p.lastInput.Store(time.Now().UnixNano())
 	return p
 }
 
+// activity records the user's latest input time and wakes the stream once, on
+// the transition from idle to active. Calling it again with the same time is a
+// no-op: Update calls it after every message, and only a NEW input may wake.
 func (p *probeRequests) activity(at time.Time) {
-	old := p.lastInput.Swap(at.UnixNano())
-	if time.Since(time.Unix(0, old)) >= heartbeatIdleAfter && time.Since(at) < heartbeatIdleAfter {
+	next := at.UnixNano()
+	old := p.lastInput.Swap(next)
+	if old == next {
+		return
+	}
+	if idleAt(old) && !idleAt(next) {
 		select {
 		case p.wake <- struct{}{}:
 		default:
@@ -189,28 +295,53 @@ func (p *probeRequests) activity(at time.Time) {
 	}
 }
 
+// passDone reports that the guest has finished answering a request. Never
+// blocks: the writer that calls it is os/exec's stdout copier, which must not
+// park (see sampleWriter).
+func (p *probeRequests) passDone() {
+	select {
+	case p.answered <- struct{}{}:
+	default:
+	}
+}
+
 func (p *probeRequests) Read(buf []byte) (int, error) {
 	if len(buf) == 0 {
 		return 0, nil
 	}
-	if !p.first {
-		delay := p.every
-		if time.Since(time.Unix(0, p.lastInput.Load())) >= heartbeatIdleAfter {
-			delay = idleProbeInterval
-		}
-		timer := time.NewTimer(delay)
-		defer timer.Stop()
+	if !p.sent.IsZero() {
+		// Wait for the answer to the previous request first.
 		select {
 		case <-p.ctx.Done():
 			return 0, io.EOF
-		case <-p.wake:
-		case <-timer.C:
+		case <-p.answered:
+		}
+		// Then keep the cadence, measured from when the last request went out,
+		// so a slow pass does not stretch the interval by its own length.
+		delay := p.every
+		if idleAt(p.lastInput.Load()) {
+			delay = p.idle
+		}
+		if wait := delay - time.Since(p.sent); wait > 0 {
+			timer := time.NewTimer(wait)
+			defer timer.Stop()
+			select {
+			case <-p.ctx.Done():
+				return 0, io.EOF
+			case <-p.wake:
+			case <-timer.C:
+			}
 		}
 	}
-	p.first = false
 	if p.ctx.Err() != nil {
 		return 0, io.EOF
 	}
+	// A wake that arrived while this request was already due is spent by it.
+	select {
+	case <-p.wake:
+	default:
+	}
+	p.sent = time.Now()
 	buf[0] = '\n'
 	return 1, nil
 }

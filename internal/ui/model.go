@@ -288,6 +288,8 @@ type model struct {
 
 	// lastInput controls monitoring cadence. Idle sessions retain SSH connections;
 	// a key or terminal focus resumes frequent work over the existing streams.
+	// Judge its age only with idleAt (wall clock), never time.Since: see
+	// probeRequests.
 	lastInput time.Time
 
 	// quitting marks the Update that is on its way out, and it exists because the

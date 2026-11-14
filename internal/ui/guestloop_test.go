@@ -105,7 +105,7 @@ func TestGuestLoopLowPriorityIsOptIn(t *testing.T) {
 func TestDrivenProbeIdlesAndWakesWithoutReplacingProcess(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	requests := newProbeRequests(ctx, time.Hour)
+	requests := newProbeRequests(ctx, time.Hour, time.Hour)
 	requests.activity(time.Now().Add(-2 * heartbeatIdleAfter))
 	script := guestLoop{marker: "sand-test-driven", pidFile: "driven.pid", body: "echo $$\n", driven: true}.script()
 	cmd := exec.CommandContext(ctx, "bash", "-c", script)
@@ -137,6 +137,9 @@ func TestDrivenProbeIdlesAndWakesWithoutReplacingProcess(t *testing.T) {
 		}
 	}
 	pid := read()
+	// The production writer reports each answered pass; this test reads the
+	// stream itself, so it reports it.
+	requests.passDone()
 	select {
 	case line := <-lines:
 		t.Fatalf("idle probe did unsolicited work: %q", line)
