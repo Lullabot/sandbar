@@ -53,7 +53,9 @@
 // # No network, ever
 //
 // Every git read here is local: `symbolic-ref`, `config --get`, `remote`,
-// `remote get-url`, `rev-parse`, `rev-list --count`, `status --porcelain`.
+// `remote get-url`, `rev-parse`, `rev-list --count`, `status --porcelain`
+// (`--no-ahead-behind` keeps even status's v2 branch header from walking
+// history).
 // None of them contacts the forge. Push state is derived from the LOCAL
 // remote-tracking ref, which a prior `git push` already updated — never from
 // `git ls-remote` or any other network round-trip. Remote truth is confirmed
@@ -159,6 +161,19 @@ const (
 //     resolves the parent repo path from it (see parentFromGitdirPointer),
 //     which is what makes that logic unit-testable against synthetic text.
 //
+//     The reads are folded into as few git processes as give the same
+//     answers, because a pass runs them for up to sweepMaxCheckouts entries
+//     and the process count, not any one read, is what a pass costs. One
+//     `status --porcelain=v2 --branch --no-ahead-behind` yields both the
+//     branch (its `# branch.head` header; `(detached)` means none) and the
+//     dirty count (every non-header line, one per path, exactly as the v1
+//     porcelain counted). One `rev-list --left-right --count
+//     HEAD...<tracking ref>` yields ahead and behind, and its success is the
+//     proof the tracking ref exists. Whenever a folded read fails — a
+//     timeout, a git too old for the flags — the script falls back to the
+//     separate reads it replaced, so a failure costs time, never a different
+//     answer.
+//
 //  4. Every field is emitted as a `key=value` line, one record per checkout,
 //     terminated by sweepRecordDelim.
 //
@@ -166,6 +181,7 @@ const (
 // fmt.Sprintf, so the shell's own `%s` in its printf format strings needs no
 // escaping.
 const sweepScriptTemplate = `set -f
+tab=$(printf '\t')
 g() { timeout __TIMEOUT__ git --no-optional-locks -C "$dir" "$@" 2>/dev/null; }
 found=$(find "$HOME" -maxdepth __DEPTH__ \( -name node_modules -o -name .cache -o -name .cargo -o -name .npm \) -prune -o -type d -name .git -print 2>/dev/null)
 trunc=
@@ -210,7 +226,24 @@ printf '%s\n' "$found" | while IFS= read -r gitpath; do
     gitdirptr=$(cat "$gitpath" 2>/dev/null)
     gitdirptr=${gitdirptr#gitdir: }
   fi
-  branch=$(g symbolic-ref --short HEAD)
+  st=$(g status --porcelain=v2 --branch --no-ahead-behind)
+  branch=
+  dirty=0
+  if [ -n "$st" ]; then
+    while IFS= read -r line; do
+      case "$line" in
+      "# branch.head "*) branch=${line#"# branch.head "} ;;
+      "#"*) ;;
+      ?*) dirty=$((dirty + 1)) ;;
+      esac
+    done <<EOF
+$st
+EOF
+    [ "$branch" = "(detached)" ] && branch=
+  else
+    branch=$(g symbolic-ref --short HEAD)
+    dirty=$(g status --porcelain | grep -c .)
+  fi
   remote=$(g config --get "branch.$branch.remote")
   if [ -z "$remote" ]; then
     remote=$(g remote | head -n 1)
@@ -222,10 +255,17 @@ printf '%s\n' "$found" | while IFS= read -r gitpath; do
   tracking=0
   ahead=0
   behind=0
-  if [ -n "$remote" ] && [ -n "$branch" ] && g rev-parse --verify --quiet "refs/remotes/$remote/$branch" >/dev/null; then
-    tracking=1
-    ahead=$(g rev-list --count "refs/remotes/$remote/$branch..HEAD")
-    behind=$(g rev-list --count "HEAD..refs/remotes/$remote/$branch")
+  if [ -n "$remote" ] && [ -n "$branch" ]; then
+    ab=$(g rev-list --left-right --count "HEAD...refs/remotes/$remote/$branch")
+    if [ -n "$ab" ]; then
+      tracking=1
+      ahead=${ab%%"$tab"*}
+      behind=${ab##*"$tab"}
+    elif g rev-parse --verify --quiet "refs/remotes/$remote/$branch" >/dev/null; then
+      tracking=1
+      ahead=
+      behind=
+    fi
   fi
   defbranch=
   if [ -n "$remote" ]; then
@@ -233,10 +273,9 @@ printf '%s\n' "$found" | while IFS= read -r gitpath; do
     defbranch=${defbranch#"$remote/"}
   fi
   localonly=0
-  if [ -n "$(g rev-list -n 1 --remotes)" ]; then
+  if [ -n "$(g for-each-ref --count=1 --format=x refs/remotes)" ]; then
     localonly=$(g rev-list --count HEAD --not --remotes)
   fi
-  dirty=$(g status --porcelain | grep -c .)
   printf 'path=%s\nkind=%s\ngitdirptr=%s\nbranch=%s\nremote=%s\nurl=%s\ntracking=%s\nahead=%s\nbehind=%s\nlocalonly=%s\ndirty=%s\ndefbranch=%s\n__DELIM__\n' \
     "$dir" "$kind" "$gitdirptr" "$branch" "$remote" "$url" "$tracking" "$ahead" "$behind" "$localonly" "$dirty" "$defbranch"
 done

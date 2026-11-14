@@ -133,6 +133,11 @@ const (
 	// it slows monitoring without closing the connections.
 	heartbeatIdleAfter = 5 * time.Minute
 
+	// heartbeatFloor is the guest loop's minimum gap between passes
+	// (guestLoop.floor). Half of heartbeatInterval, so it never slows the
+	// normal cadence; it only bounds a flood of requests to one pass a second.
+	heartbeatFloor = time.Second
+
 	// carryLimit caps the partial line the parser holds across reads, so a guest
 	// that streams megabytes without a newline cannot grow the buffer without bound.
 	carryLimit = 64 << 10
@@ -175,6 +180,7 @@ func guestScriptMode(every time.Duration, driven bool) string {
 			"echo '" + heartbeatDelim + "'\n",
 		every:  every,
 		driven: driven,
+		floor:  heartbeatFloor,
 	}.script()
 }
 
@@ -255,6 +261,7 @@ type cpuTimes struct {
 // a real `limactl shell` delivered 2642-byte chunks that sometimes arrived as
 // 2631 + 11, tearing a record (and a line) in half. Hence the carry.
 type sampleParser struct {
+	passes  int      // delimiters seen, sample or not; the pass-answered signal
 	carry   []byte   // the tail of the last chunk, up to the next newline
 	cur     cpuTimes // the record being accumulated
 	haveCPU bool     // the current record has had its `cpu ` line
@@ -319,6 +326,7 @@ func (p *sampleParser) line(line []byte) (guestSample, bool) {
 
 	switch {
 	case bytes.Equal(bytes.TrimSpace(line), []byte(heartbeatDelim)):
+		p.passes++
 		return p.complete()
 
 	// The AGGREGATE cpu line, and only it: `cpu ` with a space. The per-core `cpu0`,
@@ -525,11 +533,19 @@ type sampleWriter struct {
 	ctx context.Context
 	out chan guestSample
 	p   sampleParser
+	// passDone, when set, is told each time a pass's delimiter arrives — even
+	// one that completes no sample (a guest without /proc), since that pass was
+	// still the answer to a request. See probeRequests.
+	passDone func()
 }
 
 func (w *sampleWriter) Write(b []byte) (int, error) {
+	before := w.p.passes
 	for _, s := range w.p.feed(b) {
 		w.publish(s)
+	}
+	if w.p.passes != before && w.passDone != nil {
+		w.passDone()
 	}
 	// Even a chunk that completes no record must fail once the heartbeat is done, so
 	// a cancelled stream tears down at the next byte rather than the next record.
@@ -739,7 +755,7 @@ func (r *heartbeatRegistry) start(scope registry.Scope, name string) (uint64, <-
 	// Buffered by one so the sampler can hand off a sample and get straight back to
 	// reading the stream, without waiting for Update to come round.
 	ch := make(chan guestSample, 1)
-	requests := newProbeRequests(ctx, r.interval)
+	requests := newProbeRequests(ctx, r.interval, idleProbeInterval)
 	r.beats[key] = &heartbeat{requests: requests, epoch: epoch, cancel: cancel, ch: ch}
 	interval := r.interval
 	r.mu.Unlock()
@@ -749,7 +765,7 @@ func (r *heartbeatRegistry) start(scope registry.Scope, name string) (uint64, <-
 		// the blocked read command, which is what tells Update the heartbeat is over.
 		// Skip it and that command's goroutine is parked on this channel forever.
 		defer close(ch)
-		w := &sampleWriter{ctx: ctx, out: ch}
+		w := &sampleWriter{ctx: ctx, out: ch, passDone: requests.passDone}
 		// The error is deliberately dropped. Every way this returns — the VM stopped
 		// (`exit status 255`), the shell was cancelled (`signal: killed`), the guest
 		// has no /proc — means the same thing to the board: this VM has no reading any

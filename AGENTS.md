@@ -1350,8 +1350,28 @@ shared rules.
   confirm the text diff is the change you intended.
 
 Dashboard monitoring retains its authenticated SSH streams after five minutes
-of inactivity and requests guest metrics and checkout scans once per minute.
-Focus or keyboard input wakes the existing streams. Host-driven Bash loops
-read requests from SSH stdin and exit on EOF or 120 seconds without a request;
-they do not rotate healthy connections on a fixed TTL. The legacy autonomous
-loop wrapper remains bounded for callers without host-driven pacing.
+of inactivity, then requests guest metrics once per minute and checkout scans
+once every ten minutes. Focus or keyboard input wakes the existing streams.
+Host-driven Bash loops read requests from SSH stdin and exit on EOF or 120
+seconds without a request; they do not rotate healthy connections on a fixed
+TTL. The legacy autonomous loop wrapper remains bounded for callers without
+host-driven pacing.
+
+Three independent bounds keep a probe stream from flooding a guest; keep all
+three (`internal/ui/guestloop.go`, `probepacing_test.go`):
+
+- **One clock for idleness.** `model.lastInput` is set with
+  `time.Now().Round(0)` and `probeRequests` judges every age on the wall
+  clock, and `activity` ignores an unchanged input time. A monotonic reading
+  stops while the workstation sleeps, so mixing clocks made every `Update`
+  after a sleep look like the user returning. Each wake's answer produced
+  another `Update`, and the loop drove guests at over a hundred passes a
+  second.
+- **One request in flight.** `probeRequests.Read` writes the next newline
+  only after the writer reports the previous pass's delimiter (`passDone`),
+  counted per delimiter, not per sample, so an empty heartbeat record still
+  answers. Requests sent on a timer regardless of answers queue wherever the
+  reply path is slower, and the guest later replays every one.
+- **Guest-side coalescing and floor.** The driven loop drains queued
+  requests with `read -t 0` before a pass and sleeps `heartbeatFloor` or
+  `sweepFloor` after it, so even a host bug buys at most one pass per floor.

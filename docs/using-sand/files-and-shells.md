@@ -450,9 +450,10 @@ push`, `push`, `open draft PR`, `open in browser` — rather than a generic
 nothing to do offers no key at all.
 
 The header shows how old the listing is (`scanned 2m ago`). The rows come from
-a background sweep that runs about every 60 seconds, so after committing or
-pushing inside the VM's own shell the pane can briefly be out of date. Press
-**`r`** to rescan immediately.
+a background sweep that runs about every 60 seconds while you are using
+sandbar, and every 10 minutes after five minutes without input, so after
+committing or pushing inside the VM's own shell the pane can be out of date.
+Press **`r`** to rescan immediately.
 
 The pane's own ledger of what it did (which PR it opened, when) is
 reopenable later with `L` (Log), the same key that reopens a build's or

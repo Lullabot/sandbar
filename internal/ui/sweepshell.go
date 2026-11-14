@@ -84,6 +84,19 @@ const (
 	// and delete guard are never far behind reality.
 	sweepInterval = 60 * time.Second
 
+	// sweepIdleInterval is the sweep's interval once the user has been idle for
+	// heartbeatIdleAfter. Nobody is looking at the badge, and the delete guard
+	// re-sweeps a running VM itself before it asks (sweepOnce), so a stale
+	// cache costs nothing while idle. A pass is not cheap: on a guest with fifty
+	// checkouts it is several CPU-seconds and over a thousand short-lived
+	// processes, so running it every minute for as long as a board stayed open
+	// was a standing load on every VM.
+	sweepIdleInterval = 10 * time.Minute
+
+	// sweepFloor is the guest loop's minimum gap between passes
+	// (guestLoop.floor), whatever the host asks for.
+	sweepFloor = 10 * time.Second
+
 	// sweepRetry mirrors heartbeatRetry exactly, for exactly the same reason:
 	// without it, a VM Lima calls Running but that cannot be shelled into (one
 	// still booting, one with a wedged sshd) would have a fresh `limactl
@@ -143,6 +156,7 @@ func guestSweepScriptMode(every time.Duration, driven bool) string {
 		every:   every,
 		driven:  driven,
 		lowPrio: true,
+		floor:   sweepFloor,
 	}.script()
 }
 
@@ -151,8 +165,9 @@ func guestSweepScriptMode(every time.Duration, driven bool) string {
 // lines — for the same reason sampleParser is: a real `limactl shell` tears
 // chunks across line (and record) boundaries.
 type sweepParser struct {
-	carry []byte       // the tail of the last chunk, up to the next newline
-	buf   bytes.Buffer // raw text accumulated since the last completed pass
+	passes int          // end markers seen; the pass-answered signal
+	carry  []byte       // the tail of the last chunk, up to the next newline
+	buf    bytes.Buffer // raw text accumulated since the last completed pass
 }
 
 // feed folds one chunk in and returns every sweep pass completed by it —
@@ -175,6 +190,7 @@ func (p *sweepParser) feed(chunk []byte) []checkouts.VMCheckouts {
 		buf = buf[i+1:]
 
 		if string(bytes.TrimSpace(bytes.TrimRight(line, "\r"))) == sweepEndMarker {
+			p.passes++
 			// Hand the WHOLE accumulated pass to checkouts.ParseSweep
 			// unmodified — this file does no classification of its own,
 			// and never inspects sweepRecordDelim; that is entirely
@@ -214,11 +230,18 @@ type sweepWriter struct {
 	ctx context.Context
 	out chan checkouts.VMCheckouts
 	p   sweepParser
+	// passDone, when set, is told each time a pass's end marker arrives. See
+	// probeRequests.
+	passDone func()
 }
 
 func (w *sweepWriter) Write(b []byte) (int, error) {
+	before := w.p.passes
 	for _, vc := range w.p.feed(b) {
 		w.publish(vc)
+	}
+	if w.p.passes != before && w.passDone != nil {
+		w.passDone()
 	}
 	if err := w.ctx.Err(); err != nil {
 		return 0, err
@@ -364,7 +387,7 @@ func (r *sweepRegistry) start(scope registry.Scope, name string) (uint64, <-chan
 	// straight back to reading the stream, without waiting for Update to come
 	// round — mirrors heartbeat's channel exactly.
 	ch := make(chan checkouts.VMCheckouts, 1)
-	requests := newProbeRequests(ctx, r.interval)
+	requests := newProbeRequests(ctx, r.interval, sweepIdleInterval)
 	r.sweeps[key] = &sweepConn{requests: requests, epoch: epoch, cancel: cancel, ch: ch}
 	interval := r.interval
 	r.mu.Unlock()
@@ -374,7 +397,7 @@ func (r *sweepRegistry) start(scope registry.Scope, name string) (uint64, <-chan
 		// what wakes the blocked read command, which is what tells Update the
 		// sweep connection is over.
 		defer close(ch)
-		w := &sweepWriter{ctx: ctx, out: ch}
+		w := &sweepWriter{ctx: ctx, out: ch, passDone: requests.passDone}
 		// The error is deliberately dropped, exactly as the heartbeat's is:
 		// every way this returns (VM stopped, context cancelled, no /bin/sh)
 		// means the same thing to the registry — this VM has no sweep
