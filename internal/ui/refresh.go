@@ -94,7 +94,7 @@ func (m *model) tickRefresh() tea.Cmd {
 		}
 		mem.tickGen = refreshIDs.Add(1)
 		delay := mem.refreshDelay()
-		if time.Since(m.lastInput) >= heartbeatIdleAfter && delay < idleProbeInterval {
+		if idleAt(m.lastInput.UnixNano()) && delay < idleProbeInterval {
 			delay = idleProbeInterval
 		}
 		cmds = append(cmds, refreshTickCmd(mem.scope, delay, mem.tickGen))

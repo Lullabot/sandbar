@@ -67,6 +67,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/lullabot/sandbar/internal/checkouts"
@@ -145,18 +146,19 @@ const (
 // recursive `find` over $HOME plus a git read per checkout, which is exactly the
 // work that should yield to whatever the developer is actually doing in there.
 func guestSweepScript(every time.Duration) string {
-	return guestSweepScriptMode(every, false)
+	return guestSweepScriptMode(every, 0, false)
 }
 
-func guestSweepScriptMode(every time.Duration, driven bool) string {
+func guestSweepScriptMode(every, idle time.Duration, driven bool) string {
 	return guestLoop{
-		marker:  sweepEndMarker,
-		pidFile: "sand-sweep.pid",
-		body:    checkouts.BuildSweepCommand() + "echo '" + sweepEndMarker + "'\n",
-		every:   every,
-		driven:  driven,
-		lowPrio: true,
-		floor:   sweepFloor,
+		marker:     sweepEndMarker,
+		pidFile:    "sand-sweep.pid",
+		body:       checkouts.BuildSweepCommand() + "echo '" + sweepEndMarker + "'\n",
+		every:      every,
+		driven:     driven,
+		lowPrio:    true,
+		floor:      sweepFloor,
+		requestGap: idle,
 	}.script()
 }
 
@@ -165,9 +167,8 @@ func guestSweepScriptMode(every time.Duration, driven bool) string {
 // lines — for the same reason sampleParser is: a real `limactl shell` tears
 // chunks across line (and record) boundaries.
 type sweepParser struct {
-	passes int          // end markers seen; the pass-answered signal
-	carry  []byte       // the tail of the last chunk, up to the next newline
-	buf    bytes.Buffer // raw text accumulated since the last completed pass
+	carry []byte       // the tail of the last chunk, up to the next newline
+	buf   bytes.Buffer // raw text accumulated since the last completed pass
 }
 
 // feed folds one chunk in and returns every sweep pass completed by it —
@@ -190,7 +191,6 @@ func (p *sweepParser) feed(chunk []byte) []checkouts.VMCheckouts {
 		buf = buf[i+1:]
 
 		if string(bytes.TrimSpace(bytes.TrimRight(line, "\r"))) == sweepEndMarker {
-			p.passes++
 			// Hand the WHOLE accumulated pass to checkouts.ParseSweep
 			// unmodified — this file does no classification of its own,
 			// and never inspects sweepRecordDelim; that is entirely
@@ -236,11 +236,11 @@ type sweepWriter struct {
 }
 
 func (w *sweepWriter) Write(b []byte) (int, error) {
-	before := w.p.passes
-	for _, vc := range w.p.feed(b) {
+	passes := w.p.feed(b)
+	for _, vc := range passes {
 		w.publish(vc)
 	}
-	if w.p.passes != before && w.passDone != nil {
+	if len(passes) > 0 && w.passDone != nil {
 		w.passDone()
 	}
 	if err := w.ctx.Err(); err != nil {
@@ -302,6 +302,12 @@ type sweepRegistry struct {
 	// (sweepRetryMax) exactly as heartbeatRegistry.fails does. Reset by the
 	// first completed pass a new connection folds in.
 	fails map[vmHandle]int
+
+	// lastInput is the input time activity last fanned out (Unix nanoseconds;
+	// zero until the first). Update calls activity after every message, almost
+	// always with an unchanged time; this lets that call return without taking
+	// mu or walking the streams, and seeds each new stream with it in start.
+	lastInput atomic.Int64
 
 	nextEpoch uint64
 
@@ -387,7 +393,11 @@ func (r *sweepRegistry) start(scope registry.Scope, name string) (uint64, <-chan
 	// straight back to reading the stream, without waiting for Update to come
 	// round — mirrors heartbeat's channel exactly.
 	ch := make(chan checkouts.VMCheckouts, 1)
-	requests := newProbeRequests(ctx, r.interval, sweepIdleInterval)
+	idle := sweepIdleInterval
+	requests := newProbeRequests(ctx, r.interval, idle)
+	if last := r.lastInput.Load(); last != 0 {
+		requests.lastInput.Store(last)
+	}
 	r.sweeps[key] = &sweepConn{requests: requests, epoch: epoch, cancel: cancel, ch: ch}
 	interval := r.interval
 	r.mu.Unlock()
@@ -402,7 +412,7 @@ func (r *sweepRegistry) start(scope registry.Scope, name string) (uint64, <-chan
 		// every way this returns (VM stopped, context cancelled, no /bin/sh)
 		// means the same thing to the registry — this VM has no sweep
 		// connection any more.
-		_ = shell.ShellStreamOut(ctx, name, requests, w, "bash", "-c", guestSweepScriptMode(interval, true))
+		_ = shell.ShellStreamOut(ctx, name, requests, w, "bash", "-c", guestSweepScriptMode(interval, idle, true))
 	}()
 
 	return epoch, ch, true
@@ -661,7 +671,7 @@ func (r *sweepRegistry) sweepOnce(ctx context.Context, scope registry.Scope, nam
 }
 
 func (r *sweepRegistry) activity(at time.Time) {
-	if r == nil {
+	if r == nil || r.lastInput.Swap(at.UnixNano()) == at.UnixNano() {
 		return
 	}
 	r.mu.Lock()

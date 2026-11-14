@@ -11,6 +11,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -77,12 +78,13 @@ func TestProbeActivityAfterSleepDoesNotWakeOnEveryUpdate(t *testing.T) {
 	}
 }
 
-// The model must store lastInput without a monotonic reading, so the model's
-// own idle checks (refresh.go) and the streams' agree after a sleep.
-func TestLastInputIsWallClock(t *testing.T) {
-	m := model{lastInput: time.Now().Round(0)}
-	if s := m.lastInput.String(); strings.Contains(s, "m=") {
-		t.Fatalf("lastInput carries a monotonic reading: %s", s)
+// The listing poll's idle check must agree with the streams' after a sleep:
+// an input time whose monotonic reading says "a minute ago" is idle if the
+// wall clock says it was half an hour ago.
+func TestIdleAtIgnoresTheMonotonicClock(t *testing.T) {
+	last := suspendedTime(t, heartbeatIdleAfter+30*time.Minute, time.Minute)
+	if !idleAt(last.UnixNano()) {
+		t.Fatal("idleAt must judge age on the wall clock")
 	}
 }
 
@@ -216,21 +218,38 @@ func TestDrivenGuestLoopCoalescesQueuedRequests(t *testing.T) {
 	}
 }
 
-// Both probes leave a floor between passes in the guest itself.
+// Both probes leave a floor between passes in the guest itself, paid only
+// when another request is already waiting.
 func TestDrivenGuestLoopsHaveAFloor(t *testing.T) {
-	if s := guestScriptMode(heartbeatInterval, true); !strings.Contains(s, "sleep 1\ndone") {
-		t.Fatalf("the heartbeat loop must sleep heartbeatFloor between passes, got:\n%s", s)
-	}
-	if s := guestSweepScriptMode(sweepInterval, true); !strings.Contains(s, "sleep 10\ndone") {
-		t.Fatalf("the sweep loop must sleep sweepFloor between passes, got:\n%s", s)
+	for _, c := range []struct {
+		name   string
+		script string
+		floor  time.Duration
+	}{
+		{"heartbeat", guestScriptMode(heartbeatInterval, idleProbeInterval, true), heartbeatFloor},
+		{"sweep", guestSweepScriptMode(sweepInterval, sweepIdleInterval, true), sweepFloor},
+	} {
+		want := "read -r -t 0 && sleep " + strconv.Itoa(int(c.floor/time.Second)) + "\ndone"
+		if !strings.Contains(c.script, want) {
+			t.Errorf("%s: want %q in the driven loop, got:\n%s", c.name, want, c.script)
+		}
 	}
 }
 
-// The sweep slows right down when nobody is using the board; the heartbeat keeps
-// its own idle rate.
-func TestSweepIdlesLongerThanTheHeartbeat(t *testing.T) {
-	if sweepIdleInterval <= idleProbeInterval || sweepIdleInterval <= sweepInterval {
-		t.Fatalf("sweepIdleInterval %s must exceed both the heartbeat's idle interval %s and the sweep's active interval %s",
-			sweepIdleInterval, idleProbeInterval, sweepInterval)
+// A driven guest loop treats a gap with no request as an abandoned stream and
+// exits. That gap must outlast the host's own idle interval, or an idle board's
+// healthy stream is reaped between two requests and reconnected: an ssh
+// handshake plus an unrequested full pass every couple of minutes, which for
+// the sweep is more work than its idle interval was meant to save.
+func TestDrivenGuestLoopsOutlastTheirIdleInterval(t *testing.T) {
+	for _, idle := range []time.Duration{idleProbeInterval, sweepIdleInterval} {
+		if got := (guestLoop{requestGap: idle}).reapAfter(); got <= idle {
+			t.Errorf("the guest reaps after %s without a request, but the host idles %s between requests", got, idle)
+		}
+	}
+	// And the driven script really waits that long.
+	want := "read -r -t " + strconv.Itoa(int((guestLoop{requestGap: sweepIdleInterval}).reapAfter()/time.Second)) + " request"
+	if s := guestSweepScriptMode(sweepInterval, sweepIdleInterval, true); !strings.Contains(s, want) {
+		t.Fatalf("want %q in the sweep loop, got:\n%s", want, s)
 	}
 }

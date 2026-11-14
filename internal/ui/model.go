@@ -288,11 +288,8 @@ type model struct {
 
 	// lastInput controls monitoring cadence. Idle sessions retain SSH connections;
 	// a key or terminal focus resumes frequent work over the existing streams.
-	// Always set with time.Now().Round(0), which strips the monotonic reading, so
-	// every age computed from it is wall-clock time. The probe streams store it
-	// as Unix nanoseconds and judge idleness on the wall clock; a value carrying a
-	// monotonic reading disagrees with that after the workstation sleeps (see
-	// probeRequests).
+	// Judge its age only with idleAt (wall clock), never time.Since: see
+	// probeRequests.
 	lastInput time.Time
 
 	// quitting marks the Update that is on its way out, and it exists because the
@@ -670,7 +667,7 @@ func New(fleet provider.Fleet) tea.Model {
 		spinner:          sp,
 		// The session starts freshly used; anything else and the idle
 		// gate would be shut before the first frame.
-		lastInput: time.Now().Round(0),
+		lastInput: time.Now(),
 	}
 	if checker != nil {
 		m.release = checker.Cached()
@@ -1027,7 +1024,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// blurred terminal is a backgrounded one — but a terminal beside an editor is
 		// blurred and fully visible, so every alt-tab blanked the gauges of a user who
 		// was still watching them. See shouldTick.
-		m.lastInput = time.Now().Round(0)
+		m.lastInput = time.Now()
 		return m, nil
 
 	case heartbeatSampleMsg:
@@ -1807,7 +1804,7 @@ func (m model) dispatch(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		// Any key resumes frequent monitoring over the existing SSH streams.
-		m.lastInput = time.Now().Round(0)
+		m.lastInput = time.Now()
 
 		if msg.String() == "ctrl+c" {
 			// On the progress screen, ctrl+c cancels the job being SHOWN — and only

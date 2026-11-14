@@ -167,12 +167,14 @@ const (
 //     `status --porcelain=v2 --branch --no-ahead-behind` yields both the
 //     branch (its `# branch.head` header; `(detached)` means none) and the
 //     dirty count (every non-header line, one per path, exactly as the v1
-//     porcelain counted). One `rev-list --left-right --count
+//     porcelain counted, in one `grep`). One `rev-list --left-right --count
 //     HEAD...<tracking ref>` yields ahead and behind, and its success is the
-//     proof the tracking ref exists. Whenever a folded read fails — a
-//     timeout, a git too old for the flags — the script falls back to the
-//     separate reads it replaced, so a failure costs time, never a different
-//     answer.
+//     proof the tracking ref exists: a branch never pushed, or a read that
+//     timed out, reads as not tracking, which classifies it as at risk
+//     rather than safely pushed. A status that fails (a timeout, or a git
+//     older than 2.17's `--no-ahead-behind`) still gets its branch from
+//     `symbolic-ref`; its dirty count is 0, as a timed-out status's always
+//     was.
 //
 //  4. Every field is emitted as a `key=value` line, one record per checkout,
 //     terminated by sweepRecordDelim.
@@ -182,6 +184,8 @@ const (
 // escaping.
 const sweepScriptTemplate = `set -f
 tab=$(printf '\t')
+nl='
+'
 g() { timeout __TIMEOUT__ git --no-optional-locks -C "$dir" "$@" 2>/dev/null; }
 found=$(find "$HOME" -maxdepth __DEPTH__ \( -name node_modules -o -name .cache -o -name .cargo -o -name .npm \) -prune -o -type d -name .git -print 2>/dev/null)
 trunc=
@@ -229,21 +233,15 @@ printf '%s\n' "$found" | while IFS= read -r gitpath; do
   st=$(g status --porcelain=v2 --branch --no-ahead-behind)
   branch=
   dirty=0
-  if [ -n "$st" ]; then
-    while IFS= read -r line; do
-      case "$line" in
-      "# branch.head "*) branch=${line#"# branch.head "} ;;
-      "#"*) ;;
-      ?*) dirty=$((dirty + 1)) ;;
-      esac
-    done <<EOF
-$st
-EOF
+  case "$st" in
+  *"# branch.head "*)
+    branch=${st#*"# branch.head "}
+    branch=${branch%%"$nl"*}
     [ "$branch" = "(detached)" ] && branch=
-  else
-    branch=$(g symbolic-ref --short HEAD)
-    dirty=$(g status --porcelain | grep -c .)
-  fi
+    dirty=$(printf '%s\n' "$st" | grep -vc '^#')
+    ;;
+  *) branch=$(g symbolic-ref --short HEAD) ;;
+  esac
   remote=$(g config --get "branch.$branch.remote")
   if [ -z "$remote" ]; then
     remote=$(g remote | head -n 1)
@@ -261,10 +259,6 @@ EOF
       tracking=1
       ahead=${ab%%"$tab"*}
       behind=${ab##*"$tab"}
-    elif g rev-parse --verify --quiet "refs/remotes/$remote/$branch" >/dev/null; then
-      tracking=1
-      ahead=
-      behind=
     fi
   fi
   defbranch=

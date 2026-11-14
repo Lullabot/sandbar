@@ -82,6 +82,7 @@ import (
 	"io"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/lullabot/sandbar/internal/provider"
@@ -135,8 +136,8 @@ const (
 
 	// heartbeatFloor is the guest loop's minimum gap between passes
 	// (guestLoop.floor). Half of heartbeatInterval, so it never slows the
-	// normal cadence; it only bounds a flood of requests to one pass a second.
-	heartbeatFloor = time.Second
+	// normal cadence; it only bounds a flood of requests to one pass per floor.
+	heartbeatFloor = heartbeatInterval / 2
 
 	// carryLimit caps the partial line the parser holds across reads, so a guest
 	// that streams megabytes without a newline cannot grow the buffer without bound.
@@ -167,10 +168,10 @@ const (
 // guestloop.go's, shared with the sweep. Read its header for why a long-lived
 // guest probe needs one.
 func guestScript(every time.Duration) string {
-	return guestScriptMode(every, false)
+	return guestScriptMode(every, 0, false)
 }
 
-func guestScriptMode(every time.Duration, driven bool) string {
+func guestScriptMode(every, idle time.Duration, driven bool) string {
 	return guestLoop{
 		marker:  heartbeatDelim,
 		pidFile: "sand-heartbeat.pid",
@@ -178,9 +179,10 @@ func guestScriptMode(every time.Duration, driven bool) string {
 			"echo -n 'DISK '\n" +
 			"df -kP / | tail -n 1\n" +
 			"echo '" + heartbeatDelim + "'\n",
-		every:  every,
-		driven: driven,
-		floor:  heartbeatFloor,
+		every:      every,
+		driven:     driven,
+		floor:      heartbeatFloor,
+		requestGap: idle,
 	}.script()
 }
 
@@ -653,6 +655,12 @@ type heartbeatRegistry struct {
 	// healthy by the only definition this file has.
 	fails map[vmHandle]int
 
+	// lastInput is the input time activity last fanned out (Unix nanoseconds;
+	// zero until the first). Update calls activity after every message, almost
+	// always with an unchanged time; this lets that call return without taking
+	// mu or walking the streams, and seeds each new stream with it in start.
+	lastInput atomic.Int64
+
 	nextEpoch uint64
 
 	// shell resolves the backend seam for a heartbeat's scope (fleet.go's
@@ -755,7 +763,11 @@ func (r *heartbeatRegistry) start(scope registry.Scope, name string) (uint64, <-
 	// Buffered by one so the sampler can hand off a sample and get straight back to
 	// reading the stream, without waiting for Update to come round.
 	ch := make(chan guestSample, 1)
-	requests := newProbeRequests(ctx, r.interval, idleProbeInterval)
+	idle := idleProbeInterval
+	requests := newProbeRequests(ctx, r.interval, idle)
+	if last := r.lastInput.Load(); last != 0 {
+		requests.lastInput.Store(last)
+	}
 	r.beats[key] = &heartbeat{requests: requests, epoch: epoch, cancel: cancel, ch: ch}
 	interval := r.interval
 	r.mu.Unlock()
@@ -771,7 +783,7 @@ func (r *heartbeatRegistry) start(scope registry.Scope, name string) (uint64, <-
 		// has no /proc — means the same thing to the board: this VM has no reading any
 		// more. Surfacing it on the status line would spam the user with a message
 		// about a subsystem they never asked for, every time they stopped a VM.
-		_ = shell.ShellStreamOut(ctx, name, requests, w, "bash", "-c", guestScriptMode(interval, true))
+		_ = shell.ShellStreamOut(ctx, name, requests, w, "bash", "-c", guestScriptMode(interval, idle, true))
 	}()
 
 	return epoch, ch, true
@@ -1134,7 +1146,7 @@ func (m model) sampleOf(scope registry.Scope, name string) (guestSample, bool) {
 }
 
 func (r *heartbeatRegistry) activity(at time.Time) {
-	if r == nil {
+	if r == nil || r.lastInput.Swap(at.UnixNano()) == at.UnixNano() {
 		return
 	}
 	r.mu.Lock()
