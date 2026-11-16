@@ -1920,10 +1920,12 @@ selector when more than one profile is enabled, so you pick which profile a
 new VM is created on without leaving the TUI. See
 <a href="../connection-profiles/">Connection Profiles</a> for the full model.</p>
 <h2 id="resetting-a-vm">Resetting a VM</h2>
-<p>The create form has independent <strong>Install Claude Code</strong>, <strong>Install OpenAI Codex</strong>,
-<strong>Install OpenCode</strong>, and <strong>Install Pi</strong> checkboxes. New VMs start with your last
-submitted choices (initially all off); reset starts with the choices
-recorded for that VM and does not change global preferences.</p>
+<p>The create and reset forms both have independent <strong>Install Claude Code</strong>,
+<strong>Install OpenAI Codex</strong>, <strong>Install OpenCode</strong>, and <strong>Install Pi</strong> checkboxes.
+New VMs start with your last submitted choices (initially all off). The reset
+form starts with the choices recorded for that VM; change them to add or
+remove agents in the rebuilt VM. A reset does not change the choices new VMs
+start with.</p>
 <p>Press <code>R</code> on a managed VM's tile to open the <em>Reset VM</em> form, filled with
 its recorded settings. Change resources or settings as needed, then press
 <code>ctrl+s</code> to delete and rebuild the VM. The next reset uses the new settings.</p>

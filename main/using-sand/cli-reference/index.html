@@ -2569,6 +2569,7 @@ a preserve option</strong>. This is the CLI equivalent of <code>R</code> in the 
 <a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>sandbar<span class="w"> </span>reset<span class="w"> </span>web<span class="w"> </span>--preserve<span class="w"> </span><span class="s1">'~/src/app'</span><span class="w"> </span>--preserve<span class="w"> </span><span class="s1">'~/scratch/spike'</span>
 <a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>sandbar<span class="w"> </span>reset<span class="w"> </span>web<span class="w"> </span>--preserve-home<span class="w">                    </span><span class="c1"># keep the guest home</span>
 <a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>sandbar<span class="w"> </span>reset<span class="w"> </span>web<span class="w"> </span>--cpus<span class="w"> </span><span class="m">8</span><span class="w"> </span>--memory<span class="w"> </span>16GiB<span class="w">            </span><span class="c1"># change CPU and memory</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>sandbar<span class="w"> </span>reset<span class="w"> </span>web<span class="w"> </span>--with-pi<span class="w"> </span>--with-codex<span class="o">=</span><span class="nb">false</span><span class="w">       </span><span class="c1"># change installed agents</span>
 </code></pre></div>
 <p><code>sandbar</code> refuses to reset a VM it does not manage. It checks the VM's ownership
 marker first, then the managed index. You can reset a VM created by another
@@ -2804,6 +2805,12 @@ before creating a VM.</p>
 <td>string</td>
 <td><em>this VM's</em></td>
 <td>Docker registry pull-through proxy host.</td>
+</tr>
+<tr>
+<td><code>--with-claude</code> / <code>--with-codex</code> / <code>--with-opencode</code> / <code>--with-pi</code></td>
+<td>bool</td>
+<td><em>this VM's</em></td>
+<td>Install that agent in the rebuilt VM. Use <code>=false</code> to remove one. Does not change the remembered choices for new VMs.</td>
 </tr>
 <tr>
 <td><code>--clone-token</code></td>
