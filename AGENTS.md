@@ -979,7 +979,11 @@ comment at `roles/agent-clipboard/tasks/main.yml`.
   choices across profiles; an absent file may be seeded once from a legacy
   v2 base stamp. Saved all-off is a real preference. Existing VM records keep
   their Claude/Codex booleans (including false); missing OpenCode/Pi means off.
-  Reset starts from those recorded VM choices, not global preferences.
+  Reset starts from those recorded VM choices, not global preferences, and
+  may change them (the reset form's install rows, `sandbar reset --with-*`)
+  without saving them as preferences. Copy recorded agents through
+  `CreateConfig.AgentPtrs`: `DefaultCreateConfig` has every agent off, so an
+  agent a reset path forgets to copy is silently dropped from the rebuild.
 - **Agent installers run concurrently, in `roles/agent-install`, after every
   agent role.** The four agent roles write configuration only; `agent-install`
   starts each selected installer as an async job and waits on each under its
@@ -1270,7 +1274,8 @@ shared rules.
   in each row's help. Pass the recorded absolute path to `ResetOptions`;
   the shortened `~/…` label uses an estimated home and is display-only.
 - **Do not assume fixed reset-toggle indices in tests.** The order is
-  whole home, Claude settings, project when configured, then checkouts.
+  the four agent install rows, whole home, agent settings, project when
+  configured, then checkouts. Whole home locks only the rows below it.
   Enabling whole-home preservation must keep the other rows visible so
   the focus and previous choices stay predictable.
 - **Whole-home preservation locks included rows without changing their

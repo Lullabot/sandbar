@@ -538,8 +538,13 @@ func TestResetToggleFlipsAndWarns(t *testing.T) {
 func TestResetWholeHomeToggle(t *testing.T) {
 	m := openReset(t, resetConfig())
 
-	if got := toggleIndexByLabel(m, "Preserve the entire home directory"); got != 0 {
-		t.Fatalf("the whole-home toggle is at index %d, want 0; labels=%v", got, toggleLabels(m))
+	// It is the first PRESERVE row; only the agent install rows, which it
+	// does not decide, come before it.
+	home := toggleIndexByLabel(m, "Preserve the entire home directory")
+	for i, label := range toggleLabels(m) {
+		if (i < home) != strings.HasPrefix(label, "Install ") {
+			t.Fatalf("the whole-home toggle is at index %d, want it right after the install rows; labels=%v", home, toggleLabels(m))
+		}
 	}
 	before := len(m.toggles())
 
@@ -560,12 +565,14 @@ func TestResetWholeHomeToggle(t *testing.T) {
 	// Every row below the whole-home one is now the form's answer, not a
 	// question: locked, and rendered checked whatever its own bool says.
 	toggles := m.toggles()
-	if toggles[0].locked {
-		t.Error("the whole-home toggle locked itself; it is the one row that must stay operable")
+	for i, tg := range toggles[:home+1] {
+		if tg.locked {
+			t.Errorf("toggle %d (%q) locked; whole-home decides only the rows below it", i, tg.label)
+		}
 	}
-	for i, tg := range toggles[1:] {
+	for i, tg := range toggles[home+1:] {
 		if !tg.locked {
-			t.Errorf("toggle %d (%q) is not locked while whole-home is on", i+1, tg.label)
+			t.Errorf("toggle %d (%q) is not locked while whole-home is on", home+1+i, tg.label)
 		}
 	}
 	view := ansi.Strip(m.formView())

@@ -202,10 +202,12 @@ new VM is created on without leaving the TUI. See
 
 ## Resetting a VM
 
-The create form has independent **Install Claude Code**, **Install OpenAI Codex**,
-**Install OpenCode**, and **Install Pi** checkboxes. New VMs start with your last
-submitted choices (initially all off); reset starts with the choices
-recorded for that VM and does not change global preferences.
+The create and reset forms both have independent **Install Claude Code**,
+**Install OpenAI Codex**, **Install OpenCode**, and **Install Pi** checkboxes.
+New VMs start with your last submitted choices (initially all off). The reset
+form starts with the choices recorded for that VM; change them to add or
+remove agents in the rebuilt VM. A reset does not change the choices new VMs
+start with.
 
 Press `R` on a managed VM's tile to open the *Reset VM* form, filled with
 its recorded settings. Change resources or settings as needed, then press

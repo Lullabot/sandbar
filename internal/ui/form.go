@@ -772,17 +772,18 @@ func (m model) createToggles() []formToggle {
 // up, in the whole-home option's own help.
 const lockedToggleSuffix = " (locked)"
 
-// resetToggles is reset mode's toggle list, in the order a reset is decided:
-// the one option that keeps everything, then the individual things worth
-// keeping — the Claude login, the cloned project (only when there is one:
-// projectToggleEnabled), and one row per git checkout the last sweep found in
-// this VM.
+// resetToggles is reset mode's toggle list: first which agents the rebuilt VM
+// installs, then the preserve options in the order a reset is decided — the one
+// option that keeps everything, then the individual things worth keeping (agent
+// state, the cloned project when there is one: projectToggleEnabled, and one
+// row per git checkout the last sweep found in this VM).
 //
-// The whole-home toggle is FIRST, and that is a focus-stability decision as much
-// as a reading-order one: it is the only row whose state changes the labels of
-// every row below it, so leaving it where the eye starts means the change is
-// seen. The per-checkout rows are last because they are the only ones whose
-// COUNT varies between VMs — everything at a fixed index stays at a fixed index.
+// The agent rows lead because that is where the create form puts the same
+// four rows, and because they are independent of everything after them. The
+// whole-home toggle comes next, above every row whose state it decides, so the
+// change it makes to them is seen. The per-checkout rows are last because they
+// are the only ones whose COUNT varies between VMs — everything at a fixed
+// index stays at a fixed index.
 func (m model) resetToggles() []formToggle {
 	// Everything below the whole-home row is subsumed by it, so while it is on
 	// those rows are shown decided — checked and locked — rather than offering a
@@ -790,7 +791,35 @@ func (m model) resetToggles() []formToggle {
 	// would take the focus ring's meaning with it and leave a user who turns
 	// whole-home back off hunting for the picks they had already made.
 	subsumed := m.preserveHome
+	// Agents install per VM during finalize, so changing them here never touches
+	// the shared base. They start from the VM's recorded choices (openResetForm)
+	// and, unlike the create form's rows, do not update the remembered global
+	// preference: resetting one VM should not change what the next new VM gets.
 	t := []formToggle{
+		{
+			label: "Install Claude Code",
+			help:  "Install the current Claude Code release in the rebuilt VM. Starts from this VM's current choice.",
+			get:   func(m *model) bool { return m.resetWithClaude },
+			set:   func(m *model, v bool) { m.resetWithClaude = v },
+		},
+		{
+			label: "Install OpenAI Codex",
+			help:  "Install the current Codex release in the rebuilt VM. Starts from this VM's current choice.",
+			get:   func(m *model) bool { return m.resetWithCodex },
+			set:   func(m *model, v bool) { m.resetWithCodex = v },
+		},
+		{
+			label: "Install OpenCode",
+			help:  "Install the current OpenCode release in the rebuilt VM. Starts from this VM's current choice.",
+			get:   func(m *model) bool { return m.resetWithOpenCode },
+			set:   func(m *model, v bool) { m.resetWithOpenCode = v },
+		},
+		{
+			label: "Install Pi",
+			help:  "Install the current Pi release in the rebuilt VM. Starts from this VM's current choice.",
+			get:   func(m *model) bool { return m.resetWithPi },
+			set:   func(m *model, v bool) { m.resetWithPi = v },
+		},
 		{
 			label: "Preserve the entire home directory",
 			help: "Copies all of ~ out of the VM to this host and back, then re-runs the playbook on top of it. " +
@@ -1087,25 +1116,21 @@ func (m model) buildConfig() (vm.CreateConfig, error) {
 	cfg.CloneToken = m.field(fCloneToken)
 	cfg.DisableStartAtBoot = m.formDisableStartAtBoot
 	if m.resetMode {
-		// Reset mode shows no tool-set toggles, so it has to REPLAY the VM's
-		// recorded selection (captured in openResetForm). cfg starts life as
-		// DefaultCreateConfig(), whose tools are all on; leaving them there would
-		// make every reset request the full tool-set, mark the SHARED base stale
-		// against its stamp, and re-converge it — installing the very Claude
-		// Code/Go/Java the user opted out of, silently, from a form that never
-		// mentions them.
+		// Agents come from the reset form's own rows, which openResetForm seeded
+		// from the VM's recorded selection.
 		cfg.WithClaude = m.resetWithClaude
 		cfg.WithCodex = m.resetWithCodex
 		cfg.WithOpenCode = m.resetWithOpenCode
 		cfg.WithPi = m.resetWithPi
+		// The base tool-set has no rows here, so it REPLAYS the recorded
+		// selection. cfg starts life as DefaultCreateConfig(), whose tools are
+		// all on; leaving them there would make every reset request the full
+		// tool-set, mark the SHARED base stale against its stamp, and re-converge
+		// it — installing the very Go/Java the user opted out of, silently, from
+		// a form that never mentions them.
 		cfg.WithDDEV = m.resetWithDDEV
 		cfg.WithGo = m.resetWithGo
 		cfg.WithJava = m.resetWithJava
-		// Codex is replayed like its siblings: the RECORDED selection is the
-		// truth here, not the default. Its default-off only protects the ADD
-		// direction (an unconfigured create never installs it); a VM reset
-		// from a recorded WithCodex=true must still replay true, or the reset
-		// would silently omit it from the replacement VM.
 	} else {
 		cfg.WithClaude = m.toolClaude
 		cfg.WithCodex = m.toolCodex
