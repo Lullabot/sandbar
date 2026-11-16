@@ -32,8 +32,9 @@ func TestTUIAgentChoicesPersistAt80x24(t *testing.T) {
 			return nil
 		},
 		ResetFunc: func(_ context.Context, c vm.CreateConfig, opts provision.ResetOptions, _ io.Writer) error {
-			if agentprefs.FromConfig(c) != all {
-				t.Errorf("reset lost recorded agents: %+v", c)
+			// Recorded with all four; the reset form unticks Codex below.
+			if want := (agentprefs.Selection{Claude: true, OpenCode: true, Pi: true}); agentprefs.FromConfig(c) != want {
+				t.Errorf("reset agents = %+v, want %+v", agentprefs.FromConfig(c), want)
 			}
 			reset <- opts
 			return nil
@@ -92,8 +93,14 @@ func TestTUIAgentChoicesPersistAt80x24(t *testing.T) {
 	m.focusIdx = fDockerProxyHost
 	tm = teatest.NewTestModel(t, m, teatest.WithInitialTermSize(80, 24))
 	waitForText(t, tm, "Reset VM")
+	// Install Claude Code, then Install OpenAI Codex: untick it.
 	tm.Send(tea.KeyPressMsg{Code: tea.KeyTab})
 	tm.Send(tea.KeyPressMsg{Code: tea.KeyTab})
+	tm.Send(tea.KeyPressMsg{Code: tea.KeySpace})
+	// OpenCode, Pi, whole home, then Preserve agent settings and files.
+	for range 4 {
+		tm.Send(tea.KeyPressMsg{Code: tea.KeyTab})
+	}
 	tm.Send(tea.KeyPressMsg{Code: tea.KeySpace})
 	tm.Send(ctrlKey('s'))
 	select {

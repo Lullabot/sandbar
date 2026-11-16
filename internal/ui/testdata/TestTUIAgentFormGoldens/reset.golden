@@ -1,12 +1,12 @@
                                                                                 
    Reset VM                                                                     
                                                                                 
-  Disk:              > 100GiB                                                   
-  Repository URL: (none) (locked)                                               
-  Git service:       Auto (locked)                                              
-  Clone token:       >                                                          
   Docker proxy host: >                                                          
                                                                                 
+  [ ] Install Claude Code                                                       
+  [ ] Install OpenAI Codex                                                      
+  [ ] Install OpenCode                                                          
+  [ ] Install Pi                                                                
   [ ] Preserve the entire home directory                                        
   [x] Preserve agent settings and files                                         
   Preserving copies data — agent settings and credentials, project tokens,      

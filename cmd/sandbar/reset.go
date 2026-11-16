@@ -119,6 +119,13 @@ func newResetFlagSet(o *resetOptions) *flag.FlagSet {
 	fs.StringVar(&o.values.domain, "domain", "", "Domain suffix (default: whatever this VM has)")
 	fs.StringVar(&o.values.dockerProxy, "docker-proxy-host", "", "Docker registry pull-through proxy host (default: whatever this VM has)")
 	fs.StringVar(&o.values.cloneToken, "clone-token", "", "Token for this VM's recorded repo (GitHub or GitLab); blank reuses its saved token")
+	// Agents install per VM during finalize, so a reset may change them without
+	// touching the shared base. Each flag defaults to the VM's recorded choice;
+	// unlike create, the remembered global preference plays no part here.
+	fs.BoolVar(&o.values.withClaude, "with-claude", false, "Install Claude Code in the rebuilt VM (default: whatever this VM has)")
+	fs.BoolVar(&o.values.withCodex, "with-codex", false, "Install OpenAI Codex in the rebuilt VM (default: whatever this VM has)")
+	fs.BoolVar(&o.values.withOpenCode, "with-opencode", false, "Install OpenCode in the rebuilt VM (default: whatever this VM has)")
+	fs.BoolVar(&o.values.withPi, "with-pi", false, "Install Pi in the rebuilt VM (default: whatever this VM has)")
 	fs.StringVar(&o.profile, "profile", "", "Connection profile NAME lives on (only needed when NAME exists under more than one enabled profile)")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), `Usage: sandbar reset NAME [flags]
@@ -148,7 +155,8 @@ preserve anything from a VM you believe is compromised.
 
 Every other flag you omit is taken from the VM's own recorded settings, so
 'sandbar reset web' means "give me this VM back". Pass one to change it:
-'sandbar reset web --disk 200GiB' resizes on the way through.
+'sandbar reset web --disk 200GiB' resizes on the way through, and
+'sandbar reset web --with-codex=false' leaves Codex out of the rebuilt VM.
 
 There is no --clone-url: a reset rebuilds the project this VM already has. To
 work on a different repo, create another VM with 'sandbar create'.
@@ -175,6 +183,7 @@ Examples:
   sandbar reset web --preserve ~/src/app --preserve ~/scratch/spike
   sandbar reset web --preserve-home                  # keep everything, rebuild the OS
   sandbar reset web --cpus 8 --memory 16GiB          # rebuild bigger
+  sandbar reset web --with-pi                        # add an agent
 
 Flags:
 `)
@@ -390,6 +399,8 @@ type resetFlagValues struct {
 	cpus, hostname, user, gitName, gitEmail string
 	memory, disk, locale, timezone, domain  string
 	dockerProxy, cloneToken                 string
+	withClaude, withCodex                   bool
+	withOpenCode, withPi                    bool
 }
 
 // resetConfigFor builds the config a reset rebuilds NAME from: the VM's own
@@ -419,12 +430,19 @@ func resetConfigFromRecord(rec vm.CreateConfig, found bool, name, base string, e
 		// on what "a flag you did not pass" means. It is keyed by FLAG NAME, and
 		// this flag set uses create's names for every setting it shares.
 		adoptRecordedConfig(&cfg, rec, explicit)
-		// The tool-set is not adopted from the flags (this command has none): it
-		// is the VM's own recorded selection, replayed exactly as the TUI's reset
-		// form replays it. Requesting the full default set instead would mark the
-		// SHARED base stale and re-converge tools the user opted out of.
-		cfg.WithClaude, cfg.WithCodex = rec.WithClaude, rec.WithCodex
+		// The base tool-set has no flags here: it is the VM's own recorded
+		// selection, replayed exactly as the TUI's reset form replays it.
+		// Requesting the full default set instead would mark the SHARED base
+		// stale and re-converge tools the user opted out of.
 		cfg.WithDDEV, cfg.WithGo, cfg.WithJava = rec.WithDDEV, rec.WithGo, rec.WithJava
+		// Agents start from the recorded selection as well, copied through
+		// AgentPtrs so a newly added agent cannot be skipped: DefaultCreateConfig
+		// has every agent off, so one missed here is silently dropped by the
+		// reset (OpenCode and Pi once were). Explicit --with-* flags apply below.
+		recAgents := rec.AgentPtrs()
+		for agent, selected := range cfg.AgentPtrs() {
+			*selected = *recAgents[agent]
+		}
 	} else {
 		// No record: default the identity from this host, mirroring the TUI's
 		// openResetForm fallback for a pre-snapshot index entry.
@@ -440,6 +458,15 @@ func resetConfigFromRecord(rec vm.CreateConfig, found bool, name, base string, e
 	// see runReset's flag-set comment.
 	cfg.BaseName = base
 
+	flagAgents := map[string]bool{
+		"claude": flags.withClaude, "codex": flags.withCodex,
+		"opencode": flags.withOpenCode, "pi": flags.withPi,
+	}
+	for agent, selected := range cfg.AgentPtrs() {
+		if explicit["with-"+agent] {
+			*selected = flagAgents[agent]
+		}
+	}
 	if explicit["no-start-at-boot"] {
 		cfg.DisableStartAtBoot = flags.disableStartAtBoot
 	}

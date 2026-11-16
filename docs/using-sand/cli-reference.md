@@ -359,6 +359,7 @@ sandbar reset web --preserve-agents --preserve-project
 sandbar reset web --preserve '~/src/app' --preserve '~/scratch/spike'
 sandbar reset web --preserve-home                    # keep the guest home
 sandbar reset web --cpus 8 --memory 16GiB            # change CPU and memory
+sandbar reset web --with-pi --with-codex=false       # change installed agents
 ```
 
 `sandbar` refuses to reset a VM it does not manage. It checks the VM's ownership
@@ -523,6 +524,7 @@ before creating a VM.
 | `--timezone` | string | *this VM's* | IANA timezone. Naming one explicitly makes an unknown zone fatal in the guest, exactly as it does on `sandbar create`. |
 | `--domain` | string | *this VM's* | Domain suffix. |
 | `--docker-proxy-host` | string | *this VM's* | Docker registry pull-through proxy host. |
+| `--with-claude` / `--with-codex` / `--with-opencode` / `--with-pi` | bool | *this VM's* | Install that agent in the rebuilt VM. Use `=false` to remove one. Does not change the remembered choices for new VMs. |
 | `--clone-token` | string | *(empty)* | GitHub or GitLab token for this VM's recorded repo. Blank reuses the saved global GitHub or matching scoped GitLab token. An explicit token replaces the saved token after success. A restored checkout skips cloning. |
 | `--from-backup` | string (directory) | *(none)* | Finish a reset that failed after the VM was deleted: rebuild `NAME` and restore the backup in this directory. See [If a reset fails after the VM was deleted](#if-a-reset-fails-after-the-vm-was-deleted). |
 | `--profile` | string | *the profile that owns NAME* | Which [Connection Profile](connection-profiles.md) `NAME` lives on. Only needed when the same name exists under more than one enabled profile. With `--from-backup`, the default is the profile recorded in the backup. |

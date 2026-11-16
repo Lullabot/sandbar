@@ -62,6 +62,8 @@ func recordedVM() vm.CreateConfig {
 		CloneURL:        "https://github.com/octocat/hello",
 		WithClaude:      true,
 		WithCodex:       true,
+		WithOpenCode:    true,
+		WithPi:          true,
 		WithDDEV:        false,
 		WithGo:          false,
 		WithJava:        false,
@@ -116,6 +118,53 @@ func TestResetConfigAppliesExplicitFlags(t *testing.T) {
 	// Untouched settings are still the VM's own.
 	if got.Hostname != "web-box" || got.CloneURL != recordedVM().CloneURL || got.Domain != "internal" {
 		t.Errorf("a flag that was not passed changed anyway: %+v", got)
+	}
+}
+
+// TestResetConfigAgentFlags: agents install per VM, so a reset may change them.
+// The flags go through the real flag set, so this also proves "--with-x=false"
+// counts as passed (it must turn an agent OFF, not fall back to the record),
+// and an agent whose flag is absent keeps its recorded choice.
+func TestResetConfigAgentFlags(t *testing.T) {
+	var o resetOptions
+	fs := newResetFlagSet(&o)
+	fs.SetOutput(io.Discard)
+	if err := fs.Parse([]string{"--with-codex=false", "--with-pi=false", "web"}); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	explicit := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+
+	rec := recordedVM()
+	rec.WithClaude, rec.WithOpenCode = false, false
+	reg := registry.NewEmpty()
+	if err := reg.AddScoped(rec, registry.LocalScope); err != nil {
+		t.Fatalf("seed registry: %v", err)
+	}
+	got, err := resetConfigFor(reg, "web", registry.LocalScope, "work-base", explicit, o.values, "hostuser")
+	if err != nil {
+		t.Fatalf("resetConfigFor: %v", err)
+	}
+	if got.WithClaude || got.WithCodex || got.WithOpenCode || got.WithPi {
+		t.Errorf("agents = claude:%v codex:%v opencode:%v pi:%v, want all off (two recorded off, two turned off by flag)",
+			got.WithClaude, got.WithCodex, got.WithOpenCode, got.WithPi)
+	}
+
+	o = resetOptions{}
+	fs = newResetFlagSet(&o)
+	fs.SetOutput(io.Discard)
+	if err := fs.Parse([]string{"--with-claude", "--with-opencode", "web"}); err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	explicit = map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+	got, err = resetConfigFor(reg, "web", registry.LocalScope, "work-base", explicit, o.values, "hostuser")
+	if err != nil {
+		t.Fatalf("resetConfigFor: %v", err)
+	}
+	if !got.WithClaude || !got.WithCodex || !got.WithOpenCode || !got.WithPi {
+		t.Errorf("agents = claude:%v codex:%v opencode:%v pi:%v, want all on (two recorded on, two added by flag)",
+			got.WithClaude, got.WithCodex, got.WithOpenCode, got.WithPi)
 	}
 }
 
