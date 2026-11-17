@@ -169,3 +169,28 @@ func TestAHeldPipeDoesNotMaskARealFailure(t *testing.T) {
 // stdout/stderr past sshx.WaitDelay while the shell itself exits promptly — the
 // ssh -> ControlPersist-master relationship, in one line of POSIX sh.
 const holderScript = `(sleep 5 &)`
+
+// Output carries ShellOut's `limactl shell` reads, so it needs the same
+// held-pipe handling as Stream: a clean exit with a lingering holder is a
+// success with the output intact, and a real failure keeps its exit status.
+func TestOutputHeldPipe(t *testing.T) {
+	r := &execRunner{bin: "sh"}
+
+	start := time.Now()
+	out, err := r.Output(context.Background(), "-c", holderScript+"; echo done")
+	if elapsed := time.Since(start); elapsed > sshx.WaitDelay+2*time.Second {
+		t.Fatalf("Output returned after %s; want the wait bounded by WaitDelay (%s), not by the holder", elapsed, sshx.WaitDelay)
+	}
+	if err != nil {
+		t.Fatalf("Output reported %v for a command that exited 0; a lingering pipe-holder is not the command's failure", err)
+	}
+	if !bytes.Contains(out, []byte("done")) {
+		t.Fatalf("Output = %q, want the child's own output", out)
+	}
+
+	_, err = r.Output(context.Background(), "-c", holderScript+"; exit 7")
+	var ee *exec.ExitError
+	if !errors.As(err, &ee) || ee.ExitCode() != 7 {
+		t.Fatalf("Output error = %v; want the child's own exit status 7", err)
+	}
+}
