@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.19.1](https://github.com/Lullabot/sandbar/compare/v0.19.0...v0.19.1) (2026-11-17)
+
+
+### Bug Fixes
+
+* **checkouts:** lock and re-read the checkout registry before saving ([#367](https://github.com/Lullabot/sandbar/issues/367)) ([8c65b9f](https://github.com/Lullabot/sandbar/commit/8c65b9f1679ab151d9960f01de73be462c544856))
+* **provider:** bound captured guest reads held open by an ssh child ([#368](https://github.com/Lullabot/sandbar/issues/368)) ([79dd8e1](https://github.com/Lullabot/sandbar/commit/79dd8e16edc6ff309fb39fc14f55c8d5a415de3f))
+* **proxmox:** apply the requested CPU and memory to cloned VMs ([#365](https://github.com/Lullabot/sandbar/issues/365)) ([7398665](https://github.com/Lullabot/sandbar/commit/7398665fcae9cc70bf27b47950b51215f98c00c6))
+* **secrets:** give each scope its own git credential file ([#364](https://github.com/Lullabot/sandbar/issues/364)) ([98bbfee](https://github.com/Lullabot/sandbar/commit/98bbfeea6c2b901e24b522581158e5a8416c41d3))
+* **state:** refuse to save over a state file this build cannot read ([#366](https://github.com/Lullabot/sandbar/issues/366)) ([b191499](https://github.com/Lullabot/sandbar/commit/b191499c653671a8574ce6e0b199472a5b29daf5))
+
 ## [0.19.0](https://github.com/Lullabot/sandbar/compare/v0.18.0...v0.19.0) (2026-11-17)
 
 
