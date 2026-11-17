@@ -60,6 +60,7 @@ import (
 	"time"
 
 	"github.com/lullabot/sandbar/internal/registry"
+	"github.com/lullabot/sandbar/internal/statelock"
 )
 
 // Kind distinguishes a checkout that is a repository's own working tree from
@@ -326,32 +327,58 @@ type versionProbe struct {
 // misparsed and silently narrowed.
 func LoadFrom(path string) (*Registry, error) {
 	r := &Registry{path: path, vms: map[vmHandle]VMCheckouts{}}
-	data, err := os.ReadFile(path)
+	vms, err := readFile(path)
 	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
-			return r, nil
+		var ce *corruptError
+		if errors.As(err, &ce) {
+			_ = os.Rename(path, path+".corrupt")
+			return r, fmt.Errorf("checkout registry at %s was unreadable (moved to %s.corrupt): %w", path, path, ce.err)
 		}
 		return r, err
 	}
+	r.vms = vms
+	return r, nil
+}
+
+// corruptError marks a file whose bytes do not parse, as distinct from one
+// that could not be read or is from a newer schema. Only LoadFrom moves such a
+// file aside; mutate's re-read must not rename anything under the lock.
+type corruptError struct{ err error }
+
+func (e *corruptError) Error() string { return e.err.Error() }
+
+// errNewerSchema is returned by readFile for a file stamped with a schema
+// version this build does not understand.
+var errNewerSchema = errors.New("checkout registry has a newer schema")
+
+// readFile decodes the registry at path. A missing or empty file is an empty
+// map, not an error. It never modifies the file.
+func readFile(path string) (map[vmHandle]VMCheckouts, error) {
+	vms := map[vmHandle]VMCheckouts{}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return vms, nil
+		}
+		return nil, err
+	}
 	if len(data) == 0 {
-		return r, nil
+		return vms, nil
 	}
 
 	var probe versionProbe
 	if err := json.Unmarshal(data, &probe); err != nil {
-		_ = os.Rename(path, path+".corrupt")
-		return r, fmt.Errorf("checkout registry at %s was unreadable (moved to %s.corrupt): %w", path, path, err)
+		return nil, &corruptError{err}
 	}
 	if probe.Version > currentVersion {
-		return r, fmt.Errorf(
-			"checkout registry %s has schema version %d, but this sandbar only understands %d; upgrade sandbar",
-			path, probe.Version, currentVersion)
+		return nil, fmt.Errorf(
+			"%w: %s has schema version %d, but this sandbar only understands %d; upgrade sandbar",
+			errNewerSchema, path, probe.Version, currentVersion)
 	}
 
 	var parsed fileSchema
 	if err := json.Unmarshal(data, &parsed); err != nil {
-		_ = os.Rename(path, path+".corrupt")
-		return r, fmt.Errorf("checkout registry at %s was unreadable (moved to %s.corrupt): %w", path, path, err)
+		return nil, &corruptError{err}
 	}
 	for _, de := range parsed.VMs {
 		scope := registry.Scope{Provider: de.Provider, RemoteTarget: de.RemoteTarget}
@@ -359,13 +386,13 @@ func LoadFrom(path string) (*Registry, error) {
 		if probe.Version < 2 {
 			migrateLocalOnly(cs)
 		}
-		r.vms[vmHandle{scope: scope, name: de.Name}] = VMCheckouts{
+		vms[vmHandle{scope: scope, name: de.Name}] = VMCheckouts{
 			Checkouts: cs,
 			Truncated: de.Truncated,
 			SweptAt:   de.SweptAt,
 		}
 	}
-	return r, nil
+	return vms, nil
 }
 
 // migrateLocalOnly fills the v2 LocalOnly field on rows a v1 build wrote,
@@ -431,19 +458,53 @@ func (r *Registry) Set(scope registry.Scope, vm string, c VMCheckouts) error {
 	if r == nil {
 		return errors.New("checkouts: Set called on a nil Registry")
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.vms[vmHandle{scope: scope, name: vm}] = VMCheckouts{
+	stored := VMCheckouts{
 		Checkouts: cloneCheckouts(c.Checkouts),
 		Truncated: c.Truncated,
 		SweptAt:   c.SweptAt,
 	}
+	return r.mutate(func(vms map[vmHandle]VMCheckouts) {
+		vms[vmHandle{scope: scope, name: vm}] = stored
+	})
+}
+
+// mutate is the registry's only write path: under r.mu and the state file's
+// lock it re-reads the file, applies the change, and saves. The file is
+// rewritten whole, so saving this process's map without the re-read would
+// erase every VM another sandbar process recorded since this one loaded —
+// and the delete guard reads exactly those records to warn about unpushed
+// work. A file from a newer schema is refused rather than overwritten; any
+// other re-read failure keeps the in-memory map as the best recovery source,
+// matching internal/registry.
+func (r *Registry) mutate(apply func(vms map[vmHandle]VMCheckouts)) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.path == "" {
+		apply(r.vms)
+		return nil
+	}
+	// The lock file lives beside the state file, so its directory must exist
+	// before the first write, or that write would run unserialized.
+	if err := os.MkdirAll(filepath.Dir(r.path), 0o755); err != nil {
+		return err
+	}
+	release := statelock.Acquire(r.path)
+	defer release()
+
+	vms, err := readFile(r.path)
+	switch {
+	case errors.Is(err, errNewerSchema):
+		return err
+	case err == nil:
+		r.vms = vms
+	}
+	apply(r.vms)
 	return r.save()
 }
 
 // save writes the registry atomically (unique temp file + rename), mirroring
-// registry.go/secrets.go. It must be called with r.mu already held — every
-// call site above takes the lock first. An empty path is a no-op, so
+// registry.go/secrets.go. It is called only by mutate, which holds r.mu and
+// the state file's lock. An empty path is a no-op, so
 // NewEmpty's in-memory registry never touches disk. Entries are written in a
 // stable (Provider, RemoteTarget, Name) sort order so two saves of the same
 // logical state produce byte-identical output, rather than flapping with Go's
