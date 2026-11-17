@@ -1695,3 +1695,49 @@ func TestProxmoxCloneStartAtBoot(t *testing.T) {
 		})
 	}
 }
+
+// A clone inherits cores and memory from its template, which was sized by the
+// first create that built the base. The clone's config write must carry the
+// size this VM asked for, and leave out a size that was never set rather than
+// send PVE a zero.
+func TestProxmoxCloneAppliesRequestedSize(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		cpus               int
+		memory             string
+		wantCores, wantMem string
+	}{
+		{"requested", 8, "16GiB", "8", "16384"},
+		{"unset", 0, "", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newPVEMock(t)
+			p := newCreateProvider(t, m)
+			writes := 0
+			m.on("/nodes/pve1/qemu/101/config", func(w http.ResponseWriter, r *http.Request) {
+				if err := r.ParseForm(); err != nil {
+					t.Error(err)
+				}
+				if got := r.Form.Get("cores"); got != tc.wantCores {
+					t.Errorf("cores = %q, want %q", got, tc.wantCores)
+				}
+				if got := r.Form.Get("memory"); got != tc.wantMem {
+					t.Errorf("memory = %q, want %q", got, tc.wantMem)
+				}
+				writes++
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"data":null}`))
+			})
+			m.data("/nodes/pve1/qemu/101/cloudinit", `null`)
+			cfg := webConfig()
+			cfg.CPUs = tc.cpus
+			cfg.Memory = tc.memory
+			if err := p.applyCloudInitIdentity(context.Background(), 101, cfg, io.Discard); err != nil {
+				t.Fatal(err)
+			}
+			if writes != 1 {
+				t.Fatalf("config writes = %d", writes)
+			}
+		})
+	}
+}

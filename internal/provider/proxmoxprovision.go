@@ -660,6 +660,12 @@ func (p *proxmoxProvider) finalizeClone(ctx context.Context, vmid int, cfg vm.Cr
 // never take effect. The SSH key itself is inherited from the template (baked in
 // at base-create time, where its double-encoding is handled), so it is not
 // rewritten here.
+//
+// The same write also sizes the clone. A clone inherits cores and memory from
+// its template, and the template was sized by whichever create first built the
+// base, so without this every later VM silently got that first VM's size rather
+// than the one it asked for. An unset or unparseable value is left out, which
+// keeps the template's setting instead of sending PVE a zero.
 func (p *proxmoxProvider) applyCloudInitIdentity(ctx context.Context, vmid int, cfg vm.CreateConfig, out io.Writer) error {
 	progress(out, "Applying cloud-init identity to VMID %d\n", vmid)
 	onboot := "1"
@@ -670,6 +676,12 @@ func (p *proxmoxProvider) applyCloudInitIdentity(ctx context.Context, vmid int, 
 		"onboot":    {onboot},
 		"ciuser":    {p.ciUser},
 		"ipconfig0": {"ip=dhcp"},
+	}
+	if cfg.CPUs > 0 {
+		form.Set("cores", strconv.Itoa(cfg.CPUs))
+	}
+	if mib := memMiB(cfg.Memory); mib > 0 {
+		form.Set("memory", strconv.Itoa(mib))
 	}
 	if err := p.client.SetConfigSync(ctx, vmid, form); err != nil {
 		return fmt.Errorf("proxmox: writing cloud-init config for VMID %d: %w", vmid, err)
