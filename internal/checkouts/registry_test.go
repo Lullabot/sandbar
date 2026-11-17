@@ -652,3 +652,67 @@ func TestLoadFromMigratesV1LocalOnly(t *testing.T) {
 		t.Errorf("LocalOnly on a clean pushed row = %d, want 0", got)
 	}
 }
+
+// TestSetKeepsAnotherProcessesRecords: two registries loaded from the same
+// file stand in for two sandbar processes (a TUI and a CLI, or two TUIs).
+// Each records a different VM. The file is rewritten whole, so without the
+// re-read under the lock the second Set saved its own stale map and erased
+// the first VM's record — the record the delete guard reads to warn about
+// unpushed work.
+func TestSetKeepsAnotherProcessesRecords(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "checkout-registry.json")
+	a, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom a: %v", err)
+	}
+	b, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom b: %v", err)
+	}
+	if err := a.Set(registry.LocalScope, "web", VMCheckouts{Checkouts: []Checkout{sampleCheckout("/home/u/web")}}); err != nil {
+		t.Fatalf("a.Set: %v", err)
+	}
+	if err := b.Set(registry.LocalScope, "api", VMCheckouts{Checkouts: []Checkout{sampleCheckout("/home/u/api")}}); err != nil {
+		t.Fatalf("b.Set: %v", err)
+	}
+
+	reloaded, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	for _, vm := range []string{"web", "api"} {
+		if _, ok := reloaded.Get(registry.LocalScope, vm); !ok {
+			t.Errorf("record for %q was lost from disk", vm)
+		}
+	}
+	// The writer's own view must match the file it just wrote.
+	if _, ok := b.Get(registry.LocalScope, "web"); !ok {
+		t.Error("b's in-memory registry did not pick up a's record on its re-read")
+	}
+}
+
+// TestSetRefusesToOverwriteNewerSchema: a newer sandbar may have written the
+// file since this process loaded it. Saving this build's narrower map over
+// it would destroy whatever the newer schema holds, so Set must fail and
+// leave the file alone.
+func TestSetRefusesToOverwriteNewerSchema(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "checkout-registry.json")
+	r, err := LoadFrom(path)
+	if err != nil {
+		t.Fatalf("LoadFrom: %v", err)
+	}
+	newer := []byte(`{"version":999,"vms":[]}`)
+	if err := os.WriteFile(path, newer, 0o600); err != nil {
+		t.Fatalf("write newer file: %v", err)
+	}
+	if err := r.Set(registry.LocalScope, "web", VMCheckouts{}); err == nil {
+		t.Fatal("expected Set to refuse a file from a newer schema")
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if string(got) != string(newer) {
+		t.Fatalf("newer-schema file was overwritten: %s", got)
+	}
+}

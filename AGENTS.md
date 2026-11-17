@@ -167,9 +167,10 @@ it is not where prose belongs.
   `Reconcile` must prune only entries the caller already knew about; a VM
   created after the caller's listing is not evidence of a deleted VM.
 - `statelock` — advisory file locks (`<path>.lock`, `syscall.Flock`) for
-  `registry`, `secrets` and `profiles` read-modify-write operations. Each
-  store's writes go through one method that locks, re-reads the file,
-  applies the change and saves (`mutate` in `registry` and `profiles`); a
+  `registry`, `secrets`, `profiles` and `checkouts` read-modify-write
+  operations. Each store's writes go through one method that locks, re-reads
+  the file, applies the change and saves (`mutate` in `registry`, `profiles`
+  and `checkouts`); a
   `save` from anywhere else reopens the lost-update race. If the lock cannot
   be acquired within the wait budget, the write proceeds without it, as
   with the provisioner's base lock.
