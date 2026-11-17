@@ -473,10 +473,18 @@ func (s *Store) mutate(apply func(vms scopedVMs)) error {
 	release := statelock.Acquire(s.path)
 	defer release()
 
-	// A re-read that fails (a corrupt file, which readStore has just
-	// quarantined) leaves this process's own entries as the best available
-	// state — the same posture LoadFrom takes.
-	if vms, err := readStore(s.path); err == nil {
+	// A corrupt file has just been moved aside by readStore, so writing this
+	// process's own entries in its place loses nothing. Any other failure — a
+	// file from a newer sandbar, or one that cannot be read right now — leaves
+	// that file in place, and saving over it would replace every secret it
+	// holds with this process's copy, which is EMPTY when LoadFrom refused the
+	// same file at startup. Refuse instead; the file is untouched.
+	vms, err := readStore(s.path)
+	if err != nil {
+		if _, statErr := os.Lstat(s.path); statErr == nil {
+			return fmt.Errorf("not saving secrets: %w", err)
+		}
+	} else {
 		s.vms = vms
 	}
 	apply(s.vms)

@@ -1,7 +1,7 @@
 // Package statelock serializes writes to sand's host-side state files —
 // the managed-VM index (internal/registry), the secrets store
-// (internal/secrets) and the connection profiles (internal/profiles) — across
-// concurrent sand processes.
+// (internal/secrets), the connection profiles (internal/profiles) and the
+// checkout registry (internal/checkouts) — across concurrent sand processes.
 //
 // Each file is rewritten WHOLE from an in-memory map. That is safe for one
 // writer and quietly lossy for two: a long-running TUI holds the state it read

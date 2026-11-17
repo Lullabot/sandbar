@@ -77,8 +77,13 @@
     # Store auth independently of the current shell: a new agent or shell can
     # fetch immediately, and the host-specific helper never serves another host.
     - name: Set credential paths
+      vars:
+        _clone_cred_scope: "{{ _clone_host ~ '/' ~ (_clone_relpath | dirname) }}"
       ansible.builtin.set_fact:
-        _clone_cred_slug: "{{ (_clone_host ~ '/' ~ (_clone_relpath | dirname)) | regex_replace('[^A-Za-z0-9]+', '-') }}{{ '-gitlab' if _clone_forge == 'gitlab' else '' }}"
+        # Mirrors gitCredSlug in internal/provision/gitcred.go: the readable
+        # part alone lets "foo-bar" and "foo_bar" share one file, so the
+        # scope's SHA-256 prefix keeps distinct scopes apart.
+        _clone_cred_slug: "{{ _clone_cred_scope | regex_replace('[^A-Za-z0-9]+', '-') }}-{{ (_clone_cred_scope | hash('sha256'))[:8] }}{{ '-gitlab' if _clone_forge == 'gitlab' else '' }}"
       when: project_clone_token | length > 0 and _clone_forge == 'gitlab'
 
     - name: Create scoped credential directories
