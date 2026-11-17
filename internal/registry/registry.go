@@ -797,9 +797,17 @@ func (r *Registry) mutate(apply func(vms map[scopedKey]entry, templates map[scop
 	release := statelock.Acquire(r.path)
 	defer release()
 
-	// A failed re-read leaves this process's in-memory state as the best
-	// available recovery source, matching LoadFrom's posture for corrupt files.
-	if vms, templates, _, err := readIndex(r.path); err == nil {
+	// A corrupt file has just been moved aside by readIndex, so this process's
+	// in-memory state is the best available recovery source. Any other failure
+	// leaves the file in place: one a newer sandbar wrote after this process
+	// loaded (an upgrade under a running TUI), or one unreadable right now.
+	// Saving over either would downgrade or erase it, so refuse instead.
+	vms, templates, _, err := readIndex(r.path)
+	if err != nil {
+		if _, statErr := os.Lstat(r.path); statErr == nil {
+			return fmt.Errorf("not saving the managed-VM index: %w", err)
+		}
+	} else {
 		r.vms = vms
 		r.templates = templates
 	}
