@@ -23,6 +23,7 @@ import (
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/provision"
+	"github.com/lullabot/sandbar/internal/sshconfig"
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
@@ -56,6 +57,7 @@ type Provider struct {
 	AttachArgvControlFunc func(v vm.VM) []string
 	RunArgvFunc           func(v vm.VM, workdir, expr string) []string
 	ForwardArgvFunc       func(v vm.VM, hostPort, guestPort int) []string
+	EditorSSHFunc         func(ctx context.Context, v vm.VM) (sshconfig.Entry, error)
 	GuestHomeFunc         func(v vm.VM) string
 	GuestUserFunc         func(v vm.VM) string
 	GuestPathFunc         func(name, path string) string
@@ -239,6 +241,16 @@ func (f *Provider) ForwardArgv(v vm.VM, hostPort, guestPort int) []string {
 		return f.ForwardArgvFunc(v, hostPort, guestPort)
 	}
 	return nil
+}
+
+// EditorSSH defaults to a zero Entry and nil error, per the package's
+// defaulting contract. A zero Entry has no alias, so a caller that goes on to
+// render it gets sshconfig's validation error rather than a written block.
+func (f *Provider) EditorSSH(ctx context.Context, v vm.VM) (sshconfig.Entry, error) {
+	if f.EditorSSHFunc != nil {
+		return f.EditorSSHFunc(ctx, v)
+	}
+	return sshconfig.Entry{}, nil
 }
 
 func (f *Provider) GuestHome(v vm.VM) string {

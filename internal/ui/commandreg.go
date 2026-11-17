@@ -302,6 +302,19 @@ var vmCommands = []vmCommand{
 		},
 	},
 	{
+		binding: key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "code")),
+		about: "Open the VM in VS Code over Remote-SSH, on its project checkout. sandbar writes the VM's ssh host entry to its own ssh config; " +
+			"the first time, it asks before adding one Include line to ~/.ssh/config.",
+		// Running only: a stopped VM's entry could not be resolved (Proxmox has
+		// no address for it) and VS Code would just time out. And not while a
+		// build or a reset owns it, the same guard as Shell: a reset is about to
+		// delete the guest this would open.
+		enabledFor: func(m model, v boardVM) bool { return notBuilding(m, v) && v.Status == limaRunning },
+		action: func(m *model, v boardVM) tea.Cmd {
+			return m.openInCode(v)
+		},
+	},
+	{
 		id:      "snapshot",
 		binding: key.NewBinding(key.WithKeys("t"), key.WithHelp("t", "snapshot→template")),
 		about: "Capture this VM into a reusable golden template: prompts for a name, then stops it " +

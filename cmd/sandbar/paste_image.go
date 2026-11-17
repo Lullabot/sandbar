@@ -110,15 +110,5 @@ exits non-zero.
 // (see that package's doc comment). Factored out from runPasteImage so it can
 // be tested with a stub vmLookup instead of a real provider.
 func pasteImageTarget(l vmLookup, name string) (vm.VM, error) {
-	found, err := l.Get(name)
-	if err != nil {
-		if errors.Is(err, vm.ErrNotFound) {
-			return vm.VM{}, fmt.Errorf("sandbar paste-image: no VM named %q (run 'sandbar' to list instances)", name)
-		}
-		return vm.VM{}, fmt.Errorf("sandbar paste-image: %w", err)
-	}
-	if found.Status != limaRunning {
-		return vm.VM{}, fmt.Errorf("sandbar paste-image: VM %q is not running (status: %s); start it first", name, found.Status)
-	}
-	return found, nil
+	return requireRunningVM(l, "paste-image", name)
 }

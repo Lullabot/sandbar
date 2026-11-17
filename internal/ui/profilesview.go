@@ -38,6 +38,7 @@ import (
 	"github.com/lullabot/sandbar/internal/profiles"
 	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/registry"
+	"github.com/lullabot/sandbar/internal/vscode"
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
@@ -523,23 +524,30 @@ func (m *model) disableProfile(id string) {
 // still present in m.members, so a member removed out from under it would
 // otherwise leak an open guest shell forever. Gated on the profile being
 // idle, exactly like disable.
-func (m *model) deleteProfile(id string) {
+//
+// The one thing it does remove is the profile's VS Code ssh host entries, in
+// the returned command (a file rewrite, kept off the Update goroutine). Unlike
+// the registry and secrets, which are keyed by the connection and so do come
+// back with a re-added profile, entries are named by the profile's ID, which a
+// re-added profile never gets again: nothing would ever rewrite or remove
+// them, and a Proxmox one pins a DHCP address another machine may be handed.
+func (m *model) deleteProfile(id string) tea.Cmd {
 	if m.profileStore == nil {
 		m.profileMsg = "profile store unavailable"
-		return
+		return nil
 	}
 	p, ok := m.profileStore.Get(id)
 	if !ok {
 		m.profileMsg = fmt.Sprintf("no profile with id %q", id)
-		return
+		return nil
 	}
 	if job, blocked := m.profileBlockingJobForID(id); blocked {
 		m.profileMsg = fmt.Sprintf("cannot delete %q: %s is in flight — finish or cancel it first", p.Name, job)
-		return
+		return nil
 	}
 	if err := m.profileStore.Remove(id); err != nil {
 		m.profileMsg = err.Error()
-		return
+		return nil
 	}
 	m.profileMsg = "deleted " + p.Name
 	if i, exists := m.memberIndexByProfileID(id); exists {
@@ -557,6 +565,9 @@ func (m *model) deleteProfile(id string) {
 	// (and every heartbeat under its scope) is already gone by this point.
 	m.heartbeats.setShell(fleetShellResolver(m.members))
 	m.applySize(m.width, m.height)
+	return removeEditorEntriesCmd("profile "+p.Name+": ssh host entries", func() ([]string, error) {
+		return vscode.RemoveProfileEntries(p)
+	})
 }
 
 // connectionFieldsEqual reports whether a and b would build the SAME
@@ -1133,9 +1144,9 @@ func (m model) updateProfiles(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Confirm): // y
 			id := m.profileConfirmDeleteID
 			m.profileConfirmDeleteID = ""
-			m.deleteProfile(id)
+			cmd := m.deleteProfile(id)
 			m.clampProfileCursor()
-			return m, nil
+			return m, cmd
 		case key.Matches(msg, m.keys.Cancel): // n / esc
 			m.profileConfirmDeleteID = ""
 			return m, nil

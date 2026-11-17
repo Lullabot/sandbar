@@ -14,5 +14,5 @@
                                                                                 
   list failed: ssh: connection refused                                          
   ↑↓←→ move • n new • / search • x stop • r restart • R reset • enter/S shell   
-  t snapshot→template • d delete • u upload • g download • v paste image …      
+  c code • t snapshot→template • d delete • u upload • g download …             
                                                                                 

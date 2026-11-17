@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/lullabot/sandbar/internal/provision"
+	"github.com/lullabot/sandbar/internal/sshconfig"
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
@@ -70,6 +71,9 @@ func TestZeroValueNeverPanics(t *testing.T) {
 	}
 	if got := f.ForwardArgv(vm.VM{}, 8080, 3000); got != nil {
 		t.Errorf("ForwardArgv() = %v, want nil", got)
+	}
+	if got, err := f.EditorSSH(ctx, vm.VM{}); got != (sshconfig.Entry{}) || err != nil {
+		t.Errorf("EditorSSH() = (%+v, %v), want (zero Entry, nil)", got, err)
 	}
 	if got := f.GuestHome(vm.VM{}); got != "" {
 		t.Errorf("GuestHome() = %q, want \"\"", got)

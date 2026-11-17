@@ -185,9 +185,9 @@ one connection profile, --profile picks which one to act on.
 	if err := p.Preflight(); err != nil {
 		return err
 	}
-	v, err := requireRunningVM(p, name)
+	v, err := requireRunningVM(p, "publish", name)
 	if err != nil {
-		return rewordRequireRunningVMError(err)
+		return err
 	}
 
 	// A ctrl-C during collection or a drupal.org call should cancel it
@@ -203,24 +203,6 @@ one connection profile, --profile picks which one to act on.
 	}
 
 	return doPublish(ctx, os.Stdout, os.Stdin, isTerminal(os.Stdin), providerCollector{p: p}, dp, v, path, issue, *yesFlag, *allowOutsideNSFlag)
-}
-
-// rewordRequireRunningVMError re-prefixes a requireRunningVM error (land.go)
-// for this command. requireRunningVM's DECISIONS (unknown vs. not-running)
-// and their wording are reused verbatim rather than invented a second time
-// for the same fact — see runPublish's doc comment — but its error text is
-// hardcoded with land.go's own "sandbar land:" prefix (it is land.go's
-// helper, after all), which would otherwise misreport this command's own
-// name. Only that prefix is swapped, via CutPrefix rather than a bare
-// TrimPrefix, so a future edit to land.go's wording that drops the prefix
-// is not silently double-prefixed here — it fails loudly (falls back to
-// wrapping the whole original message) instead of guessing.
-func rewordRequireRunningVMError(err error) error {
-	rest, ok := strings.CutPrefix(err.Error(), "sandbar land: ")
-	if !ok {
-		return fmt.Errorf("sandbar publish: %w", err)
-	}
-	return fmt.Errorf("sandbar publish: %s", rest)
 }
 
 // reorderPublishFlags moves every recognised flag token (and, for --profile,

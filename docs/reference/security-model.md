@@ -284,6 +284,44 @@ pinning on, because there the key is stable and a change is worth stopping for.
 Keep the VM subnet one you trust; it is the same network you must already trust
 to reach the guests at all.
 
+### Editor entries do not check host keys
+
+[Opening a VM in VS Code](../using-sand/vscode.md) writes an ssh host entry
+that outlives the sandbar process, and on Proxmox it carries the same posture as
+the guest transport above: the guest's DHCP address with
+`StrictHostKeyChecking no` and `UserKnownHostsFile /dev/null`. This is an
+accepted gap, and it is wider than the transport's, because VS Code can use the
+entry when sandbar is not running.
+
+**The risk.** If the VM is gone and its address is handed to another machine,
+reopening the alias from VS Code's recent list connects to whatever now holds
+the address, with no host-key warning. VS Code offers the profile's
+`identity_path` key to that machine and, if it accepts a login, installs its
+server there and opens a remote window on it. The private key does not leave
+your workstation, but the other machine learns which key you offered and can
+present itself as your VM.
+
+**Why it is accepted.** Guests are throwaway: each reset rebuilds the VM with
+a new host key, usually on an address an earlier VM used. A pinned key would
+make every reopen after a reset fail with a "host key changed" refusal, which
+teaches deleting `known_hosts` entries by reflex.
+
+**What limits it.** sandbar reads the address afresh from the guest agent each
+time you open the VM, and removes a VM's entry whenever it sees the VM is gone:
+a delete from the board, a VM the board notices has disappeared, any VM missing
+from its profile's listing when you open another, and every entry of a deleted
+profile. A VM deleted while sandbar is not running keeps its entry until one of
+those happens, so open VMs from sandbar (`c` or `sandbar code`) rather than from
+VS Code's recent list when you have been deleting VMs elsewhere.
+
+Remote-Lima entries also skip host-key checks, but the address-reuse risk does
+not apply to them in the same way. The entry's `127.0.0.1` is reached through
+a `ProxyCommand` that logs in to the remote Lima host (which keeps your normal
+host-key checking) and then runs Lima's own per-VM ssh config there. If the VM
+is gone, that config is gone and the connection fails. If a new VM with the
+same name exists on that host, the entry reaches it: one of your own sandbar
+VMs on a host you configured, not an unrelated machine.
+
 ### Guests are offered only the `identity_path` key
 
 The other half of the guest transport's SSH stance is which key it presents. A

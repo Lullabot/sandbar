@@ -363,7 +363,7 @@ func TestFindCheckout(t *testing.T) {
 func TestRequireRunningVM(t *testing.T) {
 	t.Run("not running", func(t *testing.T) {
 		l := stubVMLister{vms: []vm.VM{{Name: "foo", Status: "Stopped"}}}
-		_, err := requireRunningVM(l, "foo")
+		_, err := requireRunningVM(l, "land", "foo")
 		if err == nil {
 			t.Fatal("requireRunningVM: want an error for a stopped VM")
 		}
@@ -376,7 +376,7 @@ func TestRequireRunningVM(t *testing.T) {
 
 	t.Run("unknown instance", func(t *testing.T) {
 		l := stubVMLister{vms: []vm.VM{{Name: "other", Status: "Running"}}}
-		_, err := requireRunningVM(l, "missing")
+		_, err := requireRunningVM(l, "land", "missing")
 		if err == nil || !strings.Contains(err.Error(), `"missing"`) {
 			t.Errorf("requireRunningVM error = %v, want it to name the missing instance", err)
 		}
@@ -385,7 +385,7 @@ func TestRequireRunningVM(t *testing.T) {
 	t.Run("list error is wrapped", func(t *testing.T) {
 		wantErr := errors.New("boom")
 		l := stubVMLister{err: wantErr}
-		_, err := requireRunningVM(l, "foo")
+		_, err := requireRunningVM(l, "land", "foo")
 		if err == nil || !errors.Is(err, wantErr) {
 			t.Fatalf("requireRunningVM error = %v, want it to wrap %v", err, wantErr)
 		}
@@ -393,7 +393,7 @@ func TestRequireRunningVM(t *testing.T) {
 
 	t.Run("running", func(t *testing.T) {
 		l := stubVMLister{vms: []vm.VM{{Name: "foo", Status: "Running"}}}
-		found, err := requireRunningVM(l, "foo")
+		found, err := requireRunningVM(l, "land", "foo")
 		if err != nil {
 			t.Fatalf("requireRunningVM: unexpected error: %v", err)
 		}
@@ -408,7 +408,7 @@ func TestRequireRunningVM(t *testing.T) {
 // accidentally hide it from a caller that wants errors.Is.
 func TestRequireRunningVMWrapsErrNotFound(t *testing.T) {
 	l := stubVMLister{err: vm.ErrNotFound}
-	_, err := requireRunningVM(l, "foo")
+	_, err := requireRunningVM(l, "land", "foo")
 	if err == nil || !strings.Contains(err.Error(), `no VM named "foo"`) {
 		t.Errorf("requireRunningVM error = %v, want the friendly no-such-VM message", err)
 	}
