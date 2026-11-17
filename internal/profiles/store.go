@@ -153,6 +153,12 @@ func readSnapshot(path string) (snapshot, error) {
 	if err := yaml.Unmarshal(data, &parsed); err != nil {
 		return snap, &parseError{err: err}
 	}
+	if parsed.Version > currentVersion {
+		// Not a parseError: the file is intact, just newer than this build, so
+		// it must be neither quarantined nor saved over. A newer sandbar may
+		// have added fields this build would drop on its next save.
+		return snap, fmt.Errorf("profiles file at %s is version %d but this build understands only version %d — upgrade sandbar", path, parsed.Version, currentVersion)
+	}
 	for _, p := range parsed.Profiles {
 		if p.Type == TypeRemoteSSH && p.Port <= 0 {
 			// Canonicalize a hand-edited profile's missing/zero port to the SSH
@@ -198,17 +204,27 @@ func (s *Store) lock() (release func()) {
 // validation checks against that fresh state, and must return an error
 // before changing anything to abort the write.
 //
-// A failed or empty re-read keeps this process's in-memory state as the best
-// available source, matching internal/registry's mutate: the file may be
-// briefly unreadable, and an empty one is never a reason to drop the
-// permanent Local profile.
+// An empty or missing file keeps this process's in-memory state: an empty
+// one is never a reason to drop the permanent Local profile. A file that is
+// present but cannot be used — unreadable right now, unparseable, or from a
+// newer sandbar — is refused rather than saved over, matching
+// internal/registry's mutate: this process's copy may be only the in-memory
+// Local fallback loadFrom seeded, and saving it would erase every other
+// profile.
 func (s *Store) mutate(apply func() error) error {
 	if s.path == "" {
 		return apply()
 	}
 	defer s.lock()()
-	if snap, err := readSnapshot(s.path); err == nil && len(snap.profiles) > 0 {
-		s.adopt(snap)
+	snap, err := readSnapshot(s.path)
+	switch {
+	case err == nil:
+		if len(snap.profiles) > 0 {
+			s.adopt(snap)
+		}
+	case errors.Is(err, fs.ErrNotExist):
+	default:
+		return fmt.Errorf("not saving profiles: %s: %w", s.path, err)
 	}
 	if err := apply(); err != nil {
 		return err
