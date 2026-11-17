@@ -2,6 +2,8 @@ package provision
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/url"
@@ -25,14 +27,24 @@ var recognizedForgeTokens = map[string]forgeWiring{
 // gitCredSlug turns a scope into the filesystem-safe basename used for its
 // per-scope git-credentials/gitconfig.d files: the empty (global) scope slugs
 // to "default"; any other scope has every run of non-alphanumeric characters
-// collapsed to a single '-' (e.g. "github.com/acme" -> "github-com-acme").
+// collapsed to a single '-', followed by the first 8 hex digits of the exact
+// scope's SHA-256 (e.g. "github.com/acme" -> "github-com-acme-<hash>").
+//
+// The readable part alone is not injective: "gitlab.com/foo-bar" and
+// "gitlab.com/foo_bar" both collapse to "gitlab-com-foo-bar", so the second
+// scope's token overwrote the first's file and git pushed foo-bar's checkouts
+// with foo_bar's credential. The hash keeps distinct scopes in distinct files.
+// roles/project's "Set credential paths" task computes the same slug for the
+// clone credential; keep the two in step. Files under the old, hash-less names
+// on existing guests are pruned by gitCredReconcileScript on the next apply.
 var slugNonAlnumRE = regexp.MustCompile(`[^A-Za-z0-9]+`)
 
 func gitCredSlug(scope string) string {
 	if scope == "" {
 		return "default"
 	}
-	return slugNonAlnumRE.ReplaceAllString(scope, "-")
+	sum := sha256.Sum256([]byte(scope))
+	return slugNonAlnumRE.ReplaceAllString(scope, "-") + "-" + hex.EncodeToString(sum[:])[:8]
 }
 
 // gitCredEntry is one resolved git-credential wiring: a recognized token

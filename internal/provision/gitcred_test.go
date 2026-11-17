@@ -11,18 +11,43 @@ import (
 
 // TestGitCredSlug pins the slug grammar verbatim: the empty (global) scope
 // slugs to "default", and a non-empty scope collapses any run of
-// non-alphanumerics to a single '-'.
+// non-alphanumerics to a single '-' and appends the first 8 hex digits of the
+// scope's SHA-256. roles/project computes the same slug with Ansible's
+// hash('sha256') filter, so these literal values pin both implementations.
 func TestGitCredSlug(t *testing.T) {
 	cases := []struct{ scope, want string }{
 		{"", "default"},
-		{"github.com/acme", "github-com-acme"},
-		{"a/b.c__d", "a-b-c-d"},
-		{"simple", "simple"},
+		{"github.com/acme", "github-com-acme-936913df"},
+		{"gitlab.com/foo-bar", "gitlab-com-foo-bar-76da22dd"},
 	}
 	for _, c := range cases {
 		if got := gitCredSlug(c.scope); got != c.want {
 			t.Errorf("gitCredSlug(%q) = %q, want %q", c.scope, got, c.want)
 		}
+	}
+}
+
+// TestCollectGitCredEntries_DistinctScopesNeverShareAFile: scopes that differ
+// only in punctuation used to collapse to one slug, so the second token
+// overwrote the first's credential file and git authenticated one group's
+// checkouts with another group's token.
+func TestCollectGitCredEntries_DistinctScopesNeverShareAFile(t *testing.T) {
+	scopes := map[string]map[string]string{
+		"gitlab.com/foo-bar":    {"GITLAB_TOKEN": "dash"},
+		"gitlab.com/foo_bar":    {"GITLAB_TOKEN": "underscore"},
+		"gitlab.com/foo.bar":    {"GITLAB_TOKEN": "dot"},
+		"gitlab.com/foo":        {"GITLAB_TOKEN": "parent"},
+		"gitlab.com/foo/gitlab": {"GH_TOKEN": "suffix-lookalike"},
+	}
+	seen := map[string]string{}
+	for _, e := range collectGitCredEntries(scopes) {
+		if prev, ok := seen[e.slug]; ok {
+			t.Fatalf("scopes %q and %q share slug %q", prev, e.scope, e.slug)
+		}
+		seen[e.slug] = e.scope
+	}
+	if len(seen) != len(scopes) {
+		t.Fatalf("want %d distinct slugs, got %v", len(scopes), seen)
 	}
 }
 
@@ -38,7 +63,7 @@ func TestCollectGitCredEntries_RecognizedScopedKey(t *testing.T) {
 		t.Fatalf("want exactly 1 entry, got %d: %+v", len(entries), entries)
 	}
 	e := entries[0]
-	if e.scope != "github.com/acme" || e.slug != "github-com-acme" || e.host != "github.com" || e.user != "x-access-token" || e.token != "tok-value" {
+	if e.scope != "github.com/acme" || e.slug != "github-com-acme-936913df" || e.host != "github.com" || e.user != "x-access-token" || e.token != "tok-value" {
 		t.Fatalf("unexpected entry: %+v", e)
 	}
 }
