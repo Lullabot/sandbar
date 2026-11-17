@@ -56,7 +56,10 @@ func (r *execRunner) Output(ctx context.Context, args ...string) ([]byte, error)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	err := cmd.Run()
+	// ShellOut reaches `limactl shell` through here, which forks ssh: the same
+	// orphan and held-pipe hazard Stream and StreamOut guard against.
+	cmd.WaitDelay = sshx.WaitDelay
+	err := sshx.SuccessDespiteHeldPipes(cmd.Run())
 	if err != nil {
 		if msg := strings.TrimSpace(stderr.String()); msg != "" {
 			err = fmt.Errorf("%w: %s", err, msg)

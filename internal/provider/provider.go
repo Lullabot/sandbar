@@ -30,6 +30,7 @@ import (
 
 	"github.com/lullabot/sandbar/internal/lima"
 	"github.com/lullabot/sandbar/internal/provision"
+	"github.com/lullabot/sandbar/internal/sshx"
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
@@ -322,7 +323,12 @@ func RunCaptured(ctx context.Context, p Provider, v vm.VM, workdir, expr string)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	// The argv is limactl or ssh, and both can leave a descendant holding our
+	// pipes: an ssh orphaned by a cancel, or the ControlPersist master the first
+	// mux connection forks. WaitDelay bounds the wait on it, and a held pipe
+	// after a clean exit is still a success. See sshx.SuccessDespiteHeldPipes.
+	cmd.WaitDelay = sshx.WaitDelay
+	if err := sshx.SuccessDespiteHeldPipes(cmd.Run()); err != nil {
 		if msg := strings.TrimSpace(stderr.String()); msg != "" {
 			return nil, fmt.Errorf("%w: %s", err, msg)
 		}
