@@ -968,14 +968,53 @@ func TestGhostTileInvitesTheFirstVM(t *testing.T) {
 	if !strings.Contains(view, "web") || !strings.Contains(view, ghostTileText) {
 		t.Fatalf("a nearly-empty board should still invite another VM, got:\n%s", view)
 	}
-	// The ring STAYS on the ghost — the identity pin applies to the empty slot too.
-	// It must: the ring is on the ghost whenever the user deliberately arrowed there,
-	// and this same path runs on every refresh tick, so a rule that handed the ring
-	// to a VM whenever one existed would yank focus off the empty slot every few
-	// seconds. Nothing destructive can fire on the ghost, so leaving it there is
-	// safe; arrowing to the new tile is one keypress.
+	// The ring was on the ghost only because the board was empty, so the first VM
+	// to arrive takes it: that is the startup case, where the fleet is ready before
+	// its listing lands.
+	if m.focusVM.Name != "web" {
+		t.Fatalf("an automatically focused ghost should yield to the first VM, got %q", m.focusVM.Name)
+	}
+
+	// A ghost the user deliberately arrowed onto STAYS put — the identity pin
+	// applies to the empty slot too. This same path runs on every refresh tick, so
+	// a rule that handed the ring to a VM whenever one existed would yank focus off
+	// the empty slot every few seconds.
+	m, _ = press(t, m, tea.KeyPressMsg{Code: tea.KeyRight})
 	if !m.focusIsGhost() {
-		t.Fatalf("the ring should stay on the ghost the user is on, got %q", m.focusVM.Name)
+		t.Fatalf("right from web should land on the ghost, got %q", m.focusVM.Name)
+	}
+	m = loadManaged(t, m,
+		vm.VM{Name: "api", Status: "Running"},
+		vm.VM{Name: "web", Status: "Running"},
+	)
+	if !m.focusIsGhost() {
+		t.Fatalf("the ring should stay on the ghost the user chose, got %q", m.focusVM.Name)
+	}
+}
+
+// sandbar opens on the first VM, not on the ghost. The fleet counts as ready
+// once a member connects, which can be before its listing arrives; an empty
+// first render must not pin the ring to the empty slot, or a board that has
+// outgrown the viewport opens scrolled to the bottom.
+func TestStartupFocusesTheFirstVMNotTheGhost(t *testing.T) {
+	m := newTestModel(t)
+	m = resized(m, 80, 24)
+	loaded, _ := m.Update(vmsLoadedMsg{vms: nil})
+	m = loaded.(model)
+	if !m.focusIsGhost() {
+		t.Fatalf("precondition: an empty ready board focuses the ghost, got %q", m.focusVM.Name)
+	}
+	m = loadManaged(t, m,
+		vm.VM{Name: "vm-a", Status: "Stopped"},
+		vm.VM{Name: "vm-b", Status: "Running"},
+		vm.VM{Name: "vm-c", Status: "Running"},
+		vm.VM{Name: "vm-d", Status: "Running"},
+	)
+	if m.focusVM.Name != "vm-a" {
+		t.Fatalf("focus = %q, want the first VM vm-a", m.focusVM.Name)
+	}
+	if m.scrollRow != 0 {
+		t.Fatalf("scrollRow = %d, want the board scrolled to the top", m.scrollRow)
 	}
 }
 

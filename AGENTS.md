@@ -623,8 +623,11 @@ every bullet, not the constraint itself.
   moves the ring to the new VM** (`beginJob`), because that is the user acting, not
   the board reordering itself under them. `syncBoard` only adopts the ghost once
   `vmsLoaded` is true: before the first `limactl list` lands the board is empty
-  because nothing is loaded, not because the host is bare, and the identity pin
-  would then hold the ring on the ghost as the real tiles arrived.
+  because nothing is loaded, not because the host is bare. Readiness can still
+  precede a member's listing, so a ghost adopted only because the board was empty
+  (`ghostAutoFocus`) yields to the first VM that appears; only a ghost the user
+  arrowed onto is sticky. Without that, sandbar opened on the ghost and, once the
+  board outgrew the viewport, scrolled to the bottom to show it.
 - **`beginStream` starts a job; it does not choose a screen.** Which view a run
   lands on belongs to the caller, and the two callers want opposite things: a
   **build returns to the board**, where its tile carries the badge and the

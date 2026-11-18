@@ -193,6 +193,14 @@ type model struct {
 	// ensureFocusVisible moves it — so the viewport cannot drift away from the ring.
 	focusVM   vmHandle
 	scrollRow int
+	// ghostAutoFocus records that syncBoard put the ring on the ghost because
+	// the board was empty, not because the user chose it. Such a ring yields to
+	// the first VM the moment one appears: at startup the fleet is "ready" as
+	// soon as one member connects, before its listing (or another member's)
+	// lands, so without this sandbar opened with the empty slot selected and,
+	// once the board outgrew the viewport, scrolled to the bottom to show it.
+	// A ghost the user arrowed onto clears it and stays sticky.
+	ghostAutoFocus bool
 
 	// helpScroll is the `?` screen's scroll offset (help.go).
 	helpScroll int
