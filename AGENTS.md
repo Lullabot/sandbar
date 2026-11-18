@@ -3,6 +3,8 @@
 Guidance for AI coding agents working in this repository. Keep it accurate as
 the project evolves.
 
+**Writing task?** Any change to the README, the docs site (`docs/`), help text or other prose a user reads: read [`docs/contributing/writing-guide.md`](docs/contributing/writing-guide.md) first. It sets the voice, the rules and the review checklist.
+
 ## What this is
 
 `sandbar` is a tool for spinning up disposable development VMs for coding agents. It has
@@ -305,6 +307,8 @@ go vet ./...
 There is no Makefile.
 
 ## Docs
+
+**Before you write or review any documentation, read [`docs/contributing/writing-guide.md`](docs/contributing/writing-guide.md).** It sets the audience, voice, style, word list and review passes for the README and the docs site.
 
 The documentation site (`docs/`, `mkdocs.yml`) is built with MkDocs
 Material, invoked through [`uv`](https://docs.astral.sh/uv/)'s `uvx` — no
