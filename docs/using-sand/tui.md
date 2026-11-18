@@ -104,7 +104,7 @@ These act on the board itself, regardless of which tile is focused.
 | `enter` (on the ghost tile) | Create a new VM |
 | `n` | Create a new VM |
 | `p` | Open the [Connection Profiles](connection-profiles.md) management screen |
-| `/` | Search / filter tiles by name |
+| `/` | Search / filter tiles by name. While typing, `backspace` deletes a character, `ctrl+w` deletes the last word (`-`, `_` and `.` count as word breaks), `enter` keeps the filter and `esc` clears it. |
 | `O` | Toggle tile order between alphabetical (the default) and running first, then building, then stopped. The focus ring stays on the same VM, and the footer shows when running-first is on. Each launch starts alphabetical. |
 | `X` | Stop all — every **sand-managed** VM that's currently running, after a confirmation naming them. A VM `sandbar` didn't create, or a base image, is never touched, even if it's running, so a VM you use for unrelated work is safe. |
 | `?` | Show the keys screen |
