@@ -42,7 +42,9 @@ interval. Sandbar never downloads or installs an update for you.
 ## The tile board
 
 Tiles are sorted alphabetically by name and stay there — a VM changing
-status never reorders the board. An empty slot on the board is a "ghost
+status never reorders the board. Press `O` to put running VMs first instead;
+in that order a tile moves when its VM starts or stops, and the focus ring
+moves with it. When sandbar starts, the first VM is focused. An empty slot on the board is a "ghost
 tile" inviting you to press `enter` to create a VM.
 
 With more than one [Connection Profile](connection-profiles.md) enabled, a
@@ -103,6 +105,7 @@ These act on the board itself, regardless of which tile is focused.
 | `n` | Create a new VM |
 | `p` | Open the [Connection Profiles](connection-profiles.md) management screen |
 | `/` | Search / filter tiles by name |
+| `O` | Toggle tile order between alphabetical (the default) and running first, then building, then stopped. The focus ring stays on the same VM, and the footer shows when running-first is on. Each launch starts alphabetical. |
 | `X` | Stop all — every **sand-managed** VM that's currently running, after a confirmation naming them. A VM `sandbar` didn't create, or a base image, is never touched, even if it's running, so a VM you use for unrelated work is safe. |
 | `?` | Show the keys screen |
 | `q` | Quit |

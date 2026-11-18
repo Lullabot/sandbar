@@ -13,6 +13,7 @@ type keyMap struct {
 	New               key.Binding
 	Search            key.Binding
 	StopAll           key.Binding
+	Sort              key.Binding
 	Profiles          key.Binding
 	Back              key.Binding
 	Quit              key.Binding
@@ -49,6 +50,10 @@ func newKeyMap() keyMap {
 		// a base image is not a workspace.
 		Search:  key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
 		StopAll: key.NewBinding(key.WithKeys("X"), key.WithHelp("X", "stop all")),
+		// Sort toggles running-first order. Like Profiles, it is documented on the
+		// `?` screen rather than in the board footer, which is already full at 80
+		// columns; the footer band names the order whenever it is not alphabetical.
+		Sort: key.NewBinding(key.WithKeys("O"), key.WithHelp("O", "sort")),
 		// Profiles opens the connection-profiles management screen
 		// (profilesview.go) from the board. Deliberately NOT added to
 		// boardHelp's footer bindings: every existing board golden pins that

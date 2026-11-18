@@ -1365,3 +1365,76 @@ func TestBoardPowerCommandsRequireConfirmation(t *testing.T) {
 		})
 	}
 }
+
+// O toggles running-first order: running, then building, then stopped and
+// failed, alphabetical inside each group. The ring stays on the same VM across
+// the toggle, and the footer names the order while it is not the default.
+func TestSortToggleRunningFirst(t *testing.T) {
+	m := newTestModel(t)
+	m = resized(m, 120, 40)
+	m = loadManaged(t, m,
+		vm.VM{Name: "alpha", Status: "Stopped"},
+		vm.VM{Name: "bravo", Status: "Running"},
+		vm.VM{Name: "charlie", Status: "Stopped"},
+		vm.VM{Name: "delta", Status: "Running"},
+	)
+	m.focusVM = vmHandle{Name: "charlie"}
+	if got := strings.Join(boardNames(m), ","); got != "alpha,bravo,charlie,delta" {
+		t.Fatalf("default order = %s, want alphabetical", got)
+	}
+	if strings.Contains(ansi.Strip(m.boardView()), "running first") {
+		t.Fatal("the default order should not be called out in the footer")
+	}
+
+	m, _ = press(t, m, tea.KeyPressMsg{Code: 'O', Text: "O"})
+	if got := strings.Join(boardNames(m), ","); got != "bravo,delta,alpha,charlie" {
+		t.Fatalf("running-first order = %s, want bravo,delta,alpha,charlie", got)
+	}
+	if m.focusVM.Name != "charlie" {
+		t.Fatalf("focus = %q after sorting, want it to stay on charlie", m.focusVM.Name)
+	}
+	if !strings.Contains(ansi.Strip(m.boardView()), "sorted: running first") {
+		t.Fatalf("the footer should say the board is sorted running first, got:\n%s", ansi.Strip(m.boardView()))
+	}
+
+	// A VM that starts moves into the running group; the ring follows it there.
+	m = loadManaged(t, m,
+		vm.VM{Name: "alpha", Status: "Stopped"},
+		vm.VM{Name: "bravo", Status: "Running"},
+		vm.VM{Name: "charlie", Status: "Running"},
+		vm.VM{Name: "delta", Status: "Running"},
+	)
+	if got := strings.Join(boardNames(m), ","); got != "bravo,charlie,delta,alpha" {
+		t.Fatalf("order after charlie starts = %s, want bravo,charlie,delta,alpha", got)
+	}
+	if m.focusVM.Name != "charlie" {
+		t.Fatalf("focus = %q after charlie moved, want it to follow charlie", m.focusVM.Name)
+	}
+
+	m, _ = press(t, m, tea.KeyPressMsg{Code: 'O', Text: "O"})
+	if got := strings.Join(boardNames(m), ","); got != "alpha,bravo,charlie,delta" {
+		t.Fatalf("toggling back = %s, want alphabetical", got)
+	}
+}
+
+// Running-first ranks by the DERIVED status: a VM mid-build is Running to Lima
+// but sorts after the VMs that are actually running, and a failed build sorts
+// with the stopped ones rather than among the running.
+func TestSortRunningFirstUsesDerivedStatus(t *testing.T) {
+	m := newTestModel(t)
+	m.boardSort = sortRunningFirst
+	sc := m.activeScope()
+	m.jobs.begin(&job{key: provisionKey(sc, "aaa-building"), title: "Creating aaa-building", state: jobRunning, cancel: func() {}})
+	failed := provisionKey(sc, "bbb-failed")
+	m.jobs.begin(&job{key: failed, title: "Creating bbb-failed", state: jobRunning, cancel: func() {}})
+	m.jobs.finish(failed, errAnsibleBoom)
+	m = loadManaged(t, m,
+		vm.VM{Name: "aaa-building", Status: "Running"},
+		vm.VM{Name: "bbb-failed", Status: "Running"},
+		vm.VM{Name: "ccc-stopped", Status: "Stopped"},
+		vm.VM{Name: "zzz-running", Status: "Running"},
+	)
+	if got := strings.Join(boardNames(m), ","); got != "zzz-running,aaa-building,bbb-failed,ccc-stopped" {
+		t.Fatalf("order = %s, want zzz-running,aaa-building,bbb-failed,ccc-stopped", got)
+	}
+}
