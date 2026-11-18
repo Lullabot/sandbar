@@ -86,3 +86,4 @@ nav:
     - Development: contributing/development.md
     - The Embedded Playbook: contributing/ansible-playbook.md
     - Releases: contributing/releases.md
+    - Writing guide: contributing/writing-guide.md

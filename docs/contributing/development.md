@@ -80,6 +80,8 @@ behind a build tag, so plain `go test ./...` skips them:
 
 ## Docs
 
+Before you write or review docs, read the [writing guide](writing-guide.md).
+
 The documentation site (the one you are reading) is built with MkDocs
 Material, invoked entirely through [`uv`](https://docs.astral.sh/uv/)'s
 `uvx` — no global Python, no virtualenv, and no Node toolchain:
