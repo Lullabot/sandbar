@@ -10,7 +10,7 @@ tile under the focus ring.
 ## The header
 
 The header shows a live readout of the **host(s)** you're connected to, not
-the VMs: one band per active [Connection Profile](connection-profiles.md),
+the VMs: one band per active [Connection Profile](../advanced/connection-profiles.md),
 each with CPU and memory currently in use, free
 disk on the volume that holds that profile's VMs, and the build's version.
 Out of the box that's one band, for the permanent Local profile. Add a
@@ -27,7 +27,7 @@ From the `?` help screen, press `o` to reopen it. Its installed release notes
 and feature or bug request links can be clicked in terminals that support OSC 8
 hyperlinks, or opened with `n` and `r` respectively using your default browser.
 The screen also explains the persistent tmux shell; see
-[Files and Shells](files-and-shells.md) for the full tmux and file-transfer
+[Files and Shells](../using-sandbar/shells.md) for the full tmux and file-transfer
 guide. When sandbar detects Warp (`TERM_PROGRAM=WarpTerminal`), onboarding warns
 that Sandbar and Claude Code can have terminal compatibility issues there.
 
@@ -47,7 +47,7 @@ in that order a tile moves when its VM starts or stops, and the focus ring
 moves with it. When sandbar starts, the first VM is focused. An empty slot on the board is a "ghost
 tile" inviting you to press `enter` to create a VM.
 
-With more than one [Connection Profile](connection-profiles.md) enabled, a
+With more than one [Connection Profile](../advanced/connection-profiles.md) enabled, a
 tile's title row also carries a small `[profile]` label naming which
 profile that VM runs on — useful since the same VM name can exist under two
 different profiles at once. The label is omitted while only the Local
@@ -103,7 +103,7 @@ These act on the board itself, regardless of which tile is focused.
 | `↑` `↓` `←` `→` | Move the focus ring between tiles |
 | `enter` (on the ghost tile) | Create a new VM |
 | `n` | Create a new VM |
-| `p` | Open the [Connection Profiles](connection-profiles.md) management screen |
+| `p` | Open the [Connection Profiles](../advanced/connection-profiles.md) management screen |
 | `/` | Search / filter tiles by name. While typing, `backspace` deletes a character, `ctrl+w` deletes the last word (`-`, `_` and `.` count as word breaks), `enter` keeps the filter and `esc` clears it. |
 | `O` | Toggle tile order between alphabetical (the default) and running first, then building, then stopped. The focus ring stays on the same VM, and the footer shows when running-first is on. Each launch starts alphabetical. |
 | `X` | Stop all — every **sand-managed** VM that's currently running, after a confirmation naming them. A VM `sandbar` didn't create, or a base image, is never touched, even if it's running, so a VM you use for unrelated work is safe. |
@@ -124,14 +124,14 @@ require the VM to be running.
 | `r` | Restart | Stop the VM and start it again, applying any secrets you've changed since it booted. |
 | `m` | Reclaim memory | Flush writes and release the guest filesystem cache. Offered only on a running VM whose provider can return that cache memory to its host; currently this means Proxmox. The tile refreshes its guest cache and host-resident memory readings when the action finishes. |
 | `R` | Reset | Delete this VM and clone it fresh from its base image, keeping its name and sizing. Everything inside the guest is lost; the create form opens pre-filled so you can change the settings first. Only offered for VMs sandbar created. |
-| `t` | Snapshot → template | Capture this managed VM as a reusable [golden template](golden-templates.md). A running source is stopped briefly and restored afterward. |
-| `S` | Shell | Attach a shell to the guest's persistent tmux session. Work keeps running after you detach (`C-a d`) or close the terminal. Inside a host tmux session this opens a new window and leaves the board live; otherwise it suspends the board until you detach. See [Files and Shells](files-and-shells.md). |
+| `t` | Snapshot → template | Capture this managed VM as a reusable [golden template](../advanced/templates.md). A running source is stopped briefly and restored afterward. |
+| `S` | Shell | Attach a shell to the guest's persistent tmux session. Work keeps running after you detach (`C-a d`) or close the terminal. Inside a host tmux session this opens a new window and leaves the board live; otherwise it suspends the board until you detach. See [Files and Shells](../using-sandbar/shells.md). |
 | `v` | Paste Image | Stage the host clipboard's image on the guest clipboard, ready for Ctrl-V inside any supported coding agent. |
 | `d` | Delete | Delete the VM and its disk, after a confirmation. Its host-stored secrets go with it. **Irreversible.** |
-| `u` | Upload | Copy a file or directory from this machine into the guest. You pick the source, then the destination directory. See [Files and Shells](files-and-shells.md). |
-| `g` | Download | Copy a file or directory out of the guest onto this machine. See [Files and Shells](files-and-shells.md). |
-| `e` | Secrets | Edit this VM's secrets. Saving writes them into a running guest immediately; a stopped one gets them on its next start. See [Secrets](secrets.md). |
-| `l` | Land | Open the Landing pane: list this VM's git checkouts and their branch/push/PR state, and open a one-shot draft PR, the branch's page in a browser, or — for a checkout on a drupal.org remote (`git.drupalcode.org` or `git.drupal.org`) — publish its local commits to drupal.org. See [Landing](files-and-shells.md#landing) and [Publishing to drupal.org](drupalorg-publishing.md). |
+| `u` | Upload | Copy a file or directory from this machine into the guest. You pick the source, then the destination directory. See [Files and Shells](../using-sandbar/shells.md). |
+| `g` | Download | Copy a file or directory out of the guest onto this machine. See [Files and Shells](../using-sandbar/shells.md). |
+| `e` | Secrets | Edit this VM's secrets. Saving writes them into a running guest immediately; a stopped one gets them on its next start. See [Secrets](../using-sandbar/secrets.md). |
+| `l` | Land | Open the Landing pane: list this VM's git checkouts and their branch/push/PR state, and open a one-shot draft PR, the branch's page in a browser, or — for a checkout on a drupal.org remote (`git.drupalcode.org` or `git.drupal.org`) — publish its local commits to drupal.org. See [Landing](../using-sandbar/shells.md#landing) and [Publishing to drupal.org](../advanced/drupalorg-publishing.md). |
 | `L` | Log | Reopen the log of this VM's last build or file transfer — including one still running, or one that failed. |
 
 The create form includes a clone-source row. Choose the shared base or a
@@ -142,7 +142,7 @@ For an initial checkout, enter its HTTPS `Repository URL`. The `Git service`
 row detects GitHub and GitLab.com automatically. Focus it and press `space`
 or `←`/`→` to choose GitLab for a self-hosted instance; `enter` advances to
 the masked `Clone token` field. The token help follows the selected service.
-See [Secrets](secrets.md#github-and-gitlab-tokens) for token permissions.
+See [Secrets](../using-sandbar/secrets.md#github-and-gitlab-tokens) for token permissions.
 
 `d` is always delete, on every screen — the most destructive key never
 changes meaning under your fingers. Download deliberately does **not** use
@@ -188,12 +188,12 @@ how long ago that data was last seen (`as of 3d ago`), since a stopped guest
 cannot be re-swept.
 
 For the full set of `sandbar` subcommands and flags (including `sandbar shell`),
-see the [CLI Reference](cli-reference.md).
+see the [CLI Reference](cli.md).
 
 ## Connection profiles
 
 `p` opens the profile management screen — a list of every
-[Connection Profile](connection-profiles.md) `sandbar` knows about (Local plus
+[Connection Profile](../advanced/connection-profiles.md) `sandbar` knows about (Local plus
 any remote hosts you've added), with keys to create, edit, enable/disable,
 and delete them. Every change there is live: enabling a profile builds its
 connection and starts showing its tiles immediately, with no restart.
@@ -201,7 +201,7 @@ connection and starts showing its tiles immediately, with no restart.
 The create form (`n`, or `enter` on a ghost tile) also has a profile
 selector when more than one profile is enabled, so you pick which profile a
 new VM is created on without leaving the TUI. See
-[Connection Profiles](connection-profiles.md) for the full model.
+[Connection Profiles](../advanced/connection-profiles.md) for the full model.
 
 ## Resetting a VM
 
@@ -223,14 +223,14 @@ editable because cloning a private repository again requires a token. GitHub
 and GitLab.com are detected from their hostnames; a self-hosted GitLab choice
 is recorded when the VM is created.
 
-The CLI equivalent is [`sandbar reset NAME`](cli-reference.md#sandbar-reset-name).
+The CLI equivalent is [`sandbar reset NAME`](cli.md#sandbar-reset-name).
 
 Each settled VM tile can show **base update available**, **setup update
 available**, or **version unknown**. Base and setup are checked separately, so
 both notices can appear together. Missing history on an older VM remains
 unknown. These are notices only: sandbar keeps the VM running as it is and never
 reruns provisioning automatically. Press `R` for an explicit reset, and choose
-what to preserve. [`sandbar updates NAME`](cli-reference.md#sandbar-updates-name)
+what to preserve. [`sandbar updates NAME`](cli.md#sandbar-updates-name)
 reports the same states from the CLI. A VM cloned from a golden template keeps
 using that template on reset; refresh the template first if its base is old.
 “Current” compares recorded revisions with this build, not user edits or
@@ -245,7 +245,7 @@ enter to toggle the focused option; its help text describes what it copies.
   VM. The home is restored before the playbook runs. Provisioned home files
   are replaced only when they still match sandbar's recorded baseline. Edited,
   untracked, deleted, or symlinked destination files are kept; new defaults are
-  [saved separately](../reference/files-and-state.md#guest-paths). It includes the
+  [saved separately](files-and-state.md#guest-paths). It includes the
   options below, which appear
   checked and locked while this option is on. It copies the most data and
   excludes `~/.ssh/authorized_keys`, so the rebuilt VM keeps its new access
@@ -256,7 +256,7 @@ enter to toggle the focused option; its help text describes what it copies.
   and history for Claude Code, Codex, OpenCode, and Pi together, including
   state from manual installs. Selected agents are installed fresh; restored
   configuration files are retained. See the
-  [preserved paths](../reference/files-and-state.md#preserved-agent-state).
+  [preserved paths](files-and-state.md#preserved-agent-state).
 - **Preserve ~/&lt;host&gt;/&lt;org&gt;** keeps the organisation directory for
   the VM's cloned project, including the checkout, uncommitted work, and the
   `.env` beside it. If the checkout is present, the reset skips cloning it
@@ -270,7 +270,7 @@ enter to toggle the focused option; its help text describes what it copies.
   use the whole-home option if you need to keep its files.
 
 After restoring them, the reset refreshes the
-[self-review skills](review.md#the-assistant-skills) in any restored checkout
+[self-review skills](../using-sandbar/review.md#the-assistant-skills) in any restored checkout
 that already has sandbar-installed copies, so they match the rebuilt VM's
 review server. Checkouts without them, and copies your repository tracks in
 Git, are left alone. If the refresh fails, the reset still succeeds and prints
@@ -281,14 +281,14 @@ Preserved data passes through a private directory on your workstation.
 attempting to delete the VM, it keeps the archives and prints their path
 for recovery, along with the `sandbar reset NAME --from-backup DIR` command that
 finishes the reset from a terminal. See
-[`sandbar reset`](cli-reference.md#if-a-reset-fails-after-the-vm-was-deleted).
+[`sandbar reset`](cli.md#if-a-reset-fails-after-the-vm-was-deleted).
 A reset that only lost its SSH connection, for example because your SSH agent
 locked with the screen, waits for the connection and finishes on its own. See
-[If the connection drops during a reset](cli-reference.md#if-the-connection-drops-during-a-reset).
+[If the connection drops during a reset](cli.md#if-the-connection-drops-during-a-reset).
 
 **Do not preserve data if you suspect the VM is compromised.** It can
 include credentials and files written by an agent. See
-[Security Model](../reference/security-model.md).
+[Security Model](../background/security-model.md).
 
 Only directories inside the guest home can be preserved. Paths outside it,
 such as `/srv` or `/opt`, are rejected before the VM is deleted.

@@ -506,7 +506,7 @@ const (
 // not override it. A `.self-review.yaml` in the checkout can set outputFile to
 // anything (the server chdir's into the repo precisely so that file applies),
 // and reporting the default regardless named a path that did not exist, which
-// is worse than useless: docs/using-sand/review.md tells the user to point
+// is worse than useless: docs/using-sandbar/review.md tells the user to point
 // their agent at it, so a wrong path sends the agent to read nothing.
 //
 // Falls back to the startup announcement, and then to the default, so a guest

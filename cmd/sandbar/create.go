@@ -110,7 +110,7 @@ Flags:
 	// binding it directly would make the flag package print that value as the
 	// default — so `sandbar create --help` would read "(default
 	// "America/Toronto")" on one machine and "(default "Europe/Berlin")" on the
-	// next, and the copy of that help text in docs/using-sand/cli-reference.md
+	// next, and the copy of that help text in docs/reference/cli.md
 	// would be wrong for almost every reader. Same reason --git-name describes
 	// its host-derived default in prose instead of showing one.
 	timezoneFlag := fs.String("timezone", "", "IANA timezone for the guest, e.g. America/Toronto (default: the timezone this host is in)")

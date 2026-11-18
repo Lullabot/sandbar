@@ -40,7 +40,7 @@ sandbar shell claude
 
 See [Getting Started](https://lullabot.github.io/sandbar/latest/getting-started/)
 for the full walkthrough, or the
-[CLI Reference](https://lullabot.github.io/sandbar/latest/using-sand/cli-reference/)
+[CLI Reference](https://lullabot.github.io/sandbar/latest/reference/cli/)
 for every command and flag.
 
 ## Where VMs run
@@ -57,9 +57,9 @@ Out of the box, `sandbar` runs VMs on the machine you launched it from. Add a
 Every enabled profile is live at the same time: one board, tiles from all of
 them side by side. Profiles are managed from the TUI's `p` screen or by
 hand-editing a secret-free, shareable `profiles.yaml`. See
-[Where VMs Run](https://lullabot.github.io/sandbar/latest/using-sand/connection-profiles/)
+[Where VMs Run](https://lullabot.github.io/sandbar/latest/advanced/connection-profiles/)
 for the model and
-[Proxmox VE Setup](https://lullabot.github.io/sandbar/latest/using-sand/proxmox/)
+[Proxmox VE Setup](https://lullabot.github.io/sandbar/latest/advanced/proxmox/)
 for the one-time host setup.
 
 ## Reviewing what Claude wrote
@@ -68,7 +68,7 @@ Use `sandbar land NAME PATH --review` (or the Landing pane, `l`, then `v`) to
 review uncommitted or unpushed changes in your browser. The review server
 runs inside the VM, sends the diff to your browser through a loopback
 connection, and saves your comments in the checkout for the agent to read.
-See [Reviewing changes in a browser](https://lullabot.github.io/sandbar/latest/using-sand/review/).
+See [Reviewing changes in a browser](https://lullabot.github.io/sandbar/latest/using-sandbar/review/).
 
 `sandbar` also supports **golden templates** — named, reusable clone sources you
 can snapshot from an existing VM. Once you've set up a VM with project-specific
@@ -76,7 +76,7 @@ or team-specific tools and configuration, press `t` on its tile to save it as a
 template, then create new VMs from that template with `sandbar create --template <name>`
 or via the TUI's Source selector. Every clone starts from your saved setup instead
 of rebuilding the shared base, then receives the normal finalize pass. See
-[Golden Templates](https://lullabot.github.io/sandbar/latest/using-sand/golden-templates/)
+[Golden Templates](https://lullabot.github.io/sandbar/latest/advanced/templates/)
 for details.
 
 ## Development

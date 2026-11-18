@@ -58,32 +58,55 @@ extra:
     provider: mike
     alias: true
 
+plugins:
+  - search
+  - redirects:
+      redirect_maps:
+        using-sand/files-and-shells.md: using-sandbar/shells.md
+        using-sand/web-servers.md: using-sandbar/web-servers.md
+        using-sand/secrets.md: using-sandbar/secrets.md
+        using-sand/review.md: using-sandbar/review.md
+        using-sand/connection-profiles.md: advanced/connection-profiles.md
+        using-sand/proxmox.md: advanced/proxmox.md
+        using-sand/golden-templates.md: advanced/templates.md
+        using-sand/drupalorg-publishing.md: advanced/drupalorg-publishing.md
+        using-sand/tui.md: reference/board.md
+        using-sand/cli-reference.md: reference/cli.md
+        getting-started/available-tools.md: reference/vm-tools.md
+        getting-started/how-it-works.md: background/how-it-works.md
+        reference/security-model.md: background/security-model.md
+        why.md: background/why.md
+        contributing/image-build-audit.md: contributing/base-image.md
+
 nav:
   - Home: index.md
-  - Getting Started:
+  - Getting started:
     - About sandbar: getting-started/index.md
     - Installation: getting-started/installation.md
-    - Your First VM: getting-started/first-vm.md
-    - How Provisioning Works: getting-started/how-it-works.md
-    - Available Tools: getting-started/available-tools.md
-    - Security Model: reference/security-model.md
+    - Your first VM: getting-started/first-vm.md
   - Using sandbar:
-    - The Board (TUI): using-sand/tui.md
-    - CLI Reference: using-sand/cli-reference.md
-    - Where VMs Run: using-sand/connection-profiles.md
-    - Proxmox VE Setup: using-sand/proxmox.md
-    - Golden Templates: using-sand/golden-templates.md
-    - Secrets: using-sand/secrets.md
-    - Shells and Files: using-sand/files-and-shells.md
-    - Web Servers and Ports: using-sand/web-servers.md
-    - Reviewing changes in a browser: using-sand/review.md
-    - Publishing to drupal.org: using-sand/drupalorg-publishing.md
+    - Shells and files: using-sandbar/shells.md
+    - Web servers and ports: using-sandbar/web-servers.md
+    - Secrets: using-sandbar/secrets.md
+    - Reviewing changes in a browser: using-sandbar/review.md
+  - Advanced setups:
+    - Where VMs run: advanced/connection-profiles.md
+    - Proxmox VE setup: advanced/proxmox.md
+    - Golden templates: advanced/templates.md
+    - Publishing to drupal.org: advanced/drupalorg-publishing.md
   - Reference:
-    - Files and State: reference/files-and-state.md
     - Troubleshooting: reference/troubleshooting.md
-  - Why Sandbar: why.md
+    - The board (TUI): reference/board.md
+    - CLI reference: reference/cli.md
+    - Available tools: reference/vm-tools.md
+    - Files and state: reference/files-and-state.md
+  - Background:
+    - Why sandbar: background/why.md
+    - How provisioning works: background/how-it-works.md
+    - Security model: background/security-model.md
   - Contributing:
     - Development: contributing/development.md
-    - The Embedded Playbook: contributing/ansible-playbook.md
+    - The embedded playbook: contributing/ansible-playbook.md
+    - Base image build: contributing/base-image.md
     - Releases: contributing/releases.md
     - Writing guide: contributing/writing-guide.md

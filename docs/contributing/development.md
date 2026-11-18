@@ -75,7 +75,7 @@ behind a build tag, so plain `go test ./...` skips them:
 - `proxmoxe2e` — run these against a Proxmox host with a test pool set up.
   They also need `PROXMOX_E2E=1` and the other `PROXMOX_E2E_*` variables, and
   skip without them. See [Proxmox VE
-  Setup](../using-sand/proxmox.md#a-separate-pool-for-automated-tests) for
+  Setup](../advanced/proxmox.md#a-separate-pool-for-automated-tests) for
   the pool and the full variable list.
 
 ## Docs
