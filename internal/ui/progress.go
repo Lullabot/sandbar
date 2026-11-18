@@ -163,6 +163,7 @@ func (m *model) beginJob(title string, run provisionFunc, cfg vm.CreateConfig, r
 	// now looking at. Without it a create started from the empty slot leaves the ring
 	// on the empty slot, and `l` would not open the log of the build they just began.
 	m.focusVM = vmHandle{Scope: sc, Name: cfg.Name}
+	m.ghostAutoFocus = false
 	m.view = viewBoard
 	return cmd
 }

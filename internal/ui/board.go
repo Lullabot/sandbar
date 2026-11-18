@@ -267,11 +267,22 @@ func (m *model) syncBoard() {
 		// empty slot selected and enter would create a VM rather than open the first
 		// one. showsGhost folds that readiness check in.
 		if m.showsGhost() {
+			if !m.focusIsGhost() {
+				m.ghostAutoFocus = true
+			}
 			m.focusVM = m.ghostFocusVM()
 		} else {
 			m.focusVM = vmHandle{}
 		}
 		m.scrollRow = 0
+		return
+	}
+	if m.focusIsGhost() && m.ghostAutoFocus {
+		// The ring only landed on the ghost because nothing had loaded yet; the
+		// first VM to arrive takes it (see ghostAutoFocus).
+		m.ghostAutoFocus = false
+		m.focusVM = vmHandle{Scope: vms[0].scope, Name: vms[0].Name}
+		m.ensureFocusVisible()
 		return
 	}
 	if m.focusIsGhost() {
@@ -377,6 +388,7 @@ func (m *model) moveFocus(dx, dy int) {
 		// The ring is on nothing (a board that just gained its first cell): the first
 		// arrow key adopts the first one rather than doing nothing.
 		m.focusVM = m.focusCellHandle(0)
+		m.ghostAutoFocus = false
 		m.ensureFocusVisible()
 		return
 	}
@@ -405,6 +417,7 @@ func (m *model) moveFocus(dx, dy int) {
 		return
 	}
 	m.focusVM = m.focusCellHandle(target)
+	m.ghostAutoFocus = false
 	m.ensureFocusVisible()
 }
 
