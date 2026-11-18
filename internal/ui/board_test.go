@@ -1438,3 +1438,59 @@ func TestSortRunningFirstUsesDerivedStatus(t *testing.T) {
 		t.Fatalf("order = %s, want zzz-running,aaa-building,bbb-failed,ccc-stopped", got)
 	}
 }
+
+// ctrl+w deletes the last word of the name search, treating the separators VM
+// names actually use ('-', '_', '.') as word boundaries, as well as spaces.
+func TestSearchCtrlWDeletesWordBackward(t *testing.T) {
+	m := newTestModel(t)
+	m = loadManaged(t, m,
+		vm.VM{Name: "web-staging", Status: "Running"},
+		vm.VM{Name: "web-prod", Status: "Running"},
+	)
+	m, _ = press(t, m, runeKey('/'))
+	for _, r := range "web-staging" {
+		m, _ = press(t, m, runeKey(r))
+	}
+	ctrlW := tea.KeyPressMsg{Code: 'w', Mod: tea.ModCtrl}
+	if ctrlW.String() != "ctrl+w" {
+		t.Fatalf("precondition: key string = %q, want ctrl+w", ctrlW.String())
+	}
+
+	m, cmd := press(t, m, ctrlW)
+	if cmd != nil {
+		t.Fatal("ctrl+w fired a command while searching")
+	}
+	if m.searchQuery != "web-" {
+		t.Fatalf("query = %q after ctrl+w, want %q", m.searchQuery, "web-")
+	}
+	if got := strings.Join(boardNames(m), ","); got != "web-prod,web-staging" {
+		t.Fatalf("board = %s, want both web VMs back after the word is deleted", got)
+	}
+	m, _ = press(t, m, ctrlW)
+	if m.searchQuery != "" || !m.searching {
+		t.Fatalf("second ctrl+w: query = %q searching = %v, want an empty query with the search still open", m.searchQuery, m.searching)
+	}
+	m, _ = press(t, m, ctrlW)
+	if m.searchQuery != "" {
+		t.Fatalf("ctrl+w on an empty query = %q, want it to stay empty", m.searchQuery)
+	}
+}
+
+func TestDeleteWordBackward(t *testing.T) {
+	for in, want := range map[string]string{
+		"":            "",
+		"web":         "",
+		"web-staging": "web-",
+		"web-":        "",
+		"web--":       "",
+		"a_b.c":       "a_b.",
+		"two words":   "two ",
+		"two words  ": "two ",
+		"naïve-café":  "naïve-",
+		"   ":         "",
+	} {
+		if got := deleteWordBackward(in); got != want {
+			t.Errorf("deleteWordBackward(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

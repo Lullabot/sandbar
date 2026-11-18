@@ -41,7 +41,7 @@ func (m model) boardKeys() []struct {
 		{label(boardMove), "Move the focus ring between tiles. Every verb below acts on the tile it is on."},
 		{label(m.keys.Enter), "The obvious thing for the tile it is on: create a VM on the empty slot; show the log of one that is building; shell into one that is running; start one that is stopped. The footer names which."},
 		{label(m.keys.New), "Create a VM. Opens the form from anywhere on the board."},
-		{label(m.keys.Search), "Filter the tiles by name as you type. esc clears it. It narrows what you SEE and nothing else — X still stops every managed VM."},
+		{label(m.keys.Search), "Filter the tiles by name as you type. ctrl+w deletes the last word; esc clears it. It narrows what you SEE and nothing else — X still stops every managed VM."},
 		{label(m.keys.Sort), "Toggle the tile order between alphabetical and running first (then building, then stopped). The focus ring stays on the same VM; the footer shows when running-first is on."},
 		{label(m.keys.StopAll), "Stop every running sandbar VM, after a confirmation. Base images and VMs sandbar did not create are never touched."},
 		{label(m.keys.Profiles), "Manage connection profiles: create, edit, enable/disable, rename, and delete the Local, Remote SSH and Proxmox locations sandbar runs VMs on. Creating one asks for the type first. Mutations take effect live, without restarting sandbar."},

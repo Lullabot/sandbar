@@ -39,6 +39,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/lullabot/sandbar/internal/provider"
 	"github.com/lullabot/sandbar/internal/registry"
@@ -878,6 +879,8 @@ func (m model) updateBoardSearch(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			r := []rune(m.searchQuery)
 			m.searchQuery = string(r[:len(r)-1])
 		}
+	case msg.String() == "ctrl+w":
+		m.searchQuery = deleteWordBackward(m.searchQuery)
 	case msg.Text != "":
 		m.searchQuery += msg.Text
 	}
@@ -886,6 +889,25 @@ func (m model) updateBoardSearch(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// query now hides — by identity, exactly as it is across a refresh.
 	m.syncBoard()
 	return m, nil
+}
+
+// deleteWordBackward is ctrl+w for the name search: it drops any trailing
+// separators, then the word before them. VM names rarely contain spaces, so
+// '-', '_' and '.' count as separators too; otherwise ctrl+w on "web-staging"
+// would clear the whole query, which esc already does.
+func deleteWordBackward(q string) string {
+	isSep := func(r rune) bool {
+		return unicode.IsSpace(r) || r == '-' || r == '_' || r == '.'
+	}
+	r := []rune(q)
+	i := len(r)
+	for i > 0 && isSep(r[i-1]) {
+		i--
+	}
+	for i > 0 && !isSep(r[i-1]) {
+		i--
+	}
+	return string(r[:i])
 }
 
 // boardHelp is the board's footer, derived from THE SAME command registry
