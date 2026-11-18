@@ -9,7 +9,7 @@ knows Drupal contribution, not `sandbar` internals.
 A `sandbar` guest can clone and work against a drupal.org issue fork exactly
 as you would on your own machine, using plain `git`. What it cannot do is
 push: no guest ever holds a drupal.org credential (see
-[Security Model](../reference/security-model.md#publishing-to-drupalorg-agent-decides-what-host-decides-where)
+[Security Model](../background/security-model.md#publishing-to-drupalorg-agent-decides-what-host-decides-where)
 for why). Instead, `sandbar` reads the guest's already-committed local commits
 and **publishes them from your workstation**, one commit at a time, using a
 drupal.org personal access token (PAT) that never leaves your machine.
@@ -24,7 +24,7 @@ You reach this two ways:
   [setup](#setup) below.
 - **`sandbar publish NAME PATH [ISSUE]`** from the command line, for scripting or
   for a bigger confirmation than the TUI's pane can show at once (see
-  [`sandbar publish`](cli-reference.md#sandbar-publish-name-path-issue) in the CLI
+  [`sandbar publish`](../reference/cli.md#sandbar-publish-name-path-issue) in the CLI
   reference).
 
 Both surfaces do exactly the same thing: they share one implementation of
@@ -425,7 +425,7 @@ for different reasons worth keeping straight:
   module's own maintainer on a fork they created themselves. drupal.org
   additionally blocks that endpoint at its edge, for every caller (along
   with deploy tokens and deploy keys — see
-  [Security Model](../reference/security-model.md#publishing-to-drupalorg-agent-decides-what-host-decides-where)).
+  [Security Model](../background/security-model.md#publishing-to-drupalorg-agent-decides-what-host-decides-where)).
 - A **classic** personal access token cannot be scoped to a project at all.
 
 So a fine-grained token has to be made by hand, in the web UI, one issue

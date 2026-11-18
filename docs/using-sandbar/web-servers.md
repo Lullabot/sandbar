@@ -29,7 +29,7 @@ Two properties worth knowing:
 
 - **Loopback only.** Forwarded ports bind `127.0.0.1`, never a LAN
   interface. Running a server in a VM does not expose it to your network —
-  see the [security model](../reference/security-model.md).
+  see the [security model](../background/security-model.md).
 - **Privileged ports on Linux hosts.** Lima runs unprivileged, and on a
   Linux host an unprivileged process cannot bind ports below 1024 — a guest
   server on port 80 or 443 is silently skipped (Lima logs a warning in the
@@ -65,7 +65,7 @@ after which the project URL is `https://myproj.ddev.site:8443`.
     does not. Either click through the warning, or trust the guest's root
     CA on your machine: `mkcert -CAROOT` in the guest names the directory
     holding `rootCA.pem`; copy it out (the `g` verb, or the download CLI —
-    see [Shells and Files](files-and-shells.md)) and add it to your OS or
+    see [Shells and Files](shells.md)) and add it to your OS or
     browser trust store.
 
 ## Proxmox VMs: the guest has its own address
@@ -87,7 +87,7 @@ Two consequences of a real network address:
 
 - **It is not loopback-only.** Unlike a local VM, a Proxmox guest's ports
   are reachable by anything else on that network, not just by you. That's
-  why the [security model](../reference/security-model.md) expects a Proxmox
+  why the [security model](../background/security-model.md) expects a Proxmox
   host to sit on an isolated LAN or VLAN, and why you shouldn't run a
   `sandbar` VM on a network you don't control.
 - **`*.ddev.site` won't resolve to it.** Those names resolve to
@@ -102,7 +102,7 @@ On a `remote-ssh` profile the same Lima forwarding happens — but to
 the one your browser runs on, so a guest web server is reachable from nowhere
 except the remote host itself. `sandbar` adds no port forwarding of its own over
 the profile's SSH connection, and the
-[security model](../reference/security-model.md) assumes remote hosts sit
+[security model](../background/security-model.md) assumes remote hosts sit
 on an isolated network behind whatever firewalling you already have.
 
 The supported way in is outward: run
@@ -156,7 +156,7 @@ easiest way to show in-progress work to someone who isn't at your desk.
 
 For a private path to a remote VM — no public URL — plain OpenSSH
 forwarding works today, using the connection details already in your
-[profile](connection-profiles.md#profilesyaml):
+[profile](../advanced/connection-profiles.md#profilesyaml):
 
 ```console
 $ ssh -N -L 8443:127.0.0.1:8443 -p <port> -i <identity_path> <user>@<host>

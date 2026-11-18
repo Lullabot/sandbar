@@ -44,4 +44,4 @@ In the TUI, turning on the whole-home toggle locks the others on, since it
 already includes them. Running processes, containers, and anything outside
 the home do not survive. Unpushed work outside the preserved paths is lost.
 
-More: <https://lullabot.github.io/sandbar/latest/using-sand/cli-reference/>
+More: <https://lullabot.github.io/sandbar/latest/reference/cli/>

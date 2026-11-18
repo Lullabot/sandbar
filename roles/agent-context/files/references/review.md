@@ -30,4 +30,4 @@ Whether that URL opens on the workstation depends on the profile type in
 For a repository cloned after the VM was created,
 `self-review-install-skills PATH` installs the review tool's agent skills.
 
-More: <https://lullabot.github.io/sandbar/latest/using-sand/review/>
+More: <https://lullabot.github.io/sandbar/latest/using-sandbar/review/>

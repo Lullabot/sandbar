@@ -2,7 +2,7 @@
 
 ## Shells
 
-`S` on a tile in the [Board](tui.md), and `sandbar shell NAME` from the command
+`S` on a tile in the [Board](../reference/board.md), and `sandbar shell NAME` from the command
 line, both attach you to the same thing: the VM's **persistent tmux
 session** inside the guest, prefixed with `C-a`. They share one attach path,
 so they are two doors onto one session, not two different mechanisms — and
@@ -233,7 +233,7 @@ inside one VM, take the second.
 
 `u` (upload) and `g` (download) on a focused tile open a file-transfer pane.
 Download is bound to `g`, not `d` — `d` is always delete; see the
-[Board](tui.md#keybindings) page for the full keybinding table.
+[Board](../reference/board.md#keybindings) page for the full keybinding table.
 
 These move **data**, not code — think a SQL dump going in, or a screenshot,
 video, or build artifact coming out. They are not a way to get code changes
@@ -273,7 +273,7 @@ a VM mid-reset would stream files into an instance that's about to be
 destroyed.
 
 For the flags behind the equivalent CLI subcommands, see the
-[CLI Reference](cli-reference.md).
+[CLI Reference](../reference/cli.md).
 
 Files are one of two things that cross the VM boundary — for the other,
 reaching a web server listening inside the guest, see
@@ -380,18 +380,18 @@ that state calls for:
   publishing anything. Without a PAT on file the row instead reads
   `on drupal.org · no PAT on file, publish disabled`
   and offers no action. See
-  [Publishing to drupal.org](drupalorg-publishing.md), and
-  [Setup](drupalorg-publishing.md#setup) for the token file.
+  [Publishing to drupal.org](../advanced/drupalorg-publishing.md), and
+  [Setup](../advanced/drupalorg-publishing.md#setup) for the token file.
 
 The commit-and-push action is the only Landing action that runs inside the
 VM, and it stays there: the commit and the push both happen in the guest,
 using the guest's own least-privilege push token. No diff, patch, or working
 tree ever reaches your machine — see
-[Security Model](../reference/security-model.md).
+[Security Model](../background/security-model.md).
 
 Opening a draft PR uses the **workstation's own `gh`** — never the guest's
 own push token — so the PR is created by you, not by whatever ran inside
-the VM. See [Security Model](../reference/security-model.md) for why that
+the VM. See [Security Model](../background/security-model.md) for why that
 split matters. Without a usable `gh` on the workstation, Landing falls back to
 printing the branch's compare URL instead.
 
@@ -460,4 +460,4 @@ reopenable later with `L` (Log), the same key that reopens a build's or
 transfer's log.
 
 For `sandbar land`'s full CLI flags (`--pr`, `--web`), see the
-[CLI Reference](cli-reference.md#sandbar-land-name).
+[CLI Reference](../reference/cli.md#sandbar-land-name).

@@ -12,7 +12,7 @@ inside that individual VM, including on reset.
 - [cloudflared](https://github.com/cloudflare/cloudflared)
 - [mkcert](https://github.com/FiloSottile/mkcert)
 
-Running a web server with these? [Web Servers and Ports](../using-sand/web-servers.md)
+Running a web server with these? [Web Servers and Ports](../using-sandbar/web-servers.md)
 covers how to reach it from your browser — locally and on a remote profile.
 
 ## Language runtimes
@@ -27,7 +27,7 @@ covers how to reach it from your browser — locally and on a remote profile.
 The create form offers four independent checkboxes: **Install Claude Code**,
 **Install OpenAI Codex**, **Install OpenCode**, and **Install Pi**. Select any combination, including none.
 All four start unselected; after creating a VM, sandbar remembers your choices
-across connection profiles. See [Files and State](../reference/files-and-state.md#coding-agent-preferences-and-migration)
+across connection profiles. See [Files and State](files-and-state.md#coding-agent-preferences-and-migration)
 for persistence and migration details.
 
 Headless creation offers `--with-claude`, `--with-codex`, `--with-opencode`,
@@ -113,7 +113,7 @@ can otherwise only start cloud sessions.
   (`remoteControlAtStartup` in `~/.claude/settings.json`). If it is off, the
   skill starts nothing and tells you how to turn it on: answer **y** to the
   launcher's Remote Control question (see
-  [Your First VM](first-vm.md)), or enable it later in Claude Code's `/config`
+  [Your First VM](../getting-started/first-vm.md)), or enable it later in Claude Code's `/config`
   screen.
 
 The skill is sandbar's code, so it lives outside your home at
@@ -131,7 +131,7 @@ linking the skill.
 
 The `--with-*` flags configure the **shared base image**. Changing a tool
 selection makes the next `sandbar create` update the base before cloning a VM.
-See the [CLI reference](../using-sand/cli-reference.md#sandbar-create).
+See the [CLI reference](cli.md#sandbar-create).
 
 ## Browser reviews
 
@@ -139,7 +139,7 @@ Every base image includes [`@self-review/serve`](https://www.npmjs.com/package/@
 Run `sandbar land NAME PATH --review` to review a checkout's diff in your browser
 and save comments where the agent can read them. The server runs inside the
 VM and starts only when you open a review. See
-[Reviewing changes in a browser](../using-sand/review.md).
+[Reviewing changes in a browser](../using-sandbar/review.md).
 
 An initial repository cloned during provisioning receives the matching agent
 skills automatically. For repositories cloned later, run

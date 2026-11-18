@@ -322,6 +322,8 @@ uvx --with-requirements docs/requirements.txt mkdocs build --strict # check (CI 
 `--strict` fails the build on any broken link or a `nav:` entry pointing at
 a missing page. Run it locally before pushing a docs change.
 
+When a page moves or is deleted, add a `redirect_maps` entry in `mkdocs.yml`.
+
 ## Testing
 
 Onboarding tests isolate `XDG_STATE_HOME`; release-check tests isolate
@@ -733,7 +735,7 @@ every bullet, not the constraint itself.
   guest `bash -c` as text — that would break the "the only guest mount is read-only, nothing
   leaves the VM except through the TUI's Upload/Download" property this
   feature was deliberately built alongside without becoming a silent
-  third exception to it. See `docs/reference/security-model.md`'s "Landing"
+  third exception to it. See `docs/background/security-model.md`'s "Landing"
   section for the precise, non-overreaching claim this makes.
 - **`gh` is invoked argv-only, NEVER through a shell.** Every argument
   reaches `gh` as its own argv element (`internal/landgh`'s `Runner`), so a
@@ -790,7 +792,7 @@ every bullet, not the constraint itself.
   **withheld**: writing it up as safe is gated on a negative control nobody
   has run (a token bounded to one issue fork must be shown to FAIL a push to
   a canonical `project/<module>`, which needs a real drupal.org account). See
-  `docs/using-sand/drupalorg-publishing.md#why-publication-is-host-side` for
+  `docs/advanced/drupalorg-publishing.md#why-publication-is-host-side` for
   that gate and the reasoning in full. Publication also replays each guest
   commit as its own API call rather than pushing a ref — see
   `internal/drupalorg/publish.go`'s file doc comment for why a failed
@@ -839,7 +841,7 @@ every bullet, not the constraint itself.
   worktree is `<main-clone>/.git/worktrees/<name>`. The mechanism in
   `internal/provision/gitcred.go` therefore cannot assign a separate token
   by the worktree's checkout path. See "Known limitation" in
-  `docs/using-sand/secrets.md`.
+  `docs/using-sandbar/secrets.md`.
 
 ## VM Ownership and Provenance (read before touching `internal/manage`, `internal/provider`, `internal/registry`)
 

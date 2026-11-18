@@ -16,7 +16,7 @@ The reader is a developer in the middle of a task, or a coding agent reading on 
 2. Say "you" and use the present tense. "sandbar clones the base image," not "the base image will be cloned."
 3. Be opinionated. Recommend, and give the reason. When the reader has to choose, say "we recommend X because Y." Recommendations belong in how-to guides and explanation. Reference stays neutral.
 4. State limits plainly. Say what sandbar doesn't do and what it doesn't protect against. Don't hedge. Don't over explain which can be distracting.
-5. Claim only what is true. Drop "simply," "just," and "easy." Make no security promise the [Security model](../reference/security-model.md) page doesn't back.
+5. Claim only what is true. Drop "simply," "just," and "easy." Make no security promise the [Security model](../background/security-model.md) page doesn't back.
 6. Prefer literal to figurative. No metaphors, idioms, or irony in procedures. An agent or a non-native reader may take them at face value.
 7. Use one term per thing. If it's a VM on one page, it's a VM on every page.
 8. Explain why when a step is surprising. One sentence is enough. Link to an explanation page for the rest.
@@ -71,7 +71,7 @@ Order content by what a reader does first, then what they do often, then what th
 
 ### 3rd pass: technical review
 
-- Verify the **accuracy of claims** and make sure all explanations are **technically correct**. Check claims against the code, not against other docs. Check each security claim against the [Security model](../reference/security-model.md) page (rule 5).
+- Verify the **accuracy of claims** and make sure all explanations are **technically correct**. Check claims against the code, not against other docs. Check each security claim against the [Security model](../background/security-model.md) page (rule 5).
 - Validate **code examples** for correctness, clarity and relevance. Run commands where you can.
 - Define **undefined terms** or link to an explanation.
 - Think about the skills someone needs to do similar tasks, rather than focusing on one narrowly defined task.
@@ -119,7 +119,7 @@ Ask these six questions of any docs PR.
 - Is the page one Diátaxis type, or is it mixing two?
 - Does the first sentence give the answer or the action?
 - Can every sentence be taken literally?
-- Is each claim true, and is each security claim backed by the [Security model](../reference/security-model.md) page?
+- Is each claim true, and is each security claim backed by the [Security model](../background/security-model.md) page?
 - Where the reader has to choose, is there a recommendation with a reason?
 - Would any line annoy on the tenth read? Cut it.
 

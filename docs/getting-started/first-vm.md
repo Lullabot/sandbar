@@ -25,21 +25,21 @@ Then connect with:
 sandbar shell NAME
 ```
 
-See the [CLI Reference](../using-sand/cli-reference.md) for the full flag
+See the [CLI Reference](../reference/cli.md) for the full flag
 list.
 
 To clone a private GitHub or GitLab project while creating the VM, provide a
 clone token with the repository URL. GitHub and GitLab.com are detected
 automatically. For a self-hosted GitLab URL, select GitLab in the form or use
 `sandbar create --clone-forge gitlab`; token setup and reset behavior are in
-[Secrets](../using-sand/secrets.md#github-and-gitlab-tokens).
+[Secrets](../using-sandbar/secrets.md#github-and-gitlab-tokens).
 
 ## What to expect the first time
 
 The very first VM you create builds a shared base image (`sandbar-base`),
 which can take a while. Every VM you
 create after that clones the shared development tools and installs current
-releases of your selected agents. See [How Provisioning Works](how-it-works.md) for why it's
+releases of your selected agents. See [How Provisioning Works](../background/how-it-works.md) for why it's
 built this way.
 
 ## Putting the VM somewhere else
@@ -49,7 +49,7 @@ on another machine or on a Proxmox host, add that machine as a profile once
 (press `p` in the board, then `n`), then pick it from the create form's
 profile selector — or pass `sandbar create --profile NAME` headlessly. Nothing
 else about the VM changes. See [Where VMs
-Run](../using-sand/connection-profiles.md).
+Run](../advanced/connection-profiles.md).
 
 ## Logging into Claude Code
 
