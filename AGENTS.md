@@ -545,14 +545,17 @@ every bullet, not the constraint itself.
   `internal/ui/jobs.go`. **Never render `vm.Status` directly on a tile**: a
   failed provision would show as a reassuring green "Running", and an
   in-progress one would show as an idle VM with nothing happening.
-- **Tile order is alphabetical and stable; focus is pinned to VM identity,
-  not slot index.** Both are deliberate. Sorting by status (running-first)
-  looks like an improvement but makes pressing a destructive key (`x`, `d`)
-  teleport the focused tile across the board as a *side effect of the verb
-  just pressed* — exactly when the user is most likely to press another key.
-  Tracking focus by slot index has the same failure through a different
-  door: a refresh reorders the roster mid-keypress and a key meant for
-  `prod-box` lands on `dev-box`. `focusedVM()`/`syncBoard()` in `board.go`
+- **Tile order defaults to alphabetical and stable; focus is pinned to VM
+  identity, not slot index.** Running-first order is an explicit, per-session
+  opt-in (`O`, `boardSort` in `board.go`), never the default: it makes
+  pressing `x` or `s` move the focused tile across the board as a *side
+  effect of the verb just pressed*, exactly when the user is likely to press
+  another key. It is offered only because the ring follows the VM's identity,
+  so that next key still lands on the same VM; the footer band names the order
+  while it is active so moving tiles have a visible reason. Rank by
+  `statusOf`, never `vm.Status`. Tracking focus by slot index has the failure
+  the pin prevents: a refresh reorders the roster mid-keypress and a key meant
+  for `prod-box` lands on `dev-box`. `focusedVM()`/`syncBoard()` in `board.go`
   are the only correct way to ask "what VM is the ring on".
 - **The job registry retains the last run per VM *per kind* — a provision and
   a file transfer are two runs — in memory, including its log; failed jobs

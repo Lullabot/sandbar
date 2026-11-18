@@ -167,8 +167,15 @@ func (m model) boardVMs() []boardVM {
 	}
 	// Alphabetical by name (identical to the single-provider order for N=1), with
 	// a stable scope tiebreak so two same-named VMs across profiles order
-	// deterministically.
+	// deterministically. Running-first order (O) groups by status ahead of that,
+	// and keeps the same order inside each group.
 	sort.Slice(out, func(i, j int) bool {
+		if m.boardSort == sortRunningFirst {
+			ri, rj := m.statusRank(out[i]), m.statusRank(out[j])
+			if ri != rj {
+				return ri < rj
+			}
+		}
 		if out[i].Name != out[j].Name {
 			return out[i].Name < out[j].Name
 		}
@@ -178,6 +185,50 @@ func (m model) boardVMs() []boardVM {
 		return out[i].scope.RemoteTarget < out[j].scope.RemoteTarget
 	})
 	return out
+}
+
+// boardSort is the order the board lays its tiles out in.
+//
+// Alphabetical is the default and the order the identity pin was designed
+// around. Running-first exists so a user with several VMs can reach the started
+// ones quickly; the cost is that a tile MOVES when its VM starts or stops,
+// including as a side effect of a verb just pressed. The focus ring is pinned
+// to the VM's identity, not its slot, so it travels with the tile and the next
+// key still lands on the same VM — that pin is what makes this order safe to
+// offer at all.
+type boardSort int
+
+const (
+	sortAlphabetical boardSort = iota
+	sortRunningFirst
+)
+
+// statusRank orders VMs for running-first: running, then building, then
+// everything else (stopped and failed). It goes through statusOf, never
+// vm.Status, so a build Lima calls Running does not sort as an idle running VM.
+func (m model) statusRank(v boardVM) int {
+	switch m.statusOf(v.scope, v.VM) {
+	case statusRunning:
+		return 0
+	case statusBuilding:
+		return 1
+	default:
+		return 2
+	}
+}
+
+// toggleBoardSort flips between alphabetical and running-first. The ring stays
+// on the same VM (syncBoard re-pins it by identity) and the grid scrolls to
+// keep it in view.
+func (m *model) toggleBoardSort() {
+	if m.boardSort == sortRunningFirst {
+		m.boardSort = sortAlphabetical
+		m.logMsg("tiles sorted alphabetically")
+	} else {
+		m.boardSort = sortRunningFirst
+		m.logMsg("tiles sorted with running VMs first")
+	}
+	m.syncBoard()
 }
 
 // visibleVMs is the roster narrowed by the live name search ('/'). It is what the
@@ -744,6 +795,10 @@ func (m model) updateBoard(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.searching = true
 		return m, nil
 
+	case key.Matches(msg, m.keys.Sort):
+		m.toggleBoardSort()
+		return m, nil
+
 	case key.Matches(msg, m.keys.New):
 		cmd := m.openForm()
 		return m, cmd
@@ -932,8 +987,14 @@ func (m model) footerBandView() string {
 	switch {
 	case m.searching:
 		lines = append(lines, m.clipLine(statusStyle.Render("/"+m.searchQuery+"   enter: apply · esc: clear")))
+	case m.searchQuery != "" && m.boardSort == sortRunningFirst:
+		lines = append(lines, m.clipLine(statusStyle.Render(fmt.Sprintf("name filter: %q   / edit · esc clear   ·   running first   O alphabetical", m.searchQuery))))
 	case m.searchQuery != "":
 		lines = append(lines, m.clipLine(statusStyle.Render(fmt.Sprintf("name filter: %q   / edit · esc clear", m.searchQuery))))
+	case m.boardSort == sortRunningFirst:
+		// Say so whenever the order is not the default, so tiles that move as VMs
+		// start and stop have a visible reason, and the key to undo it is on screen.
+		lines = append(lines, m.clipLine(statusStyle.Render("sorted: running first   O alphabetical")))
 	}
 	// footerView applies the HelpLines cap for every screen, this one included.
 	lines = append(lines, strings.Split(m.footerView(m.boardHelp()), "\n")...)

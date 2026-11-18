@@ -201,6 +201,9 @@ type model struct {
 	// once the board outgrew the viewport, scrolled to the bottom to show it.
 	// A ghost the user arrowed onto clears it and stays sticky.
 	ghostAutoFocus bool
+	// boardSort is the tile order the O key toggles (board.go). It lives for the
+	// session only; every launch starts alphabetical.
+	boardSort boardSort
 
 	// helpScroll is the `?` screen's scroll offset (help.go).
 	helpScroll int
