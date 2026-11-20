@@ -20,7 +20,7 @@ graph TD
 The first time you create a VM, `sandbar` runs a heavy install into a stopped
 VM named `sandbar-base`. This installs development tools and shared
 runtimes. Coding agents are excluded from the base. See [Available
-Tools](available-tools.md) for the full toolchain.
+Tools](../reference/vm-tools.md) for the full toolchain.
 
 Because the base image carries no identity or secrets, it's safe to keep
 around and reuse indefinitely — `sandbar` rebuilds it automatically if the
@@ -47,7 +47,7 @@ repository. OS upgrades happen during base maintenance; the VM restarts
 only when the guest reports a reboot is required.
 
 Reset repeats the per-VM installs using that VM's recorded selections.
-The optional [agent preservation checkbox](../using-sand/tui.md#resetting-a-vm)
+The optional [agent preservation checkbox](../reference/board.md#resetting-a-vm)
 keeps settings and files across reset; executable releases are installed fresh.
 When upgrading from an older sandbar, base maintenance removes legacy agent
 installs before cloning. Changing agent choices alone does not invalidate
@@ -73,4 +73,4 @@ The shape above is identical everywhere; only the mechanics differ.
 
 For a remote host, `sandbar` runs the same `limactl` commands it would run
 locally — it only changes *where* they run. See [Where VMs
-Run](../using-sand/connection-profiles.md).
+Run](../advanced/connection-profiles.md).

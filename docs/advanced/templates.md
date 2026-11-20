@@ -158,7 +158,7 @@ Instead:
 1. Snapshot the template **before** storing secrets in the VM's guest (or clean them out first).
 2. Use the host-side secrets store (`sandbar secrets`, key `e` on a tile) to manage per-VM credentials, or put them in a cloned project's `.env` at create time (the `--clone-token` flag).
 
-See [Secrets](secrets.md) for how the host secrets store works and how to manage them per-VM and per-directory.
+See [Secrets](../using-sandbar/secrets.md) for how the host secrets store works and how to manage them per-VM and per-directory.
 
 ## When to rebuild the base vs. snapshot a template
 

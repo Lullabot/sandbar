@@ -37,4 +37,4 @@ Alternatively, `cloudflared tunnel --url http://localhost:PORT` in the guest
 prints a public `trycloudflare.com` URL. Anyone with that URL can reach the
 server, so say so and do not leave it running unattended.
 
-More: <https://lullabot.github.io/sandbar/latest/using-sand/web-servers/>
+More: <https://lullabot.github.io/sandbar/latest/using-sandbar/web-servers/>

@@ -8,7 +8,7 @@ out; every other page links here instead of restating them.
 
 | Path | What it holds | Safe to delete? |
 | --- | --- | --- |
-| `${XDG_CONFIG_HOME:-~/.config}/sandbar/profiles.yaml` | The [Connection Profiles](../using-sand/connection-profiles.md) config: every location `sandbar` can run VMs on (the permanent Local profile, plus any `remote-ssh` or `proxmox` profiles you've added), each profile's connection settings, and which profile was last used. **Secret-free** — no password or key material, only a path to a key file — and hand-editable YAML. | Yes, but you lose every remote profile's connection settings (host/user/port/etc.) — `sandbar` reseeds a fresh Local-only file on next start. The VMs and their disks on any remote host are untouched; you'd need to re-add a profile pointing at that host to manage them again. |
+| `${XDG_CONFIG_HOME:-~/.config}/sandbar/profiles.yaml` | The [Connection Profiles](../advanced/connection-profiles.md) config: every location `sandbar` can run VMs on (the permanent Local profile, plus any `remote-ssh` or `proxmox` profiles you've added), each profile's connection settings, and which profile was last used. **Secret-free** — no password or key material, only a path to a key file — and hand-editable YAML. | Yes, but you lose every remote profile's connection settings (host/user/port/etc.) — `sandbar` reseeds a fresh Local-only file on next start. The VMs and their disks on any remote host are untouched; you'd need to re-add a profile pointing at that host to manage them again. |
 | `${XDG_DATA_HOME:-~/.local/share}/sandbar/managed-vms.json` | The secret-free index of every `sandbar`-managed VM and golden template. Schema version 4 adds scoped template records and each VM's optional `templateSource` provenance to the schema-v3 `(connection scope, name)` model. | Yes, but you lose reset defaults, template metadata, and `sandbar`'s record of which VMs it manages. VM and template disks on their providers are untouched. |
 | `${XDG_DATA_HOME:-~/.local/share}/sandbar/secrets.json` | The secret store: every KEY=VALUE pair you've set for every VM, across all scopes. Stored **unencrypted**, mode `0600` inside a `0700` directory. | Only if you're prepared to re-enter every secret for every VM — deleting it does not touch a running VM's already-rendered guest files, but the next apply will have nothing to render. |
 | `${XDG_DATA_HOME:-~/.local/share}/sandbar/managed-vms.json.lock`, `…/secrets.json.lock`, `${XDG_CONFIG_HOME:-~/.config}/sandbar/profiles.yaml.lock` | Empty files used to coordinate writes to the managed index, secrets store and connection profiles. Before changing any of them, `sandbar` locks it and re-reads its current contents so concurrent processes keep each other's updates. If the lock is unavailable or the wait times out, the write proceeds without it. | Delete only when no `sandbar` process is running. They contain no data and are re-created when needed, but deleting an active lock can allow conflicting writes. |
@@ -16,9 +16,9 @@ out; every other page links here instead of restating them.
 | `${XDG_CACHE_HOME:-~/.cache}/sandbar/release-check.json` | Disposable release-check metadata: the last attempt time and last validated stable release/tag URL. Created with mode `0600` in a `0700` directory. | Yes. Sandbar can check GitHub again on its next startup; no VM or configuration data is affected. |
 | `${XDG_CACHE_HOME:-~/.cache}/sandbar/release-check.json.lock` | Advisory lock used to reserve a due release-check attempt before networking and update the shared cache safely when multiple sandbar processes run. It prevents duplicate daily requests and stale writes. | Delete only when no `sandbar` process is running. It contains no user data and is re-created as needed; removing an active lock can allow duplicate checks or conflicting cache updates. |
 | `${LIMA_HOME:-~/.lima}` | Lima's own instance store — disk images, `lima.yaml`, per-instance logs. `sandbar` does not own this directory; Lima does. | `sandbar` never deletes it directly; use `limactl delete` or Lima's own tooling. |
-| `${XDG_STATE_HOME:-~/.local/state}/sandbar/proxmox/<host>-<node>-<pool>/` | For a [Proxmox](../using-sand/proxmox.md) profile only: `sandbar`'s local state *about* that endpoint's VMs (the base-version stamp and its lock). Proxmox itself owns the VMs — this holds only what has no home on the Proxmox host. One directory per host/node/pool. | Yes — `sandbar` re-stamps the base on the next build. The VMs on the Proxmox host are untouched. |
-| Proxmox API **token file** (path you chose, e.g. `~/.config/sandbar/pve1.token`) | The `user@realm!tokenid=value` credential a Proxmox profile's `token_file` points at. **Not** managed by `sandbar` and never written by it — you create it (see [Proxmox VE](../using-sand/proxmox.md)). Must be mode `0600`; `sandbar` refuses to read a looser one. | Only if you're prepared to re-issue the token — it's the sole secret that grants access to the pool. |
-| `${XDG_CONFIG_HOME:-~/.config}/sandbar/drupalorg.token` | Your drupal.org account **personal access token**, read only on the host for [publishing a guest checkout's commits to drupal.org](../using-sand/drupalorg-publishing.md). **Not** managed by `sandbar` and never written by it — you create it, with the token as its only content. Must be mode `0600`; `sandbar` refuses to read a looser one, and refuses to publish at all if the file is absent. The path is a fixed **convention, not a configured value**: there is deliberately no `profiles.yaml` key and no form field for it, because the credential is workstation-global rather than per-location. It is deliberately **not** in the [secrets store](../using-sand/secrets.md) either — that store exists to deliver secrets *into* a guest, and no drupal.org credential ever enters a VM (see [Security Model](security-model.md#publishing-to-drupalorg-agent-decides-what-host-decides-where)). | Only if you're prepared to re-issue the token. Deleting it disables publishing until you recreate it; nothing else is affected. |
+| `${XDG_STATE_HOME:-~/.local/state}/sandbar/proxmox/<host>-<node>-<pool>/` | For a [Proxmox](../advanced/proxmox.md) profile only: `sandbar`'s local state *about* that endpoint's VMs (the base-version stamp and its lock). Proxmox itself owns the VMs — this holds only what has no home on the Proxmox host. One directory per host/node/pool. | Yes — `sandbar` re-stamps the base on the next build. The VMs on the Proxmox host are untouched. |
+| Proxmox API **token file** (path you chose, e.g. `~/.config/sandbar/pve1.token`) | The `user@realm!tokenid=value` credential a Proxmox profile's `token_file` points at. **Not** managed by `sandbar` and never written by it — you create it (see [Proxmox VE](../advanced/proxmox.md)). Must be mode `0600`; `sandbar` refuses to read a looser one. | Only if you're prepared to re-issue the token — it's the sole secret that grants access to the pool. |
+| `${XDG_CONFIG_HOME:-~/.config}/sandbar/drupalorg.token` | Your drupal.org account **personal access token**, read only on the host for [publishing a guest checkout's commits to drupal.org](../advanced/drupalorg-publishing.md). **Not** managed by `sandbar` and never written by it — you create it, with the token as its only content. Must be mode `0600`; `sandbar` refuses to read a looser one, and refuses to publish at all if the file is absent. The path is a fixed **convention, not a configured value**: there is deliberately no `profiles.yaml` key and no form field for it, because the credential is workstation-global rather than per-location. It is deliberately **not** in the [secrets store](../using-sandbar/secrets.md) either — that store exists to deliver secrets *into* a guest, and no drupal.org credential ever enters a VM (see [Security Model](../background/security-model.md#publishing-to-drupalorg-agent-decides-what-host-decides-where)). | Only if you're prepared to re-issue the token. Deleting it disables publishing until you recreate it; nothing else is affected. |
 
 Sources: `internal/profiles/store.go` (`profiles.yaml` default path, schema, and CRUD), `internal/registry/registry.go:53` and `internal/registry/registry.go:62` (`managed-vms.json` default path), `internal/registry/registry.go:172` (the config saved into that index is the create config, stripped of the clone token), `internal/registry/registry.go:107`-`internal/registry/registry.go:129` (the v3 `(scope, name)`-keyed array shape), `internal/secrets/secrets.go:124` and `internal/secrets/secrets.go:133` (`secrets.json` default path), `internal/secrets/secrets.go:342`-`internal/secrets/secrets.go:350` (directory forced to `0700`) and `internal/secrets/secrets.go:357`-`internal/secrets/secrets.go:359` (file created at `0600`), `internal/provision/baseversion.go:62`-`internal/provision/baseversion.go:68` (`LIMA_HOME` fallback to `~/.lima`), `internal/drupalorg/token.go` (`TokenPath`'s `XDG_CONFIG_HOME` fallback and doc comment, and `LoadToken`'s mode check).
 
@@ -37,15 +37,15 @@ Two unrelated things are both called a "scope" in this file store, and it's
 easy to conflate them:
 
 - The **connection scope** (`registry.Scope`: which [Connection
-  Profile](../using-sand/connection-profiles.md) — local, a specific
+  Profile](../advanced/connection-profiles.md) — local, a specific
   `user@host:port` for remote-Lima, or a `host:node/pool` for
-  [Proxmox](../using-sand/proxmox.md) — a VM lives on) is what schema version 3 added to both
+  [Proxmox](../advanced/proxmox.md) — a VM lives on) is what schema version 3 added to both
   `managed-vms.json` and `secrets.json`. It's what lets the same VM *name*
   exist independently on two different profiles.
 - The secrets store's pre-existing **directory scope** (`global`, or a
   path like `foo/bar`) is unrelated and unchanged by this — it's *within
   one VM*, picking which guest directory a secret's `.env` lands in. See
-  [Secrets](../using-sand/secrets.md#scopes-global-vs-per-directory).
+  [Secrets](../using-sandbar/secrets.md#scopes-global-vs-per-directory).
 
 A single secret is addressed by the combination of both: connection scope →
 VM name → directory scope → key.
@@ -96,7 +96,7 @@ covered. Directories named `.cache` are excluded consistently with every other
 reset preserve mode. These paths can contain credentials, session history, and
 extensions; preservation includes all four agents regardless of
 the VM's recorded selections, including manual installs. The data passes through a private
-host temporary directory during reset. See [Security Model](security-model.md)
+host temporary directory during reset. See [Security Model](../background/security-model.md)
 before preserving state from a VM you do not trust.
 
 The Sandbar Claude and Codex markers remember whether their respective remote
@@ -129,5 +129,5 @@ because `~/.bashrc` still loads it.
 
 Source: `internal/provision/secrets.go:37` (global scope sourced from `.profile`/`.bashrc`) and `internal/provision/secrets.go:78` (`RenderDotenv` for a scoped `~/<scope>/.env`).
 
-See [Security Model](security-model.md) for why the host secrets store is
+See [Security Model](../background/security-model.md) for why the host secrets store is
 unencrypted and what that means for you.

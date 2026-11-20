@@ -392,7 +392,7 @@ var (
 // terminal, where the actionable half is the only half that earns the room:
 // which commits are in the way, and that rebasing rather than merging is
 // what produces a publishable branch. The reasoning belongs in the docs
-// (docs/using-sand/drupalorg-publishing.md) and in these comments.
+// (docs/advanced/drupalorg-publishing.md) and in these comments.
 type MergeCommitsError struct {
 	// SHAs are the merge commits found in the range, as the guest reported
 	// them. They are the guest's own output and so are only ever printed,

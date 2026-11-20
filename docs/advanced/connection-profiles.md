@@ -152,7 +152,7 @@ the TUI.
 `sandbar create --profile <name>` picks which profile a headless create acts
 on. `sandbar shell NAME --profile <name>` disambiguates when a VM named `NAME`
 exists on more than one enabled profile. See the
-[CLI Reference](cli-reference.md) for the full flag semantics and resolution
+[CLI Reference](../reference/cli.md) for the full flag semantics and resolution
 order.
 
 ## All enabled profiles are active at once
@@ -161,7 +161,7 @@ Unlike the old environment-variable selection, which chose exactly one
 backend per process, **every enabled profile is live simultaneously** in the
 TUI: the board shows tiles from this machine, every enabled remote host, and
 every Proxmox host side by side, each tile labeled with the profile it runs
-on (see [The TUI](tui.md)). A disabled or errored profile shows a banner
+on (see [The TUI](../reference/board.md)). A disabled or errored profile shows a banner
 instead of tiles, naming the profile and the reason.
 
 Because VMs are tracked per-profile, the **same VM name can exist under two
@@ -191,7 +191,7 @@ Three things are worth knowing:
 
 - **Interactive shells** (`sandbar shell NAME` and `S` on a tile) wrap the guest
   tmux attach with `ssh -t` automatically; detaching still leaves the session
-  running, exactly as with a local VM (see [Files and Shells](files-and-shells.md)).
+  running, exactly as with a local VM (see [Files and Shells](../using-sandbar/shells.md)).
 - **File transfer** works in both directions, but the route differs. On a
   `remote-ssh` profile the remote `limactl copy` can't see your local
   filesystem, so `sandbar` stages the file through the remote host and preserves
@@ -202,7 +202,7 @@ Three things are worth knowing:
   loopback, not yours, so they aren't reachable from your machine without a
   tunnel. On a `proxmox` profile the guest has its own address on your
   network, so you connect to it directly. See [Web Servers and
-  Ports](web-servers.md).
+  Ports](../using-sandbar/web-servers.md).
 
 **Isolation.** VMs created on a profile are tagged with that profile's
 connection in the [managed-VM index](../reference/files-and-state.md), so

@@ -43,7 +43,7 @@ produced, because there was never a channel for it to leave anything
 behind. Files move in and out only when you upload or download them on
 purpose. This holds whether the VM runs on your own machine or on a
 server — and on a server, the agent isn't running on your hardware at
-all. The [Security Model](reference/security-model.md) spells out the
+all. The [Security Model](security-model.md) spells out the
 full set of guarantees and their two deliberate exceptions.
 
 That property is what lets sandbar run the agent with permissions
@@ -112,23 +112,23 @@ to make it easier (and faster!) to use.
   (Docker, ddev, Node, Go, Python, a JDK, `gh`, tmux, direnv). Every VM
   after the first is a clone of it plus a finalize pass for current agent
   releases, hostname, git identity, and an optional repo clone. See
-  [How Provisioning Works](getting-started/how-it-works.md).
+  [How Provisioning Works](how-it-works.md).
 - **Your laptop isn't the only place to run one.** The same board and
   the same commands create a VM on this machine, on another machine
-  over SSH, or on a [Proxmox](using-sand/proxmox.md) host — so heavy
+  over SSH, or on a [Proxmox](../advanced/proxmox.md) host — so heavy
   agent work can live on a server while you drive it from a laptop.
-  See [Where VMs Run](using-sand/connection-profiles.md).
+  See [Where VMs Run](../advanced/connection-profiles.md).
 - **A board and a CLI.** Run `sandbar` for a
-  [terminal board](using-sand/tui.md) where every action fires from the
+  [terminal board](../reference/board.md) where every action fires from the
   focused tile, or script `sandbar create` and `sandbar shell` headlessly for
   CI. Builds keep running when you navigate away, and tmux sessions
   survive a disconnect because systemd linger is on.
 - **Secrets stay off argv.** Clone tokens and
-  [secret values](using-sand/secrets.md) stream into the guest over
+  [secret values](../using-sandbar/secrets.md) stream into the guest over
   stdin into tmpfs and are removed on exit, so they never appear in a
   process listing on either side.
 - **Least-privilege access is documented, not assumed.** The
-  [Security Model](reference/security-model.md#a-least-privilege-token-reasonable-agent-access)
+  [Security Model](security-model.md#a-least-privilege-token-reasonable-agent-access)
   walks through a fine-grained GitHub token that can push code and read
   pull requests and issues but cannot merge or close them, paired with
   branch protection, so an unattended agent can push branches for
@@ -238,7 +238,7 @@ the point where local, full-VM, sealed, and disposable meet.
 The local/cloud split in that table is also less of a split for
 sandbar than for the rest. A sandbar VM runs on your laptop by default,
 but the same board and the same commands put it on a workstation, a
-home server, or a [Proxmox](using-sand/proxmox.md) host instead — a
+home server, or a [Proxmox](../advanced/proxmox.md) host instead — a
 machine you own, not someone else's cloud. You get somewhere bigger to
 run agents without giving up the boundary or handing your code to a
 third party.
@@ -247,9 +247,9 @@ third party.
 
 A Sandbar VM already runs wherever you want it: on your laptop, on a
 Mac Mini or workstation over SSH, or on a
-[Proxmox](using-sand/proxmox.md) server. All three are the same
+[Proxmox](../advanced/proxmox.md) server. All three are the same
 commands and the same board — see
-[Where VMs Run](using-sand/connection-profiles.md).
+[Where VMs Run](../advanced/connection-profiles.md).
 
 That took three backends behind one seam, and the seam is what the rest
 of the roadmap builds on: more places to run a VM, and more agents

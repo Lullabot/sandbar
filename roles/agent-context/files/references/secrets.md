@@ -24,4 +24,4 @@ environment variable and configures no Git credential helper. A linked
 worktree uses its main clone's token, not one scoped to the worktree's own
 path.
 
-More: <https://lullabot.github.io/sandbar/latest/using-sand/secrets/>
+More: <https://lullabot.github.io/sandbar/latest/using-sandbar/secrets/>

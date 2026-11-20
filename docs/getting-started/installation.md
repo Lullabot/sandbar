@@ -18,10 +18,10 @@ pulls it in as a dependency of the `sandbar` formula below.
   machine instead, and you need passwordless SSH to it.
 - On a **Proxmox VE host**, no Lima is involved at all — `sandbar` talks to the
   Proxmox API over HTTPS. The host needs a one-time
-  [token and pool setup](../using-sand/proxmox.md).
+  [token and pool setup](../advanced/proxmox.md).
 
 Either way, add the machine as a [Connection
-Profile](../using-sand/connection-profiles.md) once and `sandbar` uses it from
+Profile](../advanced/connection-profiles.md) once and `sandbar` uses it from
 then on.
 
 ## Install `sandbar`
