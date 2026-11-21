@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.20.0](https://github.com/Lullabot/sandbar/compare/v0.19.1...v0.20.0) (2026-11-21)
+
+
+### Features
+
+* **ui:** delete the last word of the board search with ctrl+w ([#373](https://github.com/Lullabot/sandbar/issues/373)) ([6408844](https://github.com/Lullabot/sandbar/commit/6408844253dae8c6f9cbd5ffe4fde9c02e6a0a70))
+* **ui:** toggle the board between alphabetical and running-first order ([#371](https://github.com/Lullabot/sandbar/issues/371)) ([b4e132f](https://github.com/Lullabot/sandbar/commit/b4e132ff7efab490d22e7b8de09b3e5a8c3588a0))
+
+
+### Bug Fixes
+
+* **deps:** update github.com/charmbracelet/x/exp/teatest/v2 digest to ee8f503 ([#382](https://github.com/Lullabot/sandbar/issues/382)) ([9d6f7fe](https://github.com/Lullabot/sandbar/commit/9d6f7fe9650796047f46bf5fa6dc24824092ae54))
+* **deps:** update module charm.land/bubbletea/v2 to v2.1.2 ([#381](https://github.com/Lullabot/sandbar/issues/381)) ([6ac3edf](https://github.com/Lullabot/sandbar/commit/6ac3edf792c2b3642f7ef989427ee70dc8211169))
+* **deps:** update module charm.land/lipgloss/v2 to v2.1.1 ([#374](https://github.com/Lullabot/sandbar/issues/374)) ([c1f9cab](https://github.com/Lullabot/sandbar/commit/c1f9cab223aeecc9e294d77a91b848d57b12bc49))
+* **ui:** open the board on the first VM, not the new-VM tile ([#370](https://github.com/Lullabot/sandbar/issues/370)) ([d0f63f4](https://github.com/Lullabot/sandbar/commit/d0f63f4821b0e6ccbd0e68a4063a15cfc4b0ff80))
+
 ## [0.19.1](https://github.com/Lullabot/sandbar/compare/v0.19.0...v0.19.1) (2026-11-17)
 
 
