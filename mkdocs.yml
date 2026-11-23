@@ -82,7 +82,7 @@ plugins:
 nav:
   - Home: index.md
   - Getting started:
-    - Installation: getting-started/installation.md
+    - Install sandbar: getting-started/installation.md
     - 'Quickstart: a Drupal site with DDEV': getting-started/quickstart.md
     - Your first VM: getting-started/first-vm.md
   - Using sandbar:
