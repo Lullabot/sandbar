@@ -130,7 +130,7 @@ Check for consistency against the word list (rule 7):
 
 | Use | Not |
 | --- | --- |
-| **sandbar** or `sandbar` | Sandbar, `sand` |
+| **sandbar** or `sandbar`; **Sandbar** only as the first word of a sentence, heading or title | Sandbar mid-sentence, SandBar, `sand` |
 | **Drupal** | drupal |
 | **Lullabot** | |
 | **JavaScript** | javascript, JS |
