@@ -77,12 +77,13 @@ plugins:
         reference/security-model.md: background/security-model.md
         why.md: background/why.md
         contributing/image-build-audit.md: contributing/base-image.md
+        getting-started/index.md: getting-started/quickstart.md
 
 nav:
   - Home: index.md
   - Getting started:
-    - About sandbar: getting-started/index.md
     - Installation: getting-started/installation.md
+    - 'Quickstart: a Drupal site with DDEV': getting-started/quickstart.md
     - Your first VM: getting-started/first-vm.md
   - Using sandbar:
     - Shells and files: using-sandbar/shells.md

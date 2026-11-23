@@ -139,6 +139,10 @@ to make it easier (and faster!) to use.
   steer a VM session from another device and be alerted when the agent is
   waiting for you. Cross-machine access stays off unless you opt in.
 
+## What sandbar is not
+
+sandbar is not a general-purpose VM manager. It doesn't manage arbitrary guest operating systems, arbitrary provisioning recipes, or long-lived infrastructure. It manages one kind of thing, a development VM for coding agents, and leaves everything else to the tools underneath it.
+
 ## How it compares
 
 Running an agent in a local VM isn't unique to Sandbar.
