@@ -5,7 +5,31 @@
          <lastmod>2026-11-23</lastmod>
     </url>
     <url>
-         <loc>https://lullabot.github.io/sandbar/main/why/</loc>
+         <loc>https://lullabot.github.io/sandbar/main/advanced/connection-profiles/</loc>
+         <lastmod>2026-11-23</lastmod>
+    </url>
+    <url>
+         <loc>https://lullabot.github.io/sandbar/main/advanced/drupalorg-publishing/</loc>
+         <lastmod>2026-11-23</lastmod>
+    </url>
+    <url>
+         <loc>https://lullabot.github.io/sandbar/main/advanced/proxmox/</loc>
+         <lastmod>2026-11-23</lastmod>
+    </url>
+    <url>
+         <loc>https://lullabot.github.io/sandbar/main/advanced/templates/</loc>
+         <lastmod>2026-11-23</lastmod>
+    </url>
+    <url>
+         <loc>https://lullabot.github.io/sandbar/main/background/how-it-works/</loc>
+         <lastmod>2026-11-23</lastmod>
+    </url>
+    <url>
+         <loc>https://lullabot.github.io/sandbar/main/background/security-model/</loc>
+         <lastmod>2026-11-23</lastmod>
+    </url>
+    <url>
+         <loc>https://lullabot.github.io/sandbar/main/background/why/</loc>
          <lastmod>2026-11-23</lastmod>
     </url>
     <url>
@@ -13,11 +37,11 @@
          <lastmod>2026-11-23</lastmod>
     </url>
     <url>
-         <loc>https://lullabot.github.io/sandbar/main/contributing/development/</loc>
+         <loc>https://lullabot.github.io/sandbar/main/contributing/base-image/</loc>
          <lastmod>2026-11-23</lastmod>
     </url>
     <url>
-         <loc>https://lullabot.github.io/sandbar/main/contributing/image-build-audit/</loc>
+         <loc>https://lullabot.github.io/sandbar/main/contributing/development/</loc>
          <lastmod>2026-11-23</lastmod>
     </url>
     <url>
@@ -25,11 +49,11 @@
          <lastmod>2026-11-23</lastmod>
     </url>
     <url>
-         <loc>https://lullabot.github.io/sandbar/main/getting-started/</loc>
+         <loc>https://lullabot.github.io/sandbar/main/contributing/writing-guide/</loc>
          <lastmod>2026-11-23</lastmod>
     </url>
     <url>
-         <loc>https://lullabot.github.io/sandbar/main/getting-started/available-tools/</loc>
+         <loc>https://lullabot.github.io/sandbar/main/getting-started/</loc>
          <lastmod>2026-11-23</lastmod>
     </url>
     <url>
@@ -37,11 +61,15 @@
          <lastmod>2026-11-23</lastmod>
     </url>
     <url>
-         <loc>https://lullabot.github.io/sandbar/main/getting-started/how-it-works/</loc>
+         <loc>https://lullabot.github.io/sandbar/main/getting-started/installation/</loc>
          <lastmod>2026-11-23</lastmod>
     </url>
     <url>
-         <loc>https://lullabot.github.io/sandbar/main/getting-started/installation/</loc>
+         <loc>https://lullabot.github.io/sandbar/main/reference/board/</loc>
+         <lastmod>2026-11-23</lastmod>
+    </url>
+    <url>
+         <loc>https://lullabot.github.io/sandbar/main/reference/cli/</loc>
          <lastmod>2026-11-23</lastmod>
     </url>
     <url>
@@ -49,51 +77,27 @@
          <lastmod>2026-11-23</lastmod>
     </url>
     <url>
-         <loc>https://lullabot.github.io/sandbar/main/reference/security-model/</loc>
-         <lastmod>2026-11-23</lastmod>
-    </url>
-    <url>
          <loc>https://lullabot.github.io/sandbar/main/reference/troubleshooting/</loc>
          <lastmod>2026-11-23</lastmod>
     </url>
     <url>
-         <loc>https://lullabot.github.io/sandbar/main/using-sand/cli-reference/</loc>
+         <loc>https://lullabot.github.io/sandbar/main/reference/vm-tools/</loc>
          <lastmod>2026-11-23</lastmod>
     </url>
     <url>
-         <loc>https://lullabot.github.io/sandbar/main/using-sand/connection-profiles/</loc>
+         <loc>https://lullabot.github.io/sandbar/main/using-sandbar/review/</loc>
          <lastmod>2026-11-23</lastmod>
     </url>
     <url>
-         <loc>https://lullabot.github.io/sandbar/main/using-sand/drupalorg-publishing/</loc>
+         <loc>https://lullabot.github.io/sandbar/main/using-sandbar/secrets/</loc>
          <lastmod>2026-11-23</lastmod>
     </url>
     <url>
-         <loc>https://lullabot.github.io/sandbar/main/using-sand/files-and-shells/</loc>
+         <loc>https://lullabot.github.io/sandbar/main/using-sandbar/shells/</loc>
          <lastmod>2026-11-23</lastmod>
     </url>
     <url>
-         <loc>https://lullabot.github.io/sandbar/main/using-sand/golden-templates/</loc>
-         <lastmod>2026-11-23</lastmod>
-    </url>
-    <url>
-         <loc>https://lullabot.github.io/sandbar/main/using-sand/proxmox/</loc>
-         <lastmod>2026-11-23</lastmod>
-    </url>
-    <url>
-         <loc>https://lullabot.github.io/sandbar/main/using-sand/review/</loc>
-         <lastmod>2026-11-23</lastmod>
-    </url>
-    <url>
-         <loc>https://lullabot.github.io/sandbar/main/using-sand/secrets/</loc>
-         <lastmod>2026-11-23</lastmod>
-    </url>
-    <url>
-         <loc>https://lullabot.github.io/sandbar/main/using-sand/tui/</loc>
-         <lastmod>2026-11-23</lastmod>
-    </url>
-    <url>
-         <loc>https://lullabot.github.io/sandbar/main/using-sand/web-servers/</loc>
+         <loc>https://lullabot.github.io/sandbar/main/using-sandbar/web-servers/</loc>
          <lastmod>2026-11-23</lastmod>
     </url>
 </urlset>
