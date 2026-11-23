@@ -142,7 +142,7 @@ The first time, sandbar asks two questions:
 1. *Enable Claude Code Remote Control for every interactive session?* Press `enter` for no.
 2. *Start sessions in bypass permissions mode instead of auto mode?* Type `y` and press `enter`.
 
-Bypass permissions mode lets Claude Code run commands without asking you first. That's reasonable in a disposable VM. In fact, it is kind of the whole point of setting all of this up. See the [Security model](../background/security-model.md) for what the VM does and doesn't isolate. If the VM's token can push to a repository your team or a client uses, you might prefer auto mode.
+Bypass permissions mode lets Claude Code run commands without asking you first. That's reasonable in a disposable VM. In fact, it is kind of the whole point of setting all of this up. See the [Security model](../background/security-model.md) for what the VM does and doesn't isolate. If the VM's token can push to a repository your team or a client uses, you might prefer auto mode; see [Choose a permission mode](coding-agents.md#choose-a-permission-mode).
 
 Then sign in to Claude Code. It prints a link: open it in your workstation browser, sign in, and copy the code it shows. Paste the code into Claude Code and press `enter`. Answer Claude Code's first-run questions, and trust the project folder.
 
@@ -168,5 +168,6 @@ To go back to the board, detach from tmux by pressing `ctrl+a`, then `d`. Claude
 
 ## Next steps
 
+- [Sign in to your coding agent](coding-agents.md): use Codex, OpenCode or Pi, and choose permission modes.
 - [Open a web server in your browser](../using-sandbar/web-servers.md): reach other servers in the VM, and trust DDEV's certificates.
 - [The board](../reference/board.md): every key on the board.

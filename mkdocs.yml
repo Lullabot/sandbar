@@ -84,6 +84,7 @@ nav:
   - Getting started:
     - Install sandbar: getting-started/installation.md
     - 'Quickstart: a Drupal site with DDEV': getting-started/quickstart.md
+    - Sign in to your coding agent: getting-started/coding-agents.md
     - Your first VM: getting-started/first-vm.md
   - Using sandbar:
     - Shells and files: using-sandbar/shells.md

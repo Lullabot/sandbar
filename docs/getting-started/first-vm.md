@@ -51,81 +51,12 @@ profile selector — or pass `sandbar create --profile NAME` headlessly. Nothing
 else about the VM changes. See [Where VMs
 Run](../advanced/connection-profiles.md).
 
-## Logging into Claude Code
+## Signing in to your coding agent
 
-When selected, `sandbar` installs the Claude Code CLI but does **not** provision a credential
-for it — no host-side token is copied into the VM. Shell into the VM (`S`
-on its tile, or `sandbar shell NAME`) and run `claude` with no arguments. On
-the first bare interactive run, `sandbar` asks whether you want to enable
-Claude Code Remote Control and whether to start sessions in bypass
-permissions mode instead of auto mode, then walks you through sign-in and
-starts the session. Later runs go straight to the prompt.
-
-Sessions start in Claude Code's [auto
-mode](https://code.claude.com/docs/en/permission-modes) unless you choose
-bypass: a classifier reviews each action and blocks risky ones without
-asking you about routine work. Bypass permissions mode skips every check.
-Whichever you choose, `Shift+Tab` switches a running session between them,
-`/config` changes the default later, and sessions dispatched from `claude
-agents` start in the same mode. Auto mode needs a supported account and
-model; where it is unavailable, Claude Code starts in manual mode instead.
-VMs provisioned by an older `sandbar`, which started every session in
-bypass, are moved to auto mode and asked once on their next launch.
-
-[Remote Control](https://code.claude.com/docs/en/remote-control) keeps Claude
-Code and all of its tools running inside the VM while letting you follow and
-steer the same live session from `claude.ai/code`, another browser, or the
-Claude mobile app. That makes it useful for checking a long-running task away
-from your desk, replying when Claude needs a decision, attaching a photo from
-your phone, or asking Claude to notify you when tests finish.
-
-If you opt in, every interactive session connects automatically. If you
-decline, `sandbar` remembers the choice and leaves cross-machine access off. You
-can still enable one session later with `/remote-control` (or `/rc`), or turn
-the default on from Claude Code's `/config` screen. Remote Control is available
-for eligible Claude subscriptions and full-scope Claude.ai logins; API keys and
-inference-only setup tokens do not support it.
+See [Sign in to your coding agent](coding-agents.md) for Claude Code, Codex, OpenCode and Pi.
 
 Remote Control does not remove Sandbar's cross-machine messaging boundary.
 Claude Code still asks for your explicit approval before one session sends a
 message to another machine or a cloud session, even though ordinary permission
 prompts are skipped inside the VM. Messages between sessions in the same VM do
 not cross that boundary.
-
-Under the hood, provisioning pre-seeds Claude Code's first-run onboarding
-state so sessions start in the permission mode you chose, and the provisioned
-`claude` command runs `claude auth login` for you whenever you're not signed
-in, so you're never dropped to an un-authed prompt.
-
-The chosen permission mode and an opted-in Remote Control connection
-aren't always active in the session immediately after the first sign-in. Claude
-Code can also prompt once about its full-screen renderer. If the first session
-comes up in manual mode or without Remote Control, quit (`/exit`) and run
-`claude` again. The provisioned launcher prints a one-time reminder about this.
-The per-directory trust dialog you see in each new folder is separate and
-deliberate.
-
-## Logging into Codex
-
-If you created the VM with `--with-codex` (or enabled Codex in the TUI create
-form), the Codex CLI is provisioned but no credential is included. Shell into
-the VM and run `codex` with no arguments. On the first bare interactive run,
-`sandbar` asks whether you want to enable Codex remote-control support.
-
-If you answer yes, the wrapper guides you through Codex's device-code login,
-sets up its persistent app server with remote control enabled, and runs the
-initial `codex remote-control pair` flow so you can pair another device with
-the ChatGPT app. You do not need to run those setup commands yourself. When
-setup finishes, the regular Codex interface opens. The app server starts again
-when the VM boots, even before you open a shell.
-
-After setup, run `codex agents` to connect to the persistent app server
-locally. To connect another device later, run:
-
-```bash
-codex remote-control pair
-```
-
-If you decline remote control, `sandbar` remembers that choice and opens Codex
-normally. Later bare runs, commands with arguments, and non-interactive uses
-continue directly to the ordinary Codex CLI without another onboarding prompt.
