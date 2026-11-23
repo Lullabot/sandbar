@@ -1535,6 +1535,78 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#page-structure-by-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Page structure by type
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Page structure by type">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#rules-for-every-page" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rules for every page
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tutorial-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tutorial structure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-to-guide-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How-to guide structure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reference-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reference structure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#explanation-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Explanation structure
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#who-the-docs-are-for" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1709,6 +1781,78 @@
     <span class="md-ellipsis">
       
         Before and after
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#page-structure-by-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Page structure by type
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Page structure by type">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#rules-for-every-page" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Rules for every page
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tutorial-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tutorial structure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-to-guide-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How-to guide structure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reference-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Reference structure
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#explanation-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Explanation structure
       
     </span>
   </a>
@@ -1917,6 +2061,45 @@
 </tbody>
 </table>
 <p>The third "after" needs a real recommendation from the maintainers. The bracket is a placeholder, not advice.</p>
+<h2 id="page-structure-by-type">Page structure by type</h2>
+<p>Each page should follow the structure outlined below depending on its type. This isn't a strict rule, but helps to keep things consistent.</p>
+<h3 id="rules-for-every-page">Rules for every page</h3>
+<ul>
+<li>The H1 matches the page's title in the <code>nav:</code> of <code>mkdocs.yml</code>.</li>
+<li>Start with a hook. The first paragraph says what the page is for.</li>
+<li>Spell the shared section names the same way on every page: <em>Before you start</em>, <em>Next steps</em> and <em>Related</em>.</li>
+<li>Keep the list of links at the end of a page short. Five or fewer is a good rule of thumb.</li>
+<li>How-to guide titles are imperative ("Open a shell"), not "How to open a shell".</li>
+</ul>
+<h3 id="tutorial-structure">Tutorial structure</h3>
+<ol>
+<li>What the reader will have at the end, in one or two sentences.</li>
+<li><em>Before you start</em>: the prerequisites.</li>
+<li>Numbered steps. Each step ends in something the reader can see. Show the expected output, and add a warning where a step commonly fails.</li>
+<li><em>What you built</em>: a short summary.</li>
+<li><em>Next steps</em>: two or three links.</li>
+</ol>
+<h3 id="how-to-guide-structure">How-to guide structure</h3>
+<ol>
+<li>One sentence on what the page does and when you need it.</li>
+<li><em>Before you start</em>, only if there are prerequisites.</li>
+<li>The steps. Put variants in subsections.</li>
+<li><em>If something goes wrong</em> (optional): link to <em>Troubleshooting</em>.</li>
+<li><em>Related</em>: links.</li>
+</ol>
+<h3 id="reference-structure">Reference structure</h3>
+<ol>
+<li>One sentence on what the page covers.</li>
+<li>The entries, in the same order every time and following the product's own structure. Give each entry the same fields.</li>
+</ol>
+<p>No other introduction, no conclusion and no next steps. These pages should be easy to scan and written for frequent re-reading.</p>
+<h3 id="explanation-structure">Explanation structure</h3>
+<ol>
+<li>The question the page answers.</li>
+<li>Sections that build on each other.</li>
+<li><em>Trade-offs</em>.</li>
+<li><em>Related</em>: links.</li>
+</ol>
 <h2 id="who-the-docs-are-for">Who the docs are for</h2>
 <p>The docs site is for people who <strong>use</strong> sandbar. Put how sandbar is built (package names, internal seams, why an implementation changed) in <code>AGENTS.md</code> or the <em>Contributing</em> section, not in user pages. Keep an implementation detail on a user page only when the reader needs it to make a decision or fix a problem, and then say why it matters to them.</p>
 <p>Order content by what a reader does first, then what they do often, then what they do rarely.</p>
@@ -1999,9 +2182,10 @@
 <li><strong>Content aging</strong>: remove outdated references and make sure version information is still correct.</li>
 </ul>
 <h2 id="review-checklist">Review checklist</h2>
-<p>Ask these six questions of any docs PR.</p>
+<p>Ask these seven questions of any docs PR.</p>
 <ul>
 <li>Is the page one Diátaxis type, or is it mixing two?</li>
+<li>Does the page follow its type's structure in <em>Page structure by type</em>, and the rules for every page?</li>
 <li>Does the first sentence give the answer or the action?</li>
 <li>Can every sentence be taken literally?</li>
 <li>Is each claim true, and is each security claim backed by the <a href="../../background/security-model/">Security model</a> page?</li>
