@@ -25,9 +25,9 @@ For the exact schema and how it's kept there, see
 Secrets are organized into **scopes**. The **global** scope applies to the
 whole VM. Any other scope is a directory path relative to the guest home,
 such as `foo/bar`. This directory scope is entirely within one VM — it's
-unrelated to which [Connection Profile](connection-profiles.md) that VM
+unrelated to which [Connection Profile](../advanced/connection-profiles.md) that VM
 runs on. Since the same VM name can exist under two different profiles at
-once (see [Connection Profiles](connection-profiles.md#all-enabled-profiles-are-active-at-once)),
+once (see [Connection Profiles](../advanced/connection-profiles.md#all-enabled-profiles-are-active-at-once)),
 the secrets store also keys everything by which profile's connection a VM
 belongs to first, so editing `claude`'s secrets on your `work` profile never
 touches a same-named `claude` on `local`. You never see or manage that
@@ -122,7 +122,7 @@ service runs there. Clone tokens support standard HTTPS endpoints without
 explicit port numbers. Use a DNS name rather than an IPv6 literal.
 
 Drupal.org projects follow the same directory-scope convention for secrets.
-Their [publishing authentication](drupalorg-publishing.md) remains separate
+Their [publishing authentication](../advanced/drupalorg-publishing.md) remains separate
 from GitHub and GitLab token handling.
 
 **The global scope is the one exception.** `GH_TOKEN` or `GITLAB_TOKEN` with
@@ -144,7 +144,7 @@ practice this means every worktree of a repo silently uses the main clone's
 narrower token. This is a pre-existing property of how this wiring resolves
 paths, not something specific to any one feature — it surfaced while
 investigating
-[publishing to drupal.org](drupalorg-publishing.md#why-publication-is-host-side),
+[publishing to drupal.org](../advanced/drupalorg-publishing.md#why-publication-is-host-side),
 whose manual per-issue-fork escape hatch would need a genuinely
 per-worktree credential, which `includeIf "gitdir:…"` cannot express. It is
 left unchanged here and recorded instead, since fixing it is a larger
@@ -156,7 +156,7 @@ Use a GitHub **fine-grained personal access token**, scoped to the
 repositories the VM should touch and set to expire. It's important to give
 the agent a token with minimal access, so if it goes off track it's limited
 in the damage it can do. See further details in the
-[Security Model](../reference/security-model.md#a-least-privilege-token-reasonable-agent-access).
+[Security Model](../background/security-model.md#a-least-privilege-token-reasonable-agent-access).
 
 ### Supplying it and where it lands
 
@@ -204,7 +204,7 @@ old token in the forge's settings.
 ### Reset and the token
 
 The token survives a reset because it is saved in the host secrets store.
-Both the TUI and [`sandbar reset`](cli-reference.md#sandbar-reset-name) apply it
+Both the TUI and [`sandbar reset`](../reference/cli.md#sandbar-reset-name) apply it
 to the rebuilt guest, and the Git credential helper is restored for fresh
 shells.
 
@@ -213,7 +213,7 @@ saved global `GH_TOKEN` for GitHub or the most specific matching scoped
 `GITLAB_TOKEN` for GitLab, including self-hosted GitLab. An explicitly entered
 token takes precedence and replaces the saved token after a successful reset.
 Preserving the project checkout or whole home skips cloning when the checkout
-is restored. See [Resetting a VM](tui.md#resetting-a-vm).
+is restored. See [Resetting a VM](../reference/board.md#resetting-a-vm).
 
 ### GitLab token permissions
 
@@ -227,7 +227,7 @@ Legacy personal access tokens use the separate `read_repository` and
 
 ## drupal.org: a notable exception
 
-[Publishing a checkout's commits to drupal.org](drupalorg-publishing.md) is
+[Publishing a checkout's commits to drupal.org](../advanced/drupalorg-publishing.md) is
 the one write-capable integration `sandbar` offers that needs **no secret in
 this store at all**, and no `.env` entry in the guest either. Everything
 above this section exists to get a `KEY=VALUE` pair from your host into a
@@ -238,7 +238,7 @@ the host, holding a personal access token from a file it reads directly (not
 through this store), performs the one call that actually writes. See
 [Files and State](../reference/files-and-state.md#host-paths) for where that
 token file lives, and
-[Security Model](../reference/security-model.md#publishing-to-drupalorg-agent-decides-what-host-decides-where)
+[Security Model](../background/security-model.md#publishing-to-drupalorg-agent-decides-what-host-decides-where)
 for why: a drupal.org account PAT is account-wide rather than scoped to one
 repository, so the only credential safe to place in an agent-controlled VM
 for that kind of account is none.

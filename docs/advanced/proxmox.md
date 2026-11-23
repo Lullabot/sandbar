@@ -106,7 +106,7 @@ secret everywhere it is configured.
 ??? example "The full script"
 
     ```bash title="proxmox-setup.sh"
-    --8<-- "docs/using-sand/proxmox-setup.sh"
+    --8<-- "docs/advanced/proxmox-setup.sh"
     ```
 
 The rest of this page is the same setup done by hand, with the reasoning for

@@ -152,7 +152,7 @@ to a coin flip.
 templatizing, and the old template is recognized as stale automatically — the
 next `sandbar create` rebuilds it. Existing VMs keep the old identity. Reset them from the updated base with
 `sandbar reset NAME` or `R` on the tile. A reset deletes guest files unless you
-[choose what to preserve](../using-sand/tui.md#choosing-what-survives).
+[choose what to preserve](board.md#choosing-what-survives).
 Alternatively, fix each VM in place:
 
 ```bash

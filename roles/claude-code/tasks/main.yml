@@ -18,7 +18,7 @@
   when: (sand_fresh_clone | default(false) | bool or sand_new_user | default(false) | bool) and not sand_preserved_home | default(false) | bool and not sand_preserved_agents | default(false) | bool
 
 # The SessionStart/CwdChanged hooks in the template load direnv's exports
-# (scoped .env secrets, see roles/project and docs/using-sand/secrets.md)
+# (scoped .env secrets, see roles/project and docs/using-sandbar/secrets.md)
 # into every Claude Code session. Without them only interactive shells get
 # the scoped secrets: direnv's bash hook rides on PROMPT_COMMAND, which
 # never fires in Claude Code's non-interactive Bash tool — and sessions

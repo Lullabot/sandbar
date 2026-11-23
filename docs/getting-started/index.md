@@ -21,11 +21,11 @@ three places, and the commands and keybindings are the same in all three:
 | --- | --- | --- |
 | Your own machine | [Lima](https://lima-vm.io) | Nothing beyond installing `sandbar` |
 | Another machine, over SSH | Lima on that machine | Passwordless SSH and Lima on the far end |
-| A [Proxmox VE](https://www.proxmox.com/) host | The Proxmox REST API | A pool-scoped API token ([setup](../using-sand/proxmox.md)) |
+| A [Proxmox VE](https://www.proxmox.com/) host | The Proxmox REST API | A pool-scoped API token ([setup](../advanced/proxmox.md)) |
 
 Each place you add is a named **Connection Profile**, and every enabled
 profile is live at once — the board shows a laptop's VMs and a server's VMs
-side by side. See [Where VMs Run](../using-sand/connection-profiles.md).
+side by side. See [Where VMs Run](../advanced/connection-profiles.md).
 
 ## What it is not
 
@@ -41,7 +41,7 @@ standalone Ansible playbook.
 
 - [Installation](installation.md) — install `sandbar` and its one prerequisite.
 - [Your First VM](first-vm.md) — the 30-second path to a running VM.
-- [How Provisioning Works](how-it-works.md) — the base-image/clone/finalize
+- [How Provisioning Works](../background/how-it-works.md) — the base-image/clone/finalize
   model that makes each VM fast to create.
-- [Where VMs Run](../using-sand/connection-profiles.md) — putting VMs on
+- [Where VMs Run](../advanced/connection-profiles.md) — putting VMs on
   another machine.

@@ -32,7 +32,7 @@ sandbar land NAME PATH --review
 ```
 
 In the TUI, press `l` on the VM's tile to open the
-[Landing pane](files-and-shells.md#landing), select a checkout, and press `v`.
+[Landing pane](shells.md#landing), select a checkout, and press `v`.
 The CLI keeps the terminal occupied until the review ends. The TUI marks the
 row `reviewing…` and adds the URL when the server is ready.
 

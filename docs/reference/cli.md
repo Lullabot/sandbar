@@ -15,7 +15,7 @@ There are nine entry points:
 - [`sandbar paste-image NAME`](#sandbar-paste-image-name) — stage an image from the
   host clipboard on a running VM's guest clipboard.
 - [`sandbar land NAME`](#sandbar-land-name) — list a VM's git checkouts, or open a
-  draft PR, a branch page, or a [browser review](review.md).
+  draft PR, a branch page, or a [browser review](../using-sandbar/review.md).
 - [`sandbar publish NAME PATH [ISSUE]`](#sandbar-publish-name-path-issue) — publish
   a checkout's local commits to a drupal.org issue fork.
 - [`sandbar version`](#sandbar-version-sandbar-version) / `sandbar --version` — print
@@ -33,7 +33,7 @@ the checks and operations behind these actions.
 Run with no arguments, `sandbar` launches the interactive TUI: it lists
 instances, streams a build's progress, and drives the same create/reset/
 delete/start/stop lifecycle as the headless commands below. See
-[The TUI](tui.md) for the keybindings and screens.
+[The TUI](board.md) for the keybindings and screens.
 
 ## `sandbar create`
 
@@ -75,8 +75,8 @@ not a prompt.
 | `--clone-forge` | string | `auto` | `auto`, `github`, or `gitlab`. Auto detects `github.com` and `gitlab.com`; select `gitlab` for self-hosted GitLab. |
 | `--recreate` | bool | `false` | Delete and re-clone `--name` if it is **sand-managed**. The older spelling of [`sandbar reset NAME`](#sandbar-reset-name), which does the same thing and can additionally preserve state — see [`--rebuild` vs `--recreate`](#-rebuild-vs-recreate). |
 | `--rebuild` | bool | `false` | Delete and rebuild the base image first, then create. |
-| `--template` | string | *(empty)* | Clone from the named [golden template](golden-templates.md), bypassing the shared base. Mutually exclusive with `--rebuild`, `--recreate`, and an explicit `--base-name`. |
-| `--profile` | string | the last-used [Connection Profile](connection-profiles.md), else `local` | Which connection profile to create the VM on. Only that one profile is built and preflighted — the rest of your fleet is untouched. A named profile that doesn't exist, or is disabled, is a validation error. |
+| `--template` | string | *(empty)* | Clone from the named [golden template](../advanced/templates.md), bypassing the shared base. Mutually exclusive with `--rebuild`, `--recreate`, and an explicit `--base-name`. |
+| `--profile` | string | the last-used [Connection Profile](../advanced/connection-profiles.md), else `local` | Which connection profile to create the VM on. Only that one profile is built and preflighted — the rest of your fleet is untouched. A named profile that doesn't exist, or is disabled, is a validation error. |
 | `--with-claude` | bool | remembered, initially `false` | Install current Claude Code in this VM. |
 | `--with-codex` | bool | remembered, initially `false` | Install current Codex in this VM. |
 | `--with-opencode` | bool | remembered, initially `false` | Install current OpenCode in this VM. |
@@ -87,7 +87,7 @@ not a prompt.
 
 Agent flags configure the individual VM. Omitted flags use the last submitted
 agent selections, shared across profiles; explicit flags (including `=false`)
-win. All four may be off. See [preference migration](../reference/files-and-state.md#coding-agent-preferences-and-migration)
+win. All four may be off. See [preference migration](files-and-state.md#coding-agent-preferences-and-migration)
 for existing installations. Reset uses the selections recorded for that VM.
 Likewise `--recreate` adopts that VM's recorded agents unless explicit agent
 flags override them. Reset and recreate do not change the global preferences.
@@ -241,7 +241,7 @@ Lima's Debian image role supports Samba-based host-home sharing, and its own
 Ansible defaults may say otherwise, but `sandbar` forces
 `samba_enabled: false` for every VM it creates (`internal/provision/vars.go`)
 — there is no host-home mount to share in the first place (see
-[Files & shells](files-and-shells.md)). If you see `samba_enabled` mentioned
+[Files & shells](../using-sandbar/shells.md)). If you see `samba_enabled` mentioned
 anywhere in the underlying role's defaults, it does not apply to anything
 `sandbar create` does.
 
@@ -350,7 +350,7 @@ above.)
 Rebuild a VM managed by `sandbar` from its base image. The name, project URL,
 and recorded settings are kept; **guest files are deleted unless you choose
 a preserve option**. This is the CLI equivalent of `R` in the TUI
-([Resetting a VM](tui.md#resetting-a-vm)).
+([Resetting a VM](board.md#resetting-a-vm)).
 
 ```sh
 sandbar reset web                                    # clean rebuild, same settings
@@ -380,7 +380,7 @@ Run [`sandbar land NAME`](#sandbar-land-name) to list cached checkout paths. Pat
 outside the guest home are rejected before the VM is deleted.
 
 Restored checkouts that already have sandbar-installed
-[self-review skills](review.md#the-assistant-skills) get them refreshed to
+[self-review skills](../using-sandbar/review.md#the-assistant-skills) get them refreshed to
 match the rebuilt VM's review server. Checkouts without them, and copies your
 repository tracks in Git, are left alone; a failed refresh is a warning, not
 a failed reset.
@@ -389,7 +389,7 @@ Use `--preserve-home` to keep your files while updating a working VM. The
 home is copied back before the provisioning playbook runs. Sandbar replaces a
 provisioned home file only when it still matches the recorded baseline.
 Edited, untracked, deleted, or symlinked destination files stay as the user left them;
-new defaults are [saved separately](../reference/files-and-state.md#guest-paths).
+new defaults are [saved separately](files-and-state.md#guest-paths).
 A symlink in a parent directory prevents a safe write, so the reset fails
 and retains its recovery archives.
 A reset without a preserve option
@@ -412,7 +412,7 @@ keeps the archives and prints their path for recovery. See
 
 **Do not preserve data from a VM you suspect is compromised.** The copy can
 include credentials and anything an agent wrote in the selected directories.
-See [Security Model](../reference/security-model.md).
+See [Security Model](../background/security-model.md).
 
 Files outside the directories you preserve are deleted. Nothing outside the
 guest home, such as `/srv` or `/opt`, can be preserved by these options.
@@ -527,7 +527,7 @@ before creating a VM.
 | `--with-claude` / `--with-codex` / `--with-opencode` / `--with-pi` | bool | *this VM's* | Install that agent in the rebuilt VM. Use `=false` to remove one. Does not change the remembered choices for new VMs. |
 | `--clone-token` | string | *(empty)* | GitHub or GitLab token for this VM's recorded repo. Blank reuses the saved global GitHub or matching scoped GitLab token. An explicit token replaces the saved token after success. A restored checkout skips cloning. |
 | `--from-backup` | string (directory) | *(none)* | Finish a reset that failed after the VM was deleted: rebuild `NAME` and restore the backup in this directory. See [If a reset fails after the VM was deleted](#if-a-reset-fails-after-the-vm-was-deleted). |
-| `--profile` | string | *the profile that owns NAME* | Which [Connection Profile](connection-profiles.md) `NAME` lives on. Only needed when the same name exists under more than one enabled profile. With `--from-backup`, the default is the profile recorded in the backup. |
+| `--profile` | string | *the profile that owns NAME* | Which [Connection Profile](../advanced/connection-profiles.md) `NAME` lives on. Only needed when the same name exists under more than one enabled profile. With `--from-backup`, the default is the profile recorded in the backup. |
 
 `NAME` is required (exactly one positional argument), and flags may appear
 before or after it.
@@ -549,11 +549,11 @@ is also no `--rebuild`, which replaces the shared base image and belongs to
 
 ### Secrets are re-applied
 
-A reset ends by writing the VM's host-stored [secrets](secrets.md) into the
+A reset ends by writing the VM's host-stored [secrets](../using-sandbar/secrets.md) into the
 rebuilt guest, so the VM comes back with the environment it had. `sandbar create`
 does the same after a build, and additionally records `--clone-token` as the
 `GH_TOKEN` secret for GitHub or scoped `GITLAB_TOKEN` for GitLab so it can be
-rotated later without a rebuild. See [GitHub and GitLab tokens](secrets.md#github-and-gitlab-tokens).
+rotated later without a rebuild. See [GitHub and GitLab tokens](../using-sandbar/secrets.md#github-and-gitlab-tokens).
 
 ### Verified `--help` output
 
@@ -698,7 +698,7 @@ and whether the recorded playbook version is current. `delete` warns about
 dependent VMs but does not delete them; those VMs keep running but cannot be
 reset from the removed template. All subcommands accept `--profile`.
 
-See [Golden Templates](golden-templates.md) for the complete workflow.
+See [Golden Templates](../advanced/templates.md) for the complete workflow.
 
 ## `sandbar shell NAME`
 
@@ -742,14 +742,14 @@ not exist or is not running.
 `--cc` attaches in tmux control mode, so a terminal that speaks the protocol
 renders the guest's tmux windows as native tabs. It refuses when `$TMUX` is
 set, because a host tmux pane strips the handshake control mode needs — see
-[Native terminal tabs with `tmux -CC`](files-and-shells.md#native-terminal-tabs-with-tmux-cc)
+[Native terminal tabs with `tmux -CC`](../using-sandbar/shells.md#native-terminal-tabs-with-tmux-cc)
 for both ways to get native tabs and why you can only have one of them at a
 time.
 
 ### Cross-profile resolution for `sandbar shell`
 
 Because the same VM name can exist under more than one
-[Connection Profile](connection-profiles.md), `sandbar shell NAME` resolves
+[Connection Profile](../advanced/connection-profiles.md), `sandbar shell NAME` resolves
 which one you mean like this:
 
 1. **`--profile <name>`** given explicitly — used directly. An unknown or
@@ -813,7 +813,7 @@ you mean using the same logic described above under `sandbar shell`'s
 
 List `NAME`'s git checkouts and their branch/push/PR state, or act on one.
 This is the same detection and the same `gh` actions the TUI's `l` (Land)
-key uses — see [Landing](files-and-shells.md#landing).
+key uses — see [Landing](../using-sandbar/shells.md#landing).
 
 ```
 Usage: sandbar land NAME [PATH] [--pr | --web | --review [--clean]] [--profile <name>]
@@ -881,19 +881,19 @@ refused (rather than ignored) alongside any other action.
   routing redirects to an existing open PR for that branch when one exists.
 - **`--review`** has no pushed-branch or remote precondition at all —
   reviewing uncommitted or unpushed work is the point. See
-  [Reviewing changes in a browser](review.md) for the full workflow.
+  [Reviewing changes in a browser](../using-sandbar/review.md) for the full workflow.
 
 `sandbar land` does not commit or push. With `--pr`, it reads the guest's
 metadata and calls `gh` on the workstation. With `--review`, the server runs
 inside the VM and sends the diff to your browser over a loopback connection.
 It does not copy a checkout onto your workstation. See
-[Reachability](review.md#reachability).
+[Reachability](../using-sandbar/review.md#reachability).
 
 Submitting a review saves `review.xml` in the guest checkout, or at the
 `output-file` path configured for self-review. The agent can read that file
 directly. `self-review-install-skills` adds the default review files and
 installed skills to the guest user's active global Git excludes file. See
-[Keeping review files out of commits](review.md#keeping-review-files-out-of-commits)
+[Keeping review files out of commits](../using-sandbar/review.md#keeping-review-files-out-of-commits)
 if the repository already tracks those files.
 
 ## `sandbar publish NAME PATH [ISSUE]`
@@ -903,7 +903,7 @@ drupal.org issue fork for issue `ISSUE`, using the workstation's own
 drupal.org token — never a credential inside the VM. This is the same
 publication logic (`internal/drupalorg`) the TUI's Landing pane offers as
 its `publish to drupal.org` row; see
-[Publishing to drupal.org](drupalorg-publishing.md) for what it does, what
+[Publishing to drupal.org](../advanced/drupalorg-publishing.md) for what it does, what
 the confirmation shows, and what to know before you rely on it.
 
 ```
@@ -944,7 +944,7 @@ there is nothing to derive and `sandbar publish` says so rather than guessing.
 
 `sandbar publish` refuses immediately, before touching the VM or drupal.org at
 all, if no workstation drupal.org PAT is on file — see
-[Setup](drupalorg-publishing.md#setup) for where that file goes. Given a
+[Setup](../advanced/drupalorg-publishing.md#setup) for where that file goes. Given a
 running VM and a PAT, it resolves the destination, collects `PATH`'s change
 set, prints the full confirmation (every commit, author, and file
 change — never a summary), and then requires an explicit human act before
@@ -960,7 +960,7 @@ publishing anything:
   destination fall outside the `issue/<module>-<issue>` fork namespace —
   and so the only way to publish straight to a canonical drupal.org project
   rather than an issue fork. This is not the normal path; see
-  [Publishing to drupal.org](drupalorg-publishing.md#what-actually-gets-published-and-how)
+  [Publishing to drupal.org](../advanced/drupalorg-publishing.md#what-actually-gets-published-and-how)
   for why that guard exists.
 - **`--profile`** picks which connection profile `NAME` is resolved on, the
   same as every other command that names a VM.
@@ -972,7 +972,7 @@ identical and your tree is clean, it offers to reset the checkout onto the
 published commits. That offer is a **separate** question from `--yes`, which
 confirms only the publish; without a terminal the command to run is printed
 instead. See
-[Your checkout after a publish](drupalorg-publishing.md#your-checkout-after-a-publish).
+[Your checkout after a publish](../advanced/drupalorg-publishing.md#your-checkout-after-a-publish).
 
 If every local commit is already in the checkout's upstream branch or the
 canonical project's base branch, `sandbar publish` reports nothing to publish
@@ -982,14 +982,14 @@ from drupal.org to identify that base branch.
 If the range contains a **merge commit**, `sandbar publish` names it and stops
 without publishing anything. Rebase onto the project's base branch before
 your first publish. See
-[Rebase onto the base branch](drupalorg-publishing.md#rebase-onto-the-base-branch-dont-merge-it-in).
+[Rebase onto the base branch](../advanced/drupalorg-publishing.md#rebase-onto-the-base-branch-dont-merge-it-in).
 
 The printed report lists every change-set commit in order — its status
 (`landed`, `already-present`, `failed`, or `not-attempted`) and its SHA on
 the fork where it has one — followed by the merge request's URL (opened, or
 already open) and any warnings. A replay that fails partway is reported
 exactly as far as it got; re-running `sandbar publish` is how you recover, and
-[A failure partway](drupalorg-publishing.md#a-failure-partway-leaves-earlier-commits-public-and-there-is-no-rollback)
+[A failure partway](../advanced/drupalorg-publishing.md#a-failure-partway-leaves-earlier-commits-public-and-there-is-no-rollback)
 explains why that — rather than repairing the fork by hand — is the
 supported path.
 
@@ -998,7 +998,7 @@ force push and cannot rewrite or remove a commit it already published. That
 also means rewriting your local history after a publish is not supported —
 an amended commit whose message and author are unchanged is reported
 `already-present` and its amendment is never sent. See
-[There is no force push](drupalorg-publishing.md#there-is-no-force-push-the-fork-branch-only-ever-grows).
+[There is no force push](../advanced/drupalorg-publishing.md#there-is-no-force-push-the-fork-branch-only-ever-grows).
 
 ## `sandbar version` / `sandbar --version`
 

@@ -35,7 +35,7 @@ tenant or a determined attacker.
   anything that can route to the bridge network. Run Proxmox VMs on a
   network you trust — the same one you must already trust for `sandbar` to
   reach the guests at all. See
-  [Web Servers and Ports](../using-sand/web-servers.md) for both cases.
+  [Web Servers and Ports](../using-sandbar/web-servers.md) for both cases.
 - **Samba is forced off** for Lima-provisioned VMs: there is no host-home
   mount to share, so there is nothing for it to serve.
 - **`sandbar` does not provision a Claude Code credential.** You log in inside
@@ -69,7 +69,7 @@ tenant or a determined attacker.
   bypass-permissions mode. Same-machine session messaging is unaffected.
 - **Claude Code sessions see the scoped secrets of the directory they work
   in**, via the provisioned direnv hooks (see
-  [Secrets](../using-sand/secrets.md)). Scope your tokens accordingly — a
+  [Secrets](../using-sandbar/secrets.md)). Scope your tokens accordingly — a
   secret placed at a scope is available to any agent working under it.
 - **Codex runs with approvals off and sandbox disabled** (when selected). When
   you provision the VM with `--with-codex`, Codex is installed with
@@ -88,7 +88,7 @@ tenant or a determined attacker.
   trap — never passed as a command-line argument — so they cannot appear in
   a host or guest process listing.
 - **Host-side secrets are stored unencrypted at `0600`.** See
-  [Files and State](files-and-state.md) for the path and what deleting it
+  [Files and State](../reference/files-and-state.md) for the path and what deleting it
   costs. Treat that file as sensitive: anyone who can read your user
   account's files can read every VM's secrets.
 - **Reset preserve options copy selected guest files to your workstation.**
@@ -101,7 +101,7 @@ tenant or a determined attacker.
   delete the VM, it keeps the archives and reports their path for recovery.
   **Do not preserve data from a VM you suspect is compromised.** Preserving
   the whole home copies credentials and any files an agent wrote there onto
-  your workstation. See [`sandbar reset`](../using-sand/cli-reference.md#sandbar-reset-name).
+  your workstation. See [`sandbar reset`](../reference/cli.md#sandbar-reset-name).
 
 Together these mean: assume a `sandbar` VM can be fully compromised by whatever
 you run inside it, and rely on deletion — not defense — to recover. Nothing
@@ -139,7 +139,7 @@ side effect of Landing itself.
 
 ## Publishing to drupal.org: agent decides what, host decides where
 
-[Publishing to drupal.org](../using-sand/drupalorg-publishing.md) — replaying
+[Publishing to drupal.org](../advanced/drupalorg-publishing.md) — replaying
 a guest checkout's commits onto a drupal.org issue fork — splits authority
 along one line: **the guest decides WHAT changes** (the commits, their
 messages, and their file contents) and **the host decides WHERE they go**
@@ -148,7 +148,7 @@ follows at all). The merge request's title is on the host's side of that line
 deliberately: it is read from the issue's own drupal.org page, never from the
 commits, so a compromised agent's prose cannot become the headline of a
 permanent public proposal — see
-[How the merge request is titled](../using-sand/drupalorg-publishing.md#how-the-merge-request-is-titled).
+[How the merge request is titled](../advanced/drupalorg-publishing.md#how-the-merge-request-is-titled).
 The guest never
 sees a drupal.org credential, a project, a branch name, or a URL; it only
 ever produces an inert payload of commits and file actions that is
@@ -168,7 +168,7 @@ be — it is account-wide, and a working Drupal contributor's account may hold
 push access to modules running on tens of thousands of sites. The only safe
 credential to place in an agent-controlled VM for that kind of account is
 none at all. See
-[Files and State](files-and-state.md#host-paths) for where the token
+[Files and State](../reference/files-and-state.md#host-paths) for where the token
 actually lives and why its path is a convention rather than a config value.
 
 **The limits, stated honestly.** This design does not make publication safe
@@ -202,7 +202,7 @@ agent cannot directly reach, and stops there:
 
 `sandbar` can hand an agent a GitHub or GitLab token at create time so it can
 clone, pull, and push from inside the VM (see
-[GitHub and GitLab tokens](../using-sand/secrets.md#github-and-gitlab-tokens)).
+[GitHub and GitLab tokens](../using-sandbar/secrets.md#github-and-gitlab-tokens)).
 GitHub Landing actions can also open pull requests. An autonomous agent uses
 whatever its token grants, so the token is itself a security boundary —
 and scoping it well is a concrete, real-world exercise in giving an agent
@@ -239,7 +239,7 @@ them only if your workflow needs an agent to manage them directly.
 
 ## Proxmox: a pool-scoped API token
 
-The [Proxmox](../using-sand/proxmox.md) backend applies the same
+The [Proxmox](../advanced/proxmox.md) backend applies the same
 least-privilege idea to a different boundary: the API token `sandbar` uses to
 drive a Proxmox host. The concern there is not an agent inside a VM — it's
 `sandbar` itself, on a host that may run VMs you care about and never want `sandbar`
@@ -252,7 +252,7 @@ role onto the pool's member VMs and storage only — a VM outside the pool has n
 projection, so the token is denied on it, with no wildcard or path that escapes.
 This is not `sandbar` choosing to leave other VMs alone; it is Proxmox refusing the
 token if it tried. The setup guide's
-[verification step](../using-sand/proxmox.md#verify-the-scope) is how you confirm
+[verification step](../advanced/proxmox.md#verify-the-scope) is how you confirm
 the token really did end up confined — if any grant lands at `/`, it hasn't.
 
 Three privileges (`SDN.Use` for the bridge, `Sys.AccessNetwork` for the image
@@ -262,7 +262,7 @@ works and names them explicitly rather than papering over the gap with a broad
 role — none of the three grants any access to another VM.
 
 The token is a secret, and `sandbar` handles it the way it handles every secret:
-the [`profiles.yaml`](files-and-state.md#host-paths) file records only a **path**
+the [`profiles.yaml`](../reference/files-and-state.md#host-paths) file records only a **path**
 to the token file (`token_file`), never the value, and `sandbar` refuses to read a
 token file that is readable by group or other. The credential stays outside the
 config that's safe to share.
