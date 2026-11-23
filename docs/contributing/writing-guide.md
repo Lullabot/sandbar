@@ -48,6 +48,48 @@ These three rewrites show the voice. The "before" lines are invented for illustr
 
 The third "after" needs a real recommendation from the maintainers. The bracket is a placeholder, not advice.
 
+## Page structure by type
+
+Each page should follow the structure outlined below depending on its type. This isn't a strict rule, but helps to keep things consistent.
+
+### Rules for every page
+
+- The H1 matches the page's title in the `nav:` of `mkdocs.yml`.
+- Start with a hook. The first paragraph says what the page is for.
+- Spell the shared section names the same way on every page: *Before you start*, *Next steps* and *Related*.
+- Keep the list of links at the end of a page short. Five or fewer is a good rule of thumb.
+- How-to guide titles are imperative ("Open a shell"), not "How to open a shell".
+
+### Tutorial structure
+
+1. What the reader will have at the end, in one or two sentences.
+2. *Before you start*: the prerequisites.
+3. Numbered steps. Each step ends in something the reader can see. Show the expected output, and add a warning where a step commonly fails.
+4. *What you built*: a short summary.
+5. *Next steps*: two or three links.
+
+### How-to guide structure
+
+1. One sentence on what the page does and when you need it.
+2. *Before you start*, only if there are prerequisites.
+3. The steps. Put variants in subsections.
+4. *If something goes wrong* (optional): link to *Troubleshooting*.
+5. *Related*: links.
+
+### Reference structure
+
+1. One sentence on what the page covers.
+2. The entries, in the same order every time and following the product's own structure. Give each entry the same fields.
+
+No other introduction, no conclusion and no next steps. These pages should be easy to scan and written for frequent re-reading.
+
+### Explanation structure
+
+1. The question the page answers.
+2. Sections that build on each other.
+3. *Trade-offs*.
+4. *Related*: links.
+
 ## Who the docs are for
 
 The docs site is for people who **use** sandbar. Put how sandbar is built (package names, internal seams, why an implementation changed) in `AGENTS.md` or the *Contributing* section, not in user pages. Keep an implementation detail on a user page only when the reader needs it to make a decision or fix a problem, and then say why it matters to them.
@@ -114,9 +156,10 @@ Then apply these style rules:
 
 ## Review checklist
 
-Ask these six questions of any docs PR.
+Ask these seven questions of any docs PR.
 
 - Is the page one Diátaxis type, or is it mixing two?
+- Does the page follow its type's structure in *Page structure by type*, and the rules for every page?
 - Does the first sentence give the answer or the action?
 - Can every sentence be taken literally?
 - Is each claim true, and is each security claim backed by the [Security model](../background/security-model.md) page?
