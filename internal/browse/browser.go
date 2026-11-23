@@ -89,6 +89,12 @@ func NewBrowser(lister DirLister, title string) Browser {
 	d.SetHeight(1)
 	d.SetSpacing(0)
 	l := list.New(nil, d, 0, 0)
+	// The list's default keymap returns tea.Quit for its Quit binding ("q" and
+	// "esc"; "v" in bubbles v2.2.1), and every key the browser does not claim
+	// falls through to the list. Left on, one keystroke in this child screen
+	// would close all of sandbar instead of backing out of it. Esc is the
+	// caller's "back" key, and ctrl+c is handled app-wide before it gets here.
+	l.DisableQuitKeybindings()
 	l.Title = title
 	ti := textinput.New()
 	ti.Prompt = "Source path: "
