@@ -132,6 +132,7 @@ Flags:
 	fs.BoolVar(&cfg.WithPi, "with-pi", cfg.WithPi, "Install Pi when creating this VM (default: last submitted selection)")
 	recreate := fs.Bool("recreate", false, "Delete and re-clone the named instance if it is sandbar-managed. The older spelling of 'sandbar reset NAME', which does the same thing and can also preserve agent settings, the project, selected paths, or the whole home directory")
 	fs.BoolVar(&cfg.DisableStartAtBoot, "no-start-at-boot", false, "Disable automatic startup when the Proxmox host boots")
+	fs.BoolVar(&cfg.BootFollowsPower, "start-at-boot-if-running", false, "Start at Proxmox host boot only if the VM was left running: sandbar's start and stop turn start-at-boot on and off")
 	rebuild := fs.Bool("rebuild", false, "Destroy the base image and rebuild it from scratch before creating (a stale base is otherwise converged in place)")
 	templateFlag := fs.String("template", "", "Clone from a named golden template (see 'sandbar template list') instead of the shared base image; mutually exclusive with --rebuild/--base-name/--recreate")
 	profileFlag := fs.String("profile", "", "Connection profile to create on (default: the last-used profile, else \"local\")")
@@ -478,6 +479,9 @@ func adoptRecordedConfig(cfg *vm.CreateConfig, rec vm.CreateConfig, explicit map
 	}
 	if !explicit["no-start-at-boot"] {
 		cfg.DisableStartAtBoot = rec.DisableStartAtBoot
+	}
+	if !explicit["start-at-boot-if-running"] {
+		cfg.BootFollowsPower = rec.BootFollowsPower
 	}
 	if !explicit["docker-proxy-host"] {
 		cfg.DockerProxyHost = rec.DockerProxyHost

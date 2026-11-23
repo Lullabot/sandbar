@@ -34,6 +34,7 @@ import (
 	"fmt"
 	"io"
 	"net/netip"
+	"net/url"
 	"os"
 	"os/exec"
 	"path"
@@ -762,28 +763,111 @@ func byteString(n int64) string {
 
 // --- power ----------------------------------------------------------------------
 
+// The exported power verbs are the user's: the board's start and stop keys,
+// stop-all and the CLI reach them. They, and only they, carry the power state
+// into start-at-boot (followPower). The internal start/stop calls made while
+// building a base or a clone are not the user choosing a power state, and a
+// clone's flag is written by applyCloudInitIdentity anyway.
+
 func (p *proxmoxProvider) Start(name string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), powerTimeout)
-	defer cancel()
-	return p.start(ctx, name, nil)
+	return p.StartStreaming(context.Background(), name, nil)
 }
 
 func (p *proxmoxProvider) StartStreaming(ctx context.Context, name string, out io.Writer) error {
 	ctx, cancel := context.WithTimeout(ctx, powerTimeout)
 	defer cancel()
-	return p.start(ctx, name, out)
+	if err := p.start(ctx, name, out); err != nil {
+		return err
+	}
+	p.followPower(ctx, name, true, out)
+	return nil
 }
 
 func (p *proxmoxProvider) Stop(name string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), powerTimeout)
-	defer cancel()
-	return p.stop(ctx, name, nil)
+	return p.StopStreaming(context.Background(), name, nil)
 }
 
 func (p *proxmoxProvider) StopStreaming(ctx context.Context, name string, out io.Writer) error {
 	ctx, cancel := context.WithTimeout(ctx, powerTimeout)
 	defer cancel()
-	return p.stop(ctx, name, out)
+	if err := p.stop(ctx, name, out); err != nil {
+		return err
+	}
+	p.followPower(ctx, name, false, out)
+	return nil
+}
+
+// followPower sets a VM's onboot flag to match the power state sandbar just put
+// it in, when the VM's recorded config asks for that (BootFollowsPower, with
+// start-at-boot not disabled). After a Proxmox host reboot, the VMs that were
+// running come back and the ones the user stopped stay down.
+//
+// It runs only after a successful start or stop. A start whose readiness wait
+// failed may still have powered the VM on; its flag is left alone, and the
+// next successful start or stop corrects it.
+//
+// The config is read once and written only when the flag differs, so a VM
+// without the setting costs one extra GET per power verb and never a write.
+// This is a lifecycle verb, not the polling path.
+//
+// A failure is reported to out and otherwise swallowed. The power change the
+// user asked for has already happened; failing the verb would report a VM that
+// did start (or stop) as one that did not. The cost of a missed write is a
+// stale boot flag, which the next start or stop corrects.
+func (p *proxmoxProvider) followPower(ctx context.Context, name string, running bool, out io.Writer) {
+	// start and stop have just verified and cached this VMID.
+	vmid, ok := p.cachedVMID(name)
+	if !ok {
+		return
+	}
+	cfg, err := p.client.GetConfig(ctx, vmid)
+	if err != nil {
+		progress(out, "warning: could not read %s's config to update start at boot: %v\n", name, err)
+		return
+	}
+	// Checked again against the config itself, so a VMID recycled since the
+	// power call can never have its boot flag changed on our behalf.
+	if got, _ := cfg["name"].(string); got != name {
+		return
+	}
+	desc, _ := cfg["description"].(string)
+	pv, ok := decodeProvenanceBlock(desc)
+	if !ok || !pv.Config.BootFollowsPower || pv.Config.DisableStartAtBoot {
+		return
+	}
+	want := "0"
+	if running {
+		want = "1"
+	}
+	if onbootValue(cfg["onboot"]) == want {
+		return
+	}
+	if err := p.client.SetConfigSync(ctx, vmid, url.Values{"onboot": {want}}); err != nil {
+		progress(out, "warning: could not update %s's start at boot: %v\n", name, err)
+		return
+	}
+	if running {
+		progress(out, "%s will start when the Proxmox host boots\n", name)
+	} else {
+		progress(out, "%s will stay stopped when the Proxmox host boots\n", name)
+	}
+}
+
+// onbootValue normalises PVE's onboot config value to "0" or "1". PVE returns
+// it as a JSON number; a string is accepted too. An absent key is PVE's
+// default, off.
+func onbootValue(v any) string {
+	switch v := v.(type) {
+	case float64:
+		if v != 0 {
+			return "1"
+		}
+	case string:
+		if v != "" && v != "0" {
+			return "1"
+		}
+	}
+	return "0"
 }
 
 // start boots a VM and does not return until sand can actually USE it: the PVE

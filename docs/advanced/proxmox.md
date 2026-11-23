@@ -529,3 +529,11 @@ this. A reset retains the VM's saved choice.
 From the CLI, pass `--no-start-at-boot` to `sandbar create` or `sandbar reset` to
 disable startup. Pass `--no-start-at-boot=false` to re-enable it on reset.
 This setting applies to Proxmox VMs only.
+
+### Restore only the VMs that were running
+
+Check *Only if left running* in the creation or reset form to have a host reboot bring back only the VMs you had running. When sandbar starts the VM, it turns on Proxmox's start-at-boot flag (`onboot`). When sandbar stops the VM, it turns the flag off. This option has no effect when *Start at boot* is unchecked. It is off by default, and a reset keeps the VM's saved choice.
+
+From the CLI, pass `--start-at-boot-if-running` to `sandbar create` or `sandbar reset`. On reset, `--start-at-boot-if-running=false` turns it off again.
+
+Only sandbar's own start and stop actions change the flag. A VM that you stop from the Proxmox web UI, or that shuts down from inside the guest, keeps the flag sandbar last set. If updating the flag fails, sandbar prints a warning and still completes the start or stop. The next start or stop retries the update. The token needs `VM.Config.Options`, which sandbar already requires to set `onboot`.

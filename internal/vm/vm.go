@@ -92,10 +92,17 @@ type CreateConfig struct {
 	// DisableStartAtBoot opts Proxmox clones out of starting when the host boots.
 	// The zero value enables startup, including records predating this setting.
 	DisableStartAtBoot bool
-	DockerProxyHost    string
-	CloneURL           string
-	CloneForge         string
-	CloneToken         string
+	// BootFollowsPower makes sandbar's own start and stop of a Proxmox VM also
+	// turn its start-at-boot flag on and off, so a host reboot brings back the
+	// VMs that were running before it and leaves stopped ones stopped. It
+	// refines start-at-boot rather than replacing it: with DisableStartAtBoot
+	// set the VM never starts at boot and this has no effect. The zero value
+	// keeps the plain "always start at boot" behaviour that predates it.
+	BootFollowsPower bool
+	DockerProxyHost  string
+	CloneURL         string
+	CloneForge       string
+	CloneToken       string
 
 	// DDEV, Go and Java configure shared base dependencies. Coding agents are
 	// installed per VM during finalize. Existing Claude/Codex field names retain

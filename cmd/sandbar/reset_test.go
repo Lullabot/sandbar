@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -585,6 +586,34 @@ func TestResetHelpDocumentsFromBackup(t *testing.T) {
 	fs.Usage()
 	if !strings.Contains(buf.String(), "--from-backup DIR") {
 		t.Errorf("the help never explains how to resume a failed reset:\n%s", buf.String())
+	}
+}
+
+func TestResetBootFollowsPower(t *testing.T) {
+	for _, follow := range []bool{false, true} {
+		rec := vm.DefaultCreateConfig()
+		rec.Name = "web"
+		rec.BootFollowsPower = follow
+		rec.GitName, rec.GitEmail = "Dev", "dev@example.com"
+		cfg, err := resetConfigFromRecord(rec, true, "web", rec.BaseName, nil, resetFlagValues{}, "dev")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.BootFollowsPower != follow {
+			t.Fatal("reset lost the recorded boot setting")
+		}
+		var o resetOptions
+		fs := newResetFlagSet(&o)
+		if err := fs.Parse([]string{"--start-at-boot-if-running=" + strconv.FormatBool(!follow)}); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err = resetConfigFromRecord(rec, true, "web", rec.BaseName, map[string]bool{"start-at-boot-if-running": true}, o.values, "dev")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.BootFollowsPower == follow {
+			t.Fatal("explicit flag did not override the recorded setting")
+		}
 	}
 }
 

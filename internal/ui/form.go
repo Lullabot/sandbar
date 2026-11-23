@@ -298,6 +298,7 @@ func (m *model) openForm() tea.Cmd {
 	m.agentsEdited = [4]bool{}
 	m.formGeneration++
 	m.formDisableStartAtBoot = false
+	m.formBootFollowsPower = false
 	m.toolRebuild = false
 	m.resetCheckouts, m.resetCheckoutsHidden = nil, 0 // create mode has no preserve rows
 	// The clone source always reopens on "base" (formTemplateName == "") — a
@@ -393,6 +394,7 @@ func (m *model) openResetForm(scope registry.Scope, name string, cfg vm.CreateCo
 
 	m.hostDiskFree = freeDiskBytes()
 	m.formDisableStartAtBoot = cfg.DisableStartAtBoot
+	m.formBootFollowsPower = cfg.BootFollowsPower
 	m.resetMode = true
 	m.resetName = cfg.Name
 	m.resetBaseName = cfg.BaseName
@@ -895,6 +897,12 @@ func (m model) toggles() []formToggle {
 			help:  "Start this VM automatically when the Proxmox host boots. Enabled by default.",
 			get:   func(m *model) bool { return !m.formDisableStartAtBoot },
 			set:   func(m *model, v bool) { m.formDisableStartAtBoot = !v },
+		}, formToggle{
+			label: "Only if left running",
+			help: "Start at boot only the VMs that were running: sandbar turns start at boot on when it starts this VM " +
+				"and off when it stops it, so a host reboot restores the VMs you had running. Has no effect when Start at boot is off.",
+			get: func(m *model) bool { return m.formBootFollowsPower },
+			set: func(m *model, v bool) { m.formBootFollowsPower = v },
 		})
 	}
 	return t
@@ -1115,6 +1123,7 @@ func (m model) buildConfig() (vm.CreateConfig, error) {
 	cfg.CloneForge = m.formCloneForge
 	cfg.CloneToken = m.field(fCloneToken)
 	cfg.DisableStartAtBoot = m.formDisableStartAtBoot
+	cfg.BootFollowsPower = m.formBootFollowsPower
 	if m.resetMode {
 		// Agents come from the reset form's own rows, which openResetForm seeded
 		// from the VM's recorded selection.

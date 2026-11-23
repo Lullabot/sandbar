@@ -449,6 +449,7 @@ type model struct {
 	resetCheckouts         []resetCheckout
 	resetCheckoutsHidden   int
 	formDisableStartAtBoot bool
+	formBootFollowsPower   bool
 	toggleFocus            int // -1 = focus is in the text inputs; index into m.toggles() otherwise
 
 	// Agent choices belong to individual VMs; DDEV/Go/Java configure the base.
