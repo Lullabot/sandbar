@@ -486,3 +486,25 @@ func (c *Conn) ForwardArgv(hostPort, guestPort int) []string {
 		"-o", "ExitOnForwardFailure=yes",
 		"-N", "-L", fmt.Sprintf("127.0.0.1:%d:127.0.0.1:%d", hostPort, guestPort))
 }
+
+// StopMasterArgv builds `ssh -O stop` for this connection's shared master, or
+// returns nil when multiplexing is off and there is no master to stop.
+//
+// A master's guest login keeps the supplementary groups it had when it was
+// authenticated, and every session that rides it inherits them: sshd forks
+// each channel from that one post-auth process without calling initgroups()
+// again. The finalize playbook adds the login to `docker`, over a master opened
+// before that grant, so every shell muxed onto it afterwards lacks the group
+// until the master goes away. Stopping it is how a caller makes the next ssh
+// log in afresh.
+//
+// stop, not exit: the master stops accepting new sessions and removes its
+// socket, but sessions already riding it finish undisturbed, where exit would
+// cut them off. The argv is built with sshBase so the ControlPath's %C hash
+// covers the same host, port and user as every command that shares the master.
+func (c *Conn) StopMasterArgv() []string {
+	if c.controlDir == "" {
+		return nil
+	}
+	return c.sshBase(false, true, "-O", "stop")
+}

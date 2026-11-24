@@ -38,7 +38,7 @@ func New(r Runner) *Client { return &Client{r: r} }
 func (c *Client) HostOutput(ctx context.Context, argv ...string) ([]byte, error) {
 	host, ok := c.r.(HostCommandRunner)
 	if !ok {
-		return nil, errors.New("lima: host commands unavailable")
+		return nil, ErrHostCommandsUnavailable
 	}
 	return host.HostOutput(ctx, argv...)
 }
