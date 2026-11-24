@@ -250,10 +250,27 @@ func (p *Provisioner) runProvision(ctx context.Context, name, phase, hostname st
 	if err := p.Lima.Shell(ctx, name, bytes.NewReader(vars), out, "sudo", "bash", "-c", script); err != nil {
 		return fmt.Errorf("provisioning (%s) failed for %q: %w", phase, name, err)
 	}
+	p.renewGuestLogin(ctx, name, out)
 	if phase == "finalize" && len(preservation) > 0 && preservation[0].OnSetupRevision != nil {
 		preservation[0].OnSetupRevision(setupRevision)
 	}
 	return nil
+}
+
+// renewGuestLogin stops Lima's shared ssh master for name after a playbook run,
+// so the next `limactl shell` is a new guest login that sees the groups the
+// playbook just granted (finalize adds the login to `docker`). Without it the
+// first interactive shell rode the master opened at boot and lacked the group
+// until the VM restarted. See lima.StopSSHMasterArgv.
+//
+// Best-effort: the VM is provisioned either way, and a failure costs only that
+// group until a restart. So it never fails the build; it says what happened,
+// except for a runner that cannot run host commands at all (the test fakes).
+func (p *Provisioner) renewGuestLogin(ctx context.Context, name string, out io.Writer) {
+	argv := lima.StopSSHMasterArgv(lima.InstanceDir(p.hostFiles(), name))
+	if _, err := p.Lima.HostOutput(ctx, argv...); err != nil && !errors.Is(err, lima.ErrHostCommandsUnavailable) {
+		fmt.Fprintf(out, "note: could not reset the ssh connection to %q (%v); if docker reports permission denied, restart the VM\n", name, err)
+	}
 }
 
 // BuildBase creates a clone source from the verified published image.
@@ -615,11 +632,13 @@ func (p *Provisioner) createVM(ctx context.Context, cfg vm.CreateConfig, opts Cr
 
 	// The bounce used to be unconditional. Its two stated reasons are both gone:
 	//   - the finalize apt upgrade, which no longer exists, and
-	//   - docker-group membership, which is granted in the BASE phase
-	//     (roles/dev-tools, gated `when: provision_phase != 'finalize'` in
-	//     site.yml) and therefore baked into the image — a clone has the group
-	//     in /etc/group before it ever boots, and every `limactl shell` is a
-	//     fresh login with a fresh initgroups(). Finalize never touches groups.
+	//   - docker-group membership. The published image has no login, so
+	//     finalize adds the cloud-init login to `docker` (roles/user). That
+	//     does not need a bounce, but it does need a new ssh login: Lima's
+	//     shared master was opened at boot, before the grant, and every
+	//     `limactl shell` riding it inherits the old groups. runProvision
+	//     stops that master once the playbook succeeds (renewGuestLogin), so
+	//     the first interactive shell authenticates afresh.
 	//   - the hostname change was also checked (not just assumed): verified live
 	//     against a running VM that `hostnamectl set-hostname` (what
 	//     roles/base's "Set hostname" task uses) takes effect immediately, with
@@ -1485,8 +1504,9 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 	// Counter-consideration: "never bounce" is not automatically safe either. A
 	// long-lived tmux server freezes its supplementary groups and environment
 	// at the moment each pane is forked. If a future re-apply against a
-	// RUNNING VM ever changed group membership (it does not today — see
-	// createVM's comment), existing panes would not observe that change
+	// RUNNING VM ever changed group membership (finalize only does so on a
+	// fresh clone, before any tmux server exists — see createVM's comment,
+	// and renewGuestLogin for the ssh side), existing panes would not observe that change
 	// without a restart. That is a real cost of skipping the bounce, not a
 	// reason to make it unconditional again; it means any code that starts
 	// changing groups on a live VM must reckon with tmux explicitly, the same

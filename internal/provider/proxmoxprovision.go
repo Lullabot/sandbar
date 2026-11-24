@@ -760,6 +760,7 @@ func (p *proxmoxProvider) runPlaybookPhase(ctx context.Context, name string, cfg
 	if err := p.Shell(ctx, name, bytes.NewReader(vars), out, "sudo", "bash", "-c", runPlaybookScript); err != nil {
 		return fmt.Errorf("proxmox: provisioning %s (%s phase): %w", name, phase, err)
 	}
+	p.renewGuestLogin(ctx, name, out)
 	if phase == "finalize" && len(preservation) > 0 && preservation[0].OnSetupRevision != nil {
 		preservation[0].OnSetupRevision(setupRevision)
 	}
@@ -1145,4 +1146,31 @@ func parseSizeToBytes(size string) (int64, error) {
 		return 0, fmt.Errorf("unknown size unit in %q", size)
 	}
 	return int64(num * mult), nil
+}
+
+// renewGuestLogin stops the shared ssh master to name's guest after a playbook
+// run, so the next shell is a new login that sees the groups the playbook just
+// granted. The finalize playbook adds the login to `docker` over a master
+// authenticated before that grant, and every session multiplexed onto it keeps
+// the old group list (see sshx.Conn.StopMasterArgv). The master outlives the
+// build for as long as something keeps using it, within ControlPersist, so a
+// user who opened a shell soon after the build, or kept the board's monitoring
+// running, got one without `docker` until the VM restarted.
+//
+// Best-effort, as on Lima: the VM is provisioned either way, so a failure is
+// reported and never fails the build.
+func (p *proxmoxProvider) renewGuestLogin(ctx context.Context, name string, out io.Writer) {
+	ip, err := p.guestIP(ctx, name)
+	if err != nil {
+		progress(out, "note: could not reset the ssh connection to %s (%v); if docker reports permission denied, restart the VM\n", name, err)
+		return
+	}
+	argv := p.sshHost(ip).StopMasterArgv()
+	if argv == nil {
+		return // no multiplexing, so every shell is already a new login
+	}
+	var stderr bytes.Buffer
+	if err := p.runSSH(ctx, argv, nil, io.Discard, &stderr); err != nil {
+		progress(out, "note: could not reset the ssh connection to %s (%v); if docker reports permission denied, restart the VM\n", name, foldStderr(err, stderr.Bytes()))
+	}
 }

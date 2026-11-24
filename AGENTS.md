@@ -1100,9 +1100,16 @@ comment at `roles/agent-clipboard/tasks/main.yml`.
   moves that content into `/etc/skel`, then removes the account, its home and
   its linger file so Lima or Proxmox cloud-init can create the real login at
   first boot without a UID collision. Finalize must therefore add that new
-  login to `docker` and enable linger. This still needs no bounce: the first
-  interactive `limactl shell` is a fresh login with a fresh `initgroups()`
-  after finalize. The legacy full/base path continues granting membership in
+  login to `docker` and enable linger. This needs no bounce, but it does need a
+  new ssh login: a shell multiplexed onto an ssh master keeps the groups that
+  master's guest login was authenticated with, and Lima's master
+  (`ControlPersist=yes`, opened at boot for the playbook mount) and Proxmox's
+  (`ControlPersist=600`) both predate the grant. Each playbook runner therefore
+  stops the master with `ssh -O stop` once the playbook succeeds
+  (`renewGuestLogin`, via `lima.StopSSHMasterArgv` and
+  `sshx.Conn.StopMasterArgv`); without it the first shell lacked `docker`
+  until the VM restarted. Use `stop`, not `exit`: sessions already on the
+  master, such as the playbook mount, keep running. The legacy full/base path continues granting membership in
   `dev-tools`; do not remove the finalize grant while published images ship
   without a login. `createVM` (`internal/provision/provision.go`) bounces only
   when the guest reports `/var/run/reboot-required`, and `Reset` warns instead
