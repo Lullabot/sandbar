@@ -1053,6 +1053,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Start at host boot">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-if-running-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How If running works
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#existing-vms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Existing VMs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -1845,6 +1873,34 @@
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Start at host boot">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-if-running-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How If running works
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#existing-vms" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Existing VMs
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -2791,12 +2847,43 @@ other half by hand — that the foreign VM is <em>unchanged</em> afterward — c
 status as an admin before and after; the test deliberately can't, because its
 token can't see the VM at all, which is the point.</p>
 <h2 id="start-at-host-boot">Start at host boot</h2>
-<p>Proxmox VMs created or reset by sandbar start automatically when the Proxmox
-host boots. Uncheck <strong>Start at boot</strong> in the creation or reset form to disable
-this. A reset retains the VM's saved choice.</p>
-<p>From the CLI, pass <code>--no-start-at-boot</code> to <code>sandbar create</code> or <code>sandbar reset</code> to
-disable startup. Pass <code>--no-start-at-boot=false</code> to re-enable it on reset.
-This setting applies to Proxmox VMs only.</p>
+<p>Choose what happens to a Proxmox VM when the Proxmox host boots with the <em>Start at boot</em> row, below <em>Disk</em> in the creation or reset form. Press space or the left and right arrow keys to change it. This setting applies to Proxmox VMs only.</p>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Form</th>
+<th>CLI</th>
+<th>When the host boots</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Always (default)</td>
+<td><em>Always</em></td>
+<td><code>--start-at-boot always</code></td>
+<td>The VM starts.</td>
+</tr>
+<tr>
+<td>If running</td>
+<td><em>If running</em></td>
+<td><code>--start-at-boot if-running</code></td>
+<td>The VM starts only if it was running before the host went down.</td>
+</tr>
+<tr>
+<td>Never</td>
+<td><em>Never</em></td>
+<td><code>--start-at-boot never</code></td>
+<td>The VM stays stopped.</td>
+</tr>
+</tbody>
+</table>
+<p>Pass <code>--start-at-boot</code> to <code>sandbar create</code> or <code>sandbar reset</code>. A reset keeps the VM's saved mode unless you pass the flag. The older <code>--no-start-at-boot</code> flag still works and means <code>--start-at-boot never</code>; on reset, <code>--no-start-at-boot=false</code> means <code>always</code>.</p>
+<h3 id="how-if-running-works">How <em>If running</em> works</h3>
+<p>sandbar sets Proxmox's start-at-boot flag (<code>onboot</code>) on the VM. When sandbar starts the VM, it turns the flag on. When sandbar stops the VM, it turns the flag off.</p>
+<p>Only sandbar's own start and stop actions change the flag. A VM that you stop from the Proxmox web UI, or that shuts down from inside the guest, keeps the flag sandbar last set. If updating the flag fails, sandbar prints a warning and still completes the start or stop. The next start or stop retries the update. The token needs <code>VM.Config.Options</code>, which sandbar already requires to set <code>onboot</code>.</p>
+<h3 id="existing-vms">Existing VMs</h3>
+<p>A VM created before these modes existed uses <em>Always</em>, or <em>Never</em> if you turned off start at boot when you created it. sandbar reads the mode from the VM's saved settings, which only a create or reset writes, so reset the VM to change its mode.</p>
 
 
 
