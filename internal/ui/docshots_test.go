@@ -27,6 +27,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/lullabot/sandbar/internal/checkouts"
+	"github.com/lullabot/sandbar/internal/landgh"
 	"github.com/lullabot/sandbar/internal/providerfake"
 	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
@@ -126,7 +128,8 @@ func TestGenerateDocShots(t *testing.T) {
 		UpSince:  time.Now().Add(-4 * time.Minute),
 	}}})
 	m.heartbeats.beats[vmHandle{Scope: registry.LocalScope, Name: "drupal"}] = &heartbeat{
-		seen: true,
+		seen:   true,
+		cancel: func() {}, // nothing to stop: no stream was started
 		last: guestSample{
 			CPUPct: 3, HasCPU: true,
 			MemUsed: uint64(18 * gib / 10), MemTotal: uint64(8 * gib),
@@ -138,6 +141,44 @@ func TestGenerateDocShots(t *testing.T) {
 		},
 	}
 	write("quickstart-running", m)
+
+	// Pull request tutorial: the Landing pane for the same VM. `l` opens it the
+	// way a reader does; the sweep, gh check and PR lookup it would start are
+	// answered with the messages those commands return, since each would reach
+	// a live guest or GitHub.
+	m.ghActions = &fakeGhActions{availability: ghUp()}
+	m, _ = press(t, m, runeKey('l'))
+	if m.view != viewLanding {
+		t.Fatalf("l should open the Landing pane, view = %v", m.view)
+	}
+	checkout := checkouts.Checkout{
+		Path:          "/home/alex/github.com/acme/mysite",
+		Kind:          checkouts.KindRepo,
+		Branch:        "sandbar-tutorial",
+		Forge:         "github.com",
+		OrgRepo:       "acme/mysite",
+		DefaultBranch: "main",
+		PushState:     checkouts.PushStateNever,
+		Ahead:         1,
+	}
+	landingSweep := func(c checkouts.Checkout) tea.Msg {
+		return landRefreshMsg{scope: registry.LocalScope, vm: "drupal",
+			vc: checkouts.VMCheckouts{Checkouts: []checkouts.Checkout{c}, SweptAt: time.Now()}}
+	}
+	m = docShotUpdate(t, m, landingSweep(checkout))
+	m = docShotUpdate(t, m, landingAvailableMsg{scope: registry.LocalScope, vm: "drupal", availability: ghUp()})
+	write("pull-request-landing-never-pushed", m)
+
+	// After the push: the branch is on GitHub and has no pull request yet.
+	checkout.PushState, checkout.Ahead = checkouts.PushStatePushed, 0
+	m = docShotUpdate(t, m, landingSweep(checkout))
+	m = docShotUpdate(t, m, landingPRStateMsg{scope: registry.LocalScope, vm: "drupal", path: checkout.Path})
+	write("pull-request-landing-pushed", m)
+
+	// After "open draft PR": the lookup finds the new draft pull request.
+	m = docShotUpdate(t, m, landingPRStateMsg{scope: registry.LocalScope, vm: "drupal", path: checkout.Path,
+		pr: &landgh.PR{Number: 12, URL: "https://github.com/acme/mysite/pull/12", State: "OPEN", Draft: true}})
+	write("pull-request-landing-pr-open", m)
 }
 
 // docShotUpdate delivers one message through the real Update path. The

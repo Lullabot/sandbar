@@ -19,7 +19,7 @@ You need:
 - Sandbar installed on macOS or Linux. See [Install sandbar](installation.md).
 - A Drupal project that already uses [DDEV](https://ddev.com/).
 - Access to clone the project's Git repository, for example `https://github.com/acme/mysite`. No DDEV project handy? [Fork](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/working-with-forks/fork-a-repo) the [DrupalizeMe demo site](https://github.com/DrupalizeMe/module-developer-guide-demo-site) and use your fork. You'll push to it in the next tutorial.
-- A token limited to that repository, with permission to push to it (*Contents: Read and write* on GitHub). The VM uses it to clone a private repository, and to push in the next tutorial. Coding agents in the VM can do anything the token allows, so don't use one with access to your whole account. For GitHub, create a [fine-grained token with these permissions](../background/security-model.md#a-least-privilege-token-reasonable-agent-access); for GitLab, see [GitLab token permissions](../using-sandbar/secrets.md#gitlab-token-permissions).
+- A token limited to that repository, with permission to push to it (*Contents: Read and write* on GitHub). The VM uses it to clone a private repository, and to push in the [next tutorial](first-pull-request.md). Coding agents in the VM can do anything the token allows, so don't use one with access to your whole account. For GitHub, create a [fine-grained token with these permissions](../background/security-model.md#a-least-privilege-token-reasonable-agent-access); for GitLab, see [GitLab token permissions](../using-sandbar/secrets.md#gitlab-token-permissions).
 - A Claude account that can use Claude Code.
 - If you run DDEV on your Mac, stop it with `ddev poweroff`, so the VM's site can use ports 80 and 443.
 
@@ -176,6 +176,7 @@ To go back to the board, detach from tmux by pressing `ctrl+a`, then `d`. Claude
 
 ## Next steps
 
+- [Your first pull request](first-pull-request.md): the everyday loop of agent work, review and pull request.
 - [Sign in to your coding agent](coding-agents.md): use Codex, OpenCode or Pi, and choose permission modes.
 - [Open a web server in your browser](../using-sandbar/web-servers.md): reach other servers in the VM, and trust DDEV's certificates.
 - [The board](../reference/board.md): every key on the board.
