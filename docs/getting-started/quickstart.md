@@ -37,6 +37,8 @@ The first time, you'll see a *Welcome to sandbar* screen. Press `enter` to conti
 
 The board shows your machine's CPU, memory and free disk at the top, and an empty tile that says *press enter to add a VM*.
 
+![The sandbar board with no VMs: a header line with CPU, memory and free disk, and one empty tile that says "press enter to add a VM".](../images/getting-started/quickstart-board-empty.png)
+
 ## 2. Create a VM that clones your project
 
 Press `enter` on the empty tile, or press `n`, to open the *New VM* form. Fill out the configuration options:
@@ -50,11 +52,17 @@ Press `enter` on the empty tile, or press `n`, to open the *New VM* form. Fill o
 
 Leave everything else as it is.
 
+![The New VM form with Name "drupal", a Git name and email, Repository URL "https://github.com/acme/mysite", and "Install Claude Code" checked.](../images/getting-started/quickstart-new-vm-form.png)
+
 When you press `ctrl+s`, sandbar copies its Debian Linux base image into a new [Lima](https://lima-vm.io/) VM on your machine, gives it the CPUs, memory and disk from the form, and starts it. Then it sets up your user and Git identity, installs Claude Code, and clones your repository into the VM.
 
 A `drupal` tile appears with a progress bar.
 
+![The board with a "drupal" tile marked Building, showing a build progress bar at 42% and "ansible: user · 30/72".](../images/getting-started/quickstart-building.png)
+
 When the tile shows *● Running* and the bar is gone, the VM is ready.
+
+![The board with the "drupal" tile marked Running, showing CPU, memory and disk gauges and "up 4m".](../images/getting-started/quickstart-running.png)
 
 !!! warning "If the tile turns red"
     The build failed. Press `L` on the tile to read its log, then see [Troubleshooting](../reference/troubleshooting.md).

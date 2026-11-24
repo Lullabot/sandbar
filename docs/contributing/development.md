@@ -154,3 +154,31 @@ a *live* board with your own VMs and real host stats, the
 [VHS](https://github.com/charmbracelet/vhs) tape next to the image still works
 (`cd docs/images && vhs board.tape`); it drives a real `sandbar` session, so keep a
 VM or two around first.
+
+## Regenerating the docs screenshots
+
+The board and form images on docs pages, such as the quickstart's, live under
+`docs/images/<section>/`. They come from `TestGenerateDocShots` in
+`internal/ui/docshots_test.go`, which renders sandbar's real screens with a fake
+provider and fixed values, so they never show your own VMs or host stats. Each
+scene reaches its screen with the same keys a reader presses, so a change that
+breaks that path fails the generator instead of leaving a stale image.
+
+Regenerate them all when the TUI's look changes, or when you add a scene:
+
+```
+go install github.com/charmbracelet/freeze@v0.2.2
+DOC_SHOTS_DIR=/tmp/docshots go test ./internal/ui/ -run TestGenerateDocShots -count=1
+font="$(go env GOMODCACHE)"/github.com/charmbracelet/freeze@v0.2.2/font/JetBrainsMono-Regular.ttf
+for f in /tmp/docshots/*.ansi; do
+  out=docs/images/getting-started/$(basename "$f" .ansi).png
+  rm -f "$out"  # freeze asks before overwriting
+  freeze "$f" -o "$out" --font.file "$font" \
+    --font.family "JetBrains Mono" --font.size 20 --line-height 1.6 \
+    --background "#0d1117" --padding 24 --window --border.radius 8
+done
+```
+
+Every scene uses a 100×30 terminal so the images line up across pages. When
+you add a scene for another section, write it to that section's folder under
+`docs/images/`.
