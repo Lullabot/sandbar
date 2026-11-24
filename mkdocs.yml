@@ -78,6 +78,7 @@ plugins:
         why.md: background/why.md
         contributing/image-build-audit.md: contributing/base-image.md
         getting-started/index.md: getting-started/quickstart.md
+        getting-started/first-vm.md: getting-started/quickstart.md
 
 nav:
   - Home: index.md
@@ -85,7 +86,6 @@ nav:
     - Install sandbar: getting-started/installation.md
     - 'Quickstart: a Drupal site with DDEV': getting-started/quickstart.md
     - Sign in to your coding agent: getting-started/coding-agents.md
-    - Your first VM: getting-started/first-vm.md
   - Using sandbar:
     - Shells and files: using-sandbar/shells.md
     - Web servers and ports: using-sandbar/web-servers.md
