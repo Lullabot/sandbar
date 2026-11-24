@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -297,8 +298,7 @@ func (m *model) openForm() tea.Cmd {
 	m.toolPi = cfg.WithPi
 	m.agentsEdited = [4]bool{}
 	m.formGeneration++
-	m.formDisableStartAtBoot = false
-	m.formBootFollowsPower = false
+	m.formStartAtBoot = vm.StartAtBootAlways
 	m.toolRebuild = false
 	m.resetCheckouts, m.resetCheckoutsHidden = nil, 0 // create mode has no preserve rows
 	// The clone source always reopens on "base" (formTemplateName == "") — a
@@ -393,8 +393,7 @@ func (m *model) openResetForm(scope registry.Scope, name string, cfg vm.CreateCo
 	}
 
 	m.hostDiskFree = freeDiskBytes()
-	m.formDisableStartAtBoot = cfg.DisableStartAtBoot
-	m.formBootFollowsPower = cfg.BootFollowsPower
+	m.formStartAtBoot = cfg.StartAtBoot()
 	m.resetMode = true
 	m.resetName = cfg.Name
 	m.resetBaseName = cfg.BaseName
@@ -709,6 +708,13 @@ type formToggle struct {
 	// earlier picks where they left them — the display is what changes, not the
 	// choice they made.
 	locked bool
+
+	// cycle and value make the row a selector instead of a checkbox, rendered
+	// as "label: < value >" like the Git service row. Space, enter and right
+	// step forward through the choices and left steps back; get and set are
+	// unused. A selector is never locked.
+	cycle func(m *model, step int)
+	value func(m *model) string
 }
 
 // createToggles is create mode's toggle list: the base-image tool-set
@@ -892,20 +898,73 @@ func (m model) toggles() []formToggle {
 		t = m.createToggles()
 	}
 	if i, ok := m.memberIndex(m.formScope); ok && m.members[i].profile.Type == profiles.TypeProxmox {
+		// One three-way row, not two checkboxes: "only if running" means
+		// nothing when the VM never starts at boot, and a second checkbox
+		// let the form offer that combination anyway.
 		t = append(t, formToggle{
 			label: "Start at boot",
-			help:  "Start this VM automatically when the Proxmox host boots. Enabled by default.",
-			get:   func(m *model) bool { return !m.formDisableStartAtBoot },
-			set:   func(m *model, v bool) { m.formDisableStartAtBoot = !v },
-		}, formToggle{
-			label: "Only if left running",
-			help: "Start at boot only the VMs that were running: sandbar turns start at boot on when it starts this VM " +
-				"and off when it stops it, so a host reboot restores the VMs you had running. Has no effect when Start at boot is off.",
-			get: func(m *model) bool { return m.formBootFollowsPower },
-			set: func(m *model, v bool) { m.formBootFollowsPower = v },
+			help: "What happens to this VM when the Proxmox host boots. If running: it starts only if it was running, " +
+				"because sandbar turns start at boot on when it starts the VM and off when it stops it. " +
+				"Always: it always starts. Never: it stays stopped.",
+			value: func(m *model) string { return startAtBootLabel(m.formStartAtBoot) },
+			cycle: func(m *model, step int) {
+				m.formStartAtBoot = cycleChoice(vm.StartAtBootModes, m.formStartAtBoot, vm.StartAtBootAlways, step)
+			},
 		})
 	}
 	return t
+}
+
+// startAtBootLabel is a start-at-boot mode as the form shows it.
+func startAtBootLabel(mode string) string {
+	switch mode {
+	case vm.StartAtBootIfRunning:
+		return "If running"
+	case vm.StartAtBootNever:
+		return "Never"
+	}
+	return "Always"
+}
+
+// cycleChoice steps step places from current through choices, wrapping. A
+// current value not in the list (an empty field on a model built without
+// openForm) is read as fallback.
+func cycleChoice(choices []string, current, fallback string, step int) string {
+	i := slices.Index(choices, current)
+	if i < 0 {
+		i = slices.Index(choices, fallback)
+	}
+	return choices[((i+step)%len(choices)+len(choices))%len(choices)]
+}
+
+// toggleKey handles a key pressed on a focused toggle row, shared by the create
+// and reset forms. Space and enter flip a checkbox or step a selector forward;
+// left and right step a selector. It reports whether it consumed the key, which
+// must then not reach navigation or the text inputs.
+func (m *model) toggleKey(msg tea.KeyPressMsg) bool {
+	toggles := m.toggles()
+	if m.toggleFocus < 0 || m.toggleFocus >= len(toggles) {
+		return false
+	}
+	t := toggles[m.toggleFocus]
+	if t.cycle != nil {
+		switch msg.Code {
+		case tea.KeySpace, tea.KeyEnter, tea.KeyRight:
+			t.cycle(m, 1)
+			return true
+		case tea.KeyLeft:
+			t.cycle(m, -1)
+			return true
+		}
+		return false
+	}
+	if msg.Code != tea.KeySpace && msg.Code != tea.KeyEnter {
+		return false
+	}
+	if !t.locked {
+		t.set(m, !t.get(m))
+	}
+	return true
 }
 
 // focusNext / focusPrev move the cursor between fields in create mode,
@@ -1122,8 +1181,11 @@ func (m model) buildConfig() (vm.CreateConfig, error) {
 	cfg.CloneURL = m.field(fCloneURL)
 	cfg.CloneForge = m.formCloneForge
 	cfg.CloneToken = m.field(fCloneToken)
-	cfg.DisableStartAtBoot = m.formDisableStartAtBoot
-	cfg.BootFollowsPower = m.formBootFollowsPower
+	if err := cfg.SetStartAtBoot(m.formStartAtBoot); err != nil {
+		// A model that never went through openForm has no mode yet; that is
+		// the default, not an error to show the user.
+		_ = cfg.SetStartAtBoot(vm.StartAtBootAlways)
+	}
 	if m.resetMode {
 		// Agents come from the reset form's own rows, which openResetForm seeded
 		// from the VM's recorded selection.
@@ -1436,10 +1498,7 @@ func (m model) updateForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	// On a focused toggle, space/enter flips it rather than navigating, and the
 	// key must NOT reach the text inputs below — mirrors updateResetForm.
-	if m.toggleFocus >= 0 && (msg.Code == tea.KeySpace || msg.Code == tea.KeyEnter) {
-		if t := m.toggles()[m.toggleFocus]; !t.locked {
-			t.set(&m, !t.get(&m))
-		}
+	if done := m.toggleKey(msg); done {
 		return m, nil
 	}
 
@@ -1564,10 +1623,7 @@ func (m model) updateResetForm(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// locked one (see formToggle.locked) is skipped by the focus walk and so is
 	// not reachable here; the guard is what keeps that true if it ever becomes
 	// reachable by another route.
-	if m.toggleFocus >= 0 && (msg.Code == tea.KeySpace || msg.Code == tea.KeyEnter) {
-		if t := m.toggles()[m.toggleFocus]; !t.locked {
-			t.set(&m, !t.get(&m))
-		}
+	if done := m.toggleKey(msg); done {
 		return m, nil
 	}
 
@@ -1611,6 +1667,16 @@ func toggleRow(label string, on, focused, locked bool) string {
 	case locked:
 		return lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render(line + lockedToggleSuffix)
 	case focused:
+		return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("63")).Render(line)
+	}
+	return lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(line)
+}
+
+// selectorRow renders a selector among the toggles, in the toggles' own inline
+// styles, with the same "< value >" cycle hint as the Git service row.
+func selectorRow(label, value string, focused bool) string {
+	line := label + ": < " + value + " >"
+	if focused {
 		return lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("63")).Render(line)
 	}
 	return lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Render(line)
@@ -1729,6 +1795,10 @@ func (m model) formView() string {
 	if len(toggles) > 0 {
 		b.WriteString("\n")
 		for i, t := range toggles {
+			if t.cycle != nil {
+				b.WriteString(selectorRow(t.label, t.value(&m), m.toggleFocus == i) + "\n")
+				continue
+			}
 			b.WriteString(toggleRow(t.label, t.get(&m), m.toggleFocus == i, t.locked) + "\n")
 		}
 	}

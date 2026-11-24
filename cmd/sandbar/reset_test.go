@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -589,30 +588,69 @@ func TestResetHelpDocumentsFromBackup(t *testing.T) {
 	}
 }
 
-func TestResetBootFollowsPower(t *testing.T) {
-	for _, follow := range []bool{false, true} {
+// resetConfigFromFlags parses args with the real reset flag set and builds the
+// reset config over rec, so the explicit set is the one fs.Visit reports.
+func resetConfigFromFlags(t *testing.T, rec vm.CreateConfig, args ...string) (vm.CreateConfig, error) {
+	t.Helper()
+	var o resetOptions
+	fs := newResetFlagSet(&o)
+	if err := fs.Parse(args); err != nil {
+		t.Fatal(err)
+	}
+	explicit := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+	return resetConfigFromRecord(rec, true, "web", rec.BaseName, explicit, o.values, "dev")
+}
+
+func TestResetStartAtBootMode(t *testing.T) {
+	for _, recorded := range vm.StartAtBootModes {
 		rec := vm.DefaultCreateConfig()
 		rec.Name = "web"
-		rec.BootFollowsPower = follow
 		rec.GitName, rec.GitEmail = "Dev", "dev@example.com"
-		cfg, err := resetConfigFromRecord(rec, true, "web", rec.BaseName, nil, resetFlagValues{}, "dev")
+		if err := rec.SetStartAtBoot(recorded); err != nil {
+			t.Fatal(err)
+		}
+
+		cfg, err := resetConfigFromFlags(t, rec)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if cfg.BootFollowsPower != follow {
-			t.Fatal("reset lost the recorded boot setting")
+		if got := cfg.StartAtBoot(); got != recorded {
+			t.Fatalf("reset with no flag = %q, want the recorded %q", got, recorded)
 		}
-		var o resetOptions
-		fs := newResetFlagSet(&o)
-		if err := fs.Parse([]string{"--start-at-boot-if-running=" + strconv.FormatBool(!follow)}); err != nil {
-			t.Fatal(err)
+
+		for _, tc := range []struct {
+			args []string
+			want string
+		}{
+			{[]string{"--start-at-boot", "if-running"}, vm.StartAtBootIfRunning},
+			{[]string{"--start-at-boot", "always"}, vm.StartAtBootAlways},
+			{[]string{"--start-at-boot", "never"}, vm.StartAtBootNever},
+			{[]string{"--no-start-at-boot"}, vm.StartAtBootNever},
+			{[]string{"--no-start-at-boot=false"}, vm.StartAtBootAlways},
+			{[]string{"--no-start-at-boot", "--start-at-boot", "never"}, vm.StartAtBootNever},
+		} {
+			cfg, err := resetConfigFromFlags(t, rec, tc.args...)
+			if err != nil {
+				t.Fatalf("%v: %v", tc.args, err)
+			}
+			if got := cfg.StartAtBoot(); got != tc.want {
+				t.Errorf("recorded %q, %v = %q, want %q", recorded, tc.args, got, tc.want)
+			}
 		}
-		cfg, err = resetConfigFromRecord(rec, true, "web", rec.BaseName, map[string]bool{"start-at-boot-if-running": true}, o.values, "dev")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if cfg.BootFollowsPower == follow {
-			t.Fatal("explicit flag did not override the recorded setting")
+	}
+}
+
+func TestResetStartAtBootRejectsBadFlags(t *testing.T) {
+	rec := vm.DefaultCreateConfig()
+	rec.Name = "web"
+	rec.GitName, rec.GitEmail = "Dev", "dev@example.com"
+	for _, args := range [][]string{
+		{"--start-at-boot", "sometimes"},
+		{"--no-start-at-boot", "--start-at-boot", "if-running"},
+	} {
+		if _, err := resetConfigFromFlags(t, rec, args...); err == nil {
+			t.Errorf("%v was accepted", args)
 		}
 	}
 }

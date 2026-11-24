@@ -106,8 +106,8 @@ func newResetFlagSet(o *resetOptions) *flag.FlagSet {
 	// stray `sandbar land NAME` in here printed "-preserve sandbar land NAME".
 	fs.Var(&o.preservePaths, "preserve", "Keep one more directory `PATH` inside the guest home (repeatable); run 'sandbar land NAME' to list this VM's checkouts")
 	fs.StringVar(&o.fromBackup, "from-backup", "", "Finish a reset that failed after deleting the VM: rebuild NAME and restore the backup in `DIR` (the path the failure named)")
-	fs.BoolVar(&o.values.disableStartAtBoot, "no-start-at-boot", false, "Disable automatic startup when the Proxmox host boots (default: recorded setting)")
-	fs.BoolVar(&o.values.bootFollowsPower, "start-at-boot-if-running", false, "Start at Proxmox host boot only if the VM was left running (default: recorded setting)")
+	fs.StringVar(&o.values.startAtBoot, "start-at-boot", "", startAtBootUsage+" (default: recorded setting)")
+	fs.BoolVar(&o.values.disableStartAtBoot, "no-start-at-boot", false, "Same as --start-at-boot=never; --no-start-at-boot=false means always (default: recorded setting)")
 	fs.StringVar(&o.values.cpus, "cpus", "", "vCPUs (default: whatever this VM has)")
 	fs.StringVar(&o.values.hostname, "hostname", "", "VM hostname (default: whatever this VM has)")
 	fs.StringVar(&o.values.user, "user", "", "Primary VM user (default: whatever this VM has)")
@@ -396,7 +396,8 @@ func resumeReset(reg *registry.Registry, name string, scope registry.Scope, o *r
 // these (clearing --docker-proxy-host) — what decides is whether the flag was
 // PASSED, not whether it is empty.
 type resetFlagValues struct {
-	disableStartAtBoot, bootFollowsPower    bool
+	disableStartAtBoot                      bool
+	startAtBoot                             string
 	cpus, hostname, user, gitName, gitEmail string
 	memory, disk, locale, timezone, domain  string
 	dockerProxy, cloneToken                 string
@@ -468,11 +469,12 @@ func resetConfigFromRecord(rec vm.CreateConfig, found bool, name, base string, e
 			*selected = flagAgents[agent]
 		}
 	}
-	if explicit["no-start-at-boot"] {
-		cfg.DisableStartAtBoot = flags.disableStartAtBoot
+	mode, err := startAtBootFromFlags(explicit, flags.startAtBoot, flags.disableStartAtBoot)
+	if err != nil {
+		return cfg, err
 	}
-	if explicit["start-at-boot-if-running"] {
-		cfg.BootFollowsPower = flags.bootFollowsPower
+	if mode != "" {
+		_ = cfg.SetStartAtBoot(mode) // validated by startAtBootFromFlags
 	}
 	if explicit["cpus"] {
 		n, err := vm.ParseCPUs(flags.cpus)

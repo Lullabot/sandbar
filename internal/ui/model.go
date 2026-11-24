@@ -446,11 +446,10 @@ type model struct {
 	// never cloned. Built in openResetForm from the host-side checkout registry,
 	// which means NO guest contact when the form opens (resetpreserve.go).
 	// resetCheckoutsHidden is how many the row cap left out.
-	resetCheckouts         []resetCheckout
-	resetCheckoutsHidden   int
-	formDisableStartAtBoot bool
-	formBootFollowsPower   bool
-	toggleFocus            int // -1 = focus is in the text inputs; index into m.toggles() otherwise
+	resetCheckouts       []resetCheckout
+	resetCheckoutsHidden int
+	formStartAtBoot      string // a vm.StartAtBoot* mode; Proxmox forms only
+	toggleFocus          int    // -1 = focus is in the text inputs; index into m.toggles() otherwise
 
 	// Agent choices belong to individual VMs; DDEV/Go/Java configure the base.
 	// toolRebuild carries the same intent as `sandbar create --rebuild`.
