@@ -293,3 +293,44 @@ func TestBrowserDroppedPathListError(t *testing.T) {
 		t.Fatal("selected after listing failed")
 	}
 }
+
+// containsQuit reports whether running cmd produces tea.QuitMsg, looking
+// inside batches: the list wraps its commands in tea.Batch, so a quit can
+// arrive nested rather than as the command's own message.
+func containsQuit(cmd tea.Cmd) bool {
+	switch msg := runCmd(cmd).(type) {
+	case tea.QuitMsg:
+		return true
+	case tea.BatchMsg:
+		for _, c := range msg {
+			if containsQuit(c) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// TestBrowserKeysNeverQuitTheProgram pins the list's own quit bindings off.
+// The browser is a child screen: esc backs out of it, and a quit there would
+// close all of sandbar. bubbles' list ships a Quit binding that has been
+// "q"/"esc" and, in v2.2.1, "v" — so this checks both rather than whichever
+// one the current release happens to use.
+func TestBrowserKeysNeverQuitTheProgram(t *testing.T) {
+	b := NewBrowser(fakeLister{"/root": {{Name: "a.txt", Size: 1}}}, "test")
+	b.SetSize(80, 24)
+	b, _ = b.Update(runCmd(b.Open("/root")))
+
+	for _, k := range []tea.KeyPressMsg{runeKey('q'), runeKey('v'), {Code: tea.KeyEsc}} {
+		if _, cmd := b.Update(k); containsQuit(cmd) {
+			t.Errorf("key %q in the browser quit the program", k.String())
+		}
+	}
+	if h := b.list.ShortHelp(); len(h) > 0 {
+		for _, kb := range h {
+			if kb.Help().Desc == "quit" && kb.Enabled() {
+				t.Errorf("browser help still advertises %q quit", kb.Help().Key)
+			}
+		}
+	}
+}
