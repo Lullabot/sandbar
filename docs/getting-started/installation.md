@@ -1,70 +1,82 @@
-# Installation
+# Install sandbar
 
-## Prerequisites
+Install sandbar on a macOS or Linux workstation, check that it works, and upgrade or remove it later.
 
-`sandbar` itself runs on macOS or Linux. What else you need depends on where
-you want the VMs to run.
+## Before you start
 
-**To run VMs on this machine** (the default), you need
-[Lima](https://lima-vm.io) and a working hypervisor. macOS has a hypervisor
-built in; on Linux, Lima needs QEMU/KVM — see the [Lima installation
-docs](https://lima-vm.io/docs/installation/) if `limactl` doesn't already
-work on your machine. You don't need to install Lima separately: Homebrew
-pulls it in as a dependency of the `sandbar` formula below.
+- A Mac or a Linux machine, on an Intel/AMD (amd64) or ARM (arm64) processor. Sandbar has no Windows build.
+- To run VMs on this machine, which is the default: [Lima](https://lima-vm.io) and a hypervisor. macOS has a hypervisor built in. On Linux, Lima uses QEMU with KVM, so your user must be able to open `/dev/kvm`. The Homebrew install below adds Lima for you.
+- To run VMs only on another machine or a Proxmox VE host, this machine needs nothing but sandbar. See [Where VMs run](../advanced/connection-profiles.md) after you install.
+- Optional: the [GitHub CLI](https://cli.github.com/) (`gh`), signed in on this machine, if you want sandbar to open pull requests for you from the *Landing* pane.
 
-**To run VMs somewhere else**, this machine needs nothing but `sandbar`:
+## Install with Homebrew
 
-- On **another machine over SSH**, Lima and the hypervisor live on that
-  machine instead, and you need passwordless SSH to it.
-- On a **Proxmox VE host**, no Lima is involved at all — `sandbar` talks to the
-  Proxmox API over HTTPS. The host needs a one-time
-  [token and pool setup](../advanced/proxmox.md).
-
-Either way, add the machine as a [Connection
-Profile](../advanced/connection-profiles.md) once and `sandbar` uses it from
-then on.
-
-## Install `sandbar`
-
-`sandbar` ships as a prebuilt Homebrew **formula** (not a cask — deliberately,
-so the same install works on both macOS and Linux) from the
-[`lullabot/homebrew-sandbar`](https://github.com/Lullabot/homebrew-sandbar)
-tap:
+Install sandbar with [Homebrew](https://brew.sh), on macOS or Linux. It installs Lima for you, and upgrades sandbar with one command.
 
 ```bash
 brew install lullabot/sandbar/sandbar
 ```
 
-That taps the repository and installs the formula in one step.
+This adds the `lullabot/sandbar` tap and installs the `sandbar` formula and Lima.
 
-The command was previously named `sand`. For the next few releases, packages
-include a `sand → sandbar` compatibility symlink. Invoking `sand` prints a
-deprecation warning to stderr; existing scripts continue to work, but should
-switch to `sandbar`. Existing VMs, profiles, secrets, and state paths are retained.
-
-If you installed the old Homebrew formula, replace it with the new one:
-
-```bash
-brew uninstall sand
-brew install lullabot/sandbar/sandbar
-```
-
-For a release archive, extract both `sandbar` and its `sand` symlink into the
-same directory on your PATH.
-
-## Verify it worked
+## Check that it works
 
 ```bash
 sandbar version
 ```
 
-## Upgrading and removing
+This prints the version you installed, for example `0.19.1`.
+
+To run VMs on this machine, also check Lima:
 
 ```bash
-brew upgrade sandbar
-brew uninstall sandbar   # does not delete your VMs
+limactl --version
 ```
 
-Uninstalling leaves every VM where it is. Delete the ones you don't want
-first — press `d` on a tile in the board, or, for a local VM, run
-`limactl delete <name>`.
+Then run `sandbar` to open the board. If Lima is missing or too old, sandbar says so on the board; see [Troubleshooting](../reference/troubleshooting.md#lima-is-too-old-to-support-clone).
+
+## Upgrade
+
+```bash
+brew upgrade lullabot/sandbar/sandbar
+```
+
+The board's header shows *Update available!* next to the version when a newer release is out. Upgrading doesn't change your VMs, profiles or secrets. A VM built with an older release may show an update notice on its tile; you apply it by resetting that VM (`R` on its tile, see [Resetting a VM](../reference/board.md#resetting-a-vm)).
+
+### If you used the `sand` command
+
+Sandbar was named `sand`. Releases still include a `sand` link that runs `sandbar` and prints a warning. It will be removed in a future release, so change your scripts to call `sandbar`. Your VMs, profiles, secrets and other state carry over.
+
+If you installed the old `sand` Homebrew formula, switch it to `sandbar`. Homebrew 6 won't apply the rename until you trust the new formula, so `brew upgrade` alone stays on `sand`. Run this once:
+
+```bash
+brew update
+brew trust --formula lullabot/sandbar/sandbar
+brew migrate sand
+```
+
+## Uninstall
+
+Uninstalling sandbar doesn't delete your VMs. Delete the ones you don't need first: press `d` on each tile on the board.
+
+Then remove sandbar:
+
+```bash
+brew uninstall sandbar
+```
+
+Some files stay behind:
+
+- The base image VM, `sandbar-base`, and any templates. Delete them with `limactl delete sandbar-base` and `sandbar template delete NAME` (run that one before you uninstall).
+- The downloaded base image, in `~/.lima/_sand/images`.
+- Sandbar's configuration, VM records and secrets. See [Files and state](../reference/files-and-state.md#host-paths) for every path.
+
+## If something goes wrong
+
+See [Troubleshooting](../reference/troubleshooting.md).
+
+## Related
+
+- [Quickstart: a Drupal site with DDEV](quickstart.md)
+- [Where VMs run](../advanced/connection-profiles.md)
+- [Release sandbar](../contributing/releases.md): how releases and the Homebrew tap are built

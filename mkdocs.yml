@@ -77,13 +77,16 @@ plugins:
         reference/security-model.md: background/security-model.md
         why.md: background/why.md
         contributing/image-build-audit.md: contributing/base-image.md
+        getting-started/index.md: getting-started/quickstart.md
+        getting-started/first-vm.md: getting-started/quickstart.md
 
 nav:
   - Home: index.md
   - Getting started:
-    - About sandbar: getting-started/index.md
-    - Installation: getting-started/installation.md
-    - Your first VM: getting-started/first-vm.md
+    - Install sandbar: getting-started/installation.md
+    - 'Quickstart: a Drupal site with DDEV': getting-started/quickstart.md
+    - Your first pull request: getting-started/first-pull-request.md
+    - Sign in to your coding agent: getting-started/coding-agents.md
   - Using sandbar:
     - Shells and files: using-sandbar/shells.md
     - Web servers and ports: using-sandbar/web-servers.md

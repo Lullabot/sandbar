@@ -1,15 +1,14 @@
 # Where VMs Run
 
-A `sandbar` VM doesn't have to run on the machine in front of you. It can run:
+A `sandbar` VM doesn't have to run on the machine in front of you. It can run in three places:
 
-- **On this machine** — the default. `sandbar` runs [Lima](https://lima-vm.io)
-  locally, and nothing needs configuring.
-- **On another machine, over SSH** — `sandbar` runs the same Lima commands on a
-  host you can SSH into, so VMs live on a bigger box (a workstation, a home
-  server) while you work from a laptop.
-- **On a [Proxmox VE](https://www.proxmox.com/) host** — `sandbar` drives VMs
-  through the Proxmox REST API with a pool-scoped token. No Lima involved.
-  See [Proxmox VE Setup](proxmox.md) for the one-time host setup.
+| Where | What it uses | What you need |
+| --- | --- | --- |
+| Your own machine (the default) | [Lima](https://lima-vm.io), locally | Nothing beyond installing `sandbar` |
+| Another machine, over SSH | Lima on that machine | Passwordless SSH and Lima on the far end |
+| A [Proxmox VE](https://www.proxmox.com/) host | The Proxmox REST API, with a pool-scoped token | A one-time [host setup](proxmox.md) |
+
+Another machine over SSH lets VMs live on a bigger box (a workstation, a home server) while you work from a laptop.
 
 Whichever you pick, the commands, the board, and the keybindings are the
 same. Only the machine underneath changes.

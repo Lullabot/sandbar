@@ -40,7 +40,7 @@ tenant or a determined attacker.
   mount to share, so there is nothing for it to serve.
 - **`sandbar` does not provision a Claude Code credential.** You log in inside
   the VM yourself; no host-side Claude Code token is copied in. See
-  [Logging into Claude Code](../getting-started/first-vm.md#logging-into-claude-code).
+  [Sign in to your coding agent](../getting-started/coding-agents.md#claude-code).
 - **Claude Code runs without routine permission prompts.** The provisioned
   settings start sessions in [auto mode](https://code.claude.com/docs/en/permission-modes),
   where a classifier reviews each action instead of asking you. On the first
@@ -61,7 +61,7 @@ tenant or a determined attacker.
   it on for future interactive sessions. If enabled, the session remains in
   the VM but its transcript and tool activity are synchronized through
   Anthropic so you can drive it from `claude.ai/code` or the Claude app. See
-  [Logging into Claude Code](../getting-started/first-vm.md#logging-into-claude-code).
+  [Sign in to your coding agent](../getting-started/coding-agents.md#claude-code).
 - **Cross-machine session messaging stays isolated even when Remote Control is
   enabled.** The provisioned `isolatePeerMachines: true` setting requires your
   explicit approval before Claude's `SendMessage` can reach a session on
@@ -78,7 +78,7 @@ tenant or a determined attacker.
   initially off; a remembered selection or an explicit flag/checkbox can enable it.
 - **No Codex credential is provisioned.** You log in to Codex inside the VM
   yourself with your ChatGPT account; no host-side token is copied in. See
-  [Logging into Codex](../getting-started/first-vm.md#logging-into-codex).
+  [Sign in to your coding agent](../getting-started/coding-agents.md#codex).
 - **OpenCode and Pi also require credentials configured inside the VM.**
   Selecting them installs the CLI, without importing host authentication.
   Claude's session hooks remain Claude-specific; the image-only clipboard

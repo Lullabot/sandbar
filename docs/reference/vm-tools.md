@@ -24,17 +24,7 @@ covers how to reach it from your browser — locally and on a remote profile.
 
 ## Coding agents
 
-The create form offers four independent checkboxes: **Install Claude Code**,
-**Install OpenAI Codex**, **Install OpenCode**, and **Install Pi**. Select any combination, including none.
-All four start unselected; after creating a VM, sandbar remembers your choices
-across connection profiles. See [Files and State](files-and-state.md#coding-agent-preferences-and-migration)
-for persistence and migration details.
-
-Headless creation offers `--with-claude`, `--with-codex`, `--with-opencode`,
-and `--with-pi`; use `=false` to explicitly deselect an agent. Omitted agent
-flags use the remembered selection. Changing agents does not rebuild the
-shared base. Reset retains that VM's recorded selections, independently of
-the defaults for new VMs.
+Claude Code, OpenAI Codex, OpenCode and Pi, as selected for each VM. See [Sign in to your coding agent](../getting-started/coding-agents.md) for choosing agents, signing in and permission modes.
 
 ### Claude Code terminal notifications
 
@@ -63,65 +53,7 @@ environment, so sessions there do not need per-command approval. New VMs get
 it during provisioning. Older VMs get it the next time you open a shell with
 `S` or `sandbar shell`, with no rebuild or reset.
 
-### Global Sandbar environment context
-
-During provisioning of a new VM, each selected agent receives a short global
-instruction block identifying the Sandbar guest. It tells the agent that
-passwordless `sudo` is available for guest system changes within work you have
-authorized, without asking again solely because a command uses `sudo`. It does
-not replace the agent's system prompt or grant access to your workstation.
-
-The block points to the shared `sandbar-environment` skill. Its references
-cover the VM's name and connection profile type, the `sandbar` commands you run
-on your workstation (including what `sandbar reset` deletes), reaching guest
-ports from your workstation, where secrets and tokens come from, browser
-review with `self-review-serve`, tmux keys, the clipboard, and installed
-tools. Each reference links the documentation page it summarizes. The
-skill and its local references live at `~/.agents/skills/sandbar-environment`.
-Claude Code discovers the same skill through a symlink at
-`~/.claude/skills/sandbar-environment`. The instruction blocks live at:
-
-| Agent | Global instruction file |
-| --- | --- |
-| Claude Code | `~/.claude/CLAUDE.md` |
-| Codex | `~/.codex/AGENTS.md` |
-| Pi | `~/.pi/agent/AGENTS.md` |
-| OpenCode | `~/.config/opencode/AGENTS.md` |
-
-Provisioning preserves personal text in those files and unrelated skills. It
-refreshes only Sandbar's marked block and skill files; a user-owned skill at
-the same destination causes provisioning to stop with a collision error. A VM
-with no agents selected receives no agent context. Existing running VMs are
-not updated automatically. Start a fresh agent session after provisioning to
-load the global context.
-
-### Claude Code `new-session` skill
-
-A VM with Claude Code selected also gets a `new-session` skill. Ask Claude to
-"start a new session in sandbar with a prompt to fix the failing test", for
-example, and it starts a separate, detached Claude Code session in the VM that
-appears in [Remote Control](https://code.claude.com/docs/en/remote-control).
-This is how you open a new VM session from the Claude web or mobile app, which
-can otherwise only start cloud sessions.
-
-- A loosely named repository is looked up in the VM's checkout layout,
-  `~/<host>/<group>/<repo>`.
-- In a git repository the new session works in a fresh worktree branched from
-  `origin/main`, unless you ask it to work in the directory itself.
-- The new session starts in the permission mode of the session that asked.
-- The skill requires Remote Control to be on by default
-  (`remoteControlAtStartup` in `~/.claude/settings.json`). If it is off, the
-  skill starts nothing and tells you how to turn it on: answer **y** to the
-  launcher's Remote Control question (see
-  [Your First VM](../getting-started/first-vm.md)), or enable it later in Claude Code's `/config`
-  screen.
-
-The skill is sandbar's code, so it lives outside your home at
-`/usr/local/share/sandbar/skills/new-session` and every create or reset
-installs the current copy. Claude finds it through a symlink at
-`~/.claude/skills/new-session`. If something of yours already occupies that
-path, provisioning leaves it in place, prints a warning, and continues without
-linking the skill.
+The global agent instructions and the `sandbar-environment` skill are described in [What every agent gets](../getting-started/coding-agents.md#what-every-agent-gets), and Claude Code's `new-session` skill in [Start a new session from your phone](../getting-started/coding-agents.md#start-a-new-session-from-your-phone).
 
 ## Git
 
