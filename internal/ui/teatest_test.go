@@ -298,7 +298,8 @@ func TestTUIGitLabCloneTokenFocused80x24(t *testing.T) {
 	m.hostDiskFree = 0
 	tm := newManagedTeaTestModel(t, m, teatest.WithInitialTermSize(80, 24))
 	waitForText(t, tm, "New VM")
-	for range fCloneURL {
+	// One tab per field drawn above the repo URL; a hidden field is no stop.
+	for range m.drawnFieldsBefore(fCloneURL) {
 		tm.Send(tea.KeyPressMsg{Code: tea.KeyTab})
 	}
 	tm.Type("https://git.example.test/group/repo")

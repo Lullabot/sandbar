@@ -92,7 +92,7 @@ func walkResetFocusNext(m *model, n int) []int {
 func resetCycleSteps(m model, toggles int) int {
 	editable := 0
 	for i := fHostname; i <= fDockerProxyHost; i++ {
-		if !m.fieldLocked(i) {
+		if !m.fieldLocked(i) && !m.fieldHidden(i) {
 			editable++
 		}
 	}

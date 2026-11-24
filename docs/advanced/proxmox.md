@@ -522,7 +522,7 @@ token can't see the VM at all, which is the point.
 
 ## Start at host boot
 
-Choose what happens to a Proxmox VM when the Proxmox host boots with the *Start at boot* row in the creation or reset form. Press space, enter or the arrow keys to change it. This setting applies to Proxmox VMs only.
+Choose what happens to a Proxmox VM when the Proxmox host boots with the *Start at boot* row, below *Disk* in the creation or reset form. Press space or the left and right arrow keys to change it. This setting applies to Proxmox VMs only.
 
 | Mode | Form | CLI | When the host boots |
 | --- | --- | --- | --- |
