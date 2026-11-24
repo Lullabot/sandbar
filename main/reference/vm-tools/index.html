@@ -250,7 +250,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../getting-started/" class="md-tabs__link">
+        <a href="../../getting-started/installation/" class="md-tabs__link">
           
   
   
@@ -493,34 +493,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../getting-started/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    About sandbar
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../getting-started/installation/" class="md-nav__link">
         
   
@@ -528,7 +500,7 @@
   <span class="md-ellipsis">
     
   
-    Installation
+    Install sandbar
   
 
     
@@ -549,14 +521,70 @@
   
   
     <li class="md-nav__item">
-      <a href="../../getting-started/first-vm/" class="md-nav__link">
+      <a href="../../getting-started/quickstart/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Your first VM
+    Quickstart: a Drupal site with DDEV
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/first-pull-request/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Your first pull request
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/coding-agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sign in to your coding agent
   
 
     
@@ -1176,28 +1204,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#global-sandbar-environment-context" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Global Sandbar environment context
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#claude-code-new-session-skill" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Claude Code new-session skill
-      
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1700,28 +1706,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#global-sandbar-environment-context" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Global Sandbar environment context
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#claude-code-new-session-skill" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Claude Code new-session skill
-      
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1802,16 +1786,7 @@ covers how to reach it from your browser — locally and on a remote profile.</p
 <li>A headless JDK</li>
 </ul>
 <h2 id="coding-agents">Coding agents</h2>
-<p>The create form offers four independent checkboxes: <strong>Install Claude Code</strong>,
-<strong>Install OpenAI Codex</strong>, <strong>Install OpenCode</strong>, and <strong>Install Pi</strong>. Select any combination, including none.
-All four start unselected; after creating a VM, sandbar remembers your choices
-across connection profiles. See <a href="../files-and-state/#coding-agent-preferences-and-migration">Files and State</a>
-for persistence and migration details.</p>
-<p>Headless creation offers <code>--with-claude</code>, <code>--with-codex</code>, <code>--with-opencode</code>,
-and <code>--with-pi</code>; use <code>=false</code> to explicitly deselect an agent. Omitted agent
-flags use the remembered selection. Changing agents does not rebuild the
-shared base. Reset retains that VM's recorded selections, independently of
-the defaults for new VMs.</p>
+<p>Claude Code, OpenAI Codex, OpenCode and Pi, as selected for each VM. See <a href="../../getting-started/coding-agents/">Sign in to your coding agent</a> for choosing agents, signing in and permission modes.</p>
 <h3 id="claude-code-terminal-notifications">Claude Code terminal notifications</h3>
 <p>When creating or resetting a VM with Claude Code selected, sandbar detects the
 workstation terminal and sets Claude's native notification channel for iTerm2,
@@ -1833,79 +1808,7 @@ Claude Code policy hooks treat a machine with this file as an approved agent
 environment, so sessions there do not need per-command approval. New VMs get
 it during provisioning. Older VMs get it the next time you open a shell with
 <code>S</code> or <code>sandbar shell</code>, with no rebuild or reset.</p>
-<h3 id="global-sandbar-environment-context">Global Sandbar environment context</h3>
-<p>During provisioning of a new VM, each selected agent receives a short global
-instruction block identifying the Sandbar guest. It tells the agent that
-passwordless <code>sudo</code> is available for guest system changes within work you have
-authorized, without asking again solely because a command uses <code>sudo</code>. It does
-not replace the agent's system prompt or grant access to your workstation.</p>
-<p>The block points to the shared <code>sandbar-environment</code> skill. Its references
-cover the VM's name and connection profile type, the <code>sandbar</code> commands you run
-on your workstation (including what <code>sandbar reset</code> deletes), reaching guest
-ports from your workstation, where secrets and tokens come from, browser
-review with <code>self-review-serve</code>, tmux keys, the clipboard, and installed
-tools. Each reference links the documentation page it summarizes. The
-skill and its local references live at <code>~/.agents/skills/sandbar-environment</code>.
-Claude Code discovers the same skill through a symlink at
-<code>~/.claude/skills/sandbar-environment</code>. The instruction blocks live at:</p>
-<table>
-<thead>
-<tr>
-<th>Agent</th>
-<th>Global instruction file</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Claude Code</td>
-<td><code>~/.claude/CLAUDE.md</code></td>
-</tr>
-<tr>
-<td>Codex</td>
-<td><code>~/.codex/AGENTS.md</code></td>
-</tr>
-<tr>
-<td>Pi</td>
-<td><code>~/.pi/agent/AGENTS.md</code></td>
-</tr>
-<tr>
-<td>OpenCode</td>
-<td><code>~/.config/opencode/AGENTS.md</code></td>
-</tr>
-</tbody>
-</table>
-<p>Provisioning preserves personal text in those files and unrelated skills. It
-refreshes only Sandbar's marked block and skill files; a user-owned skill at
-the same destination causes provisioning to stop with a collision error. A VM
-with no agents selected receives no agent context. Existing running VMs are
-not updated automatically. Start a fresh agent session after provisioning to
-load the global context.</p>
-<h3 id="claude-code-new-session-skill">Claude Code <code>new-session</code> skill</h3>
-<p>A VM with Claude Code selected also gets a <code>new-session</code> skill. Ask Claude to
-"start a new session in sandbar with a prompt to fix the failing test", for
-example, and it starts a separate, detached Claude Code session in the VM that
-appears in <a href="https://code.claude.com/docs/en/remote-control">Remote Control</a>.
-This is how you open a new VM session from the Claude web or mobile app, which
-can otherwise only start cloud sessions.</p>
-<ul>
-<li>A loosely named repository is looked up in the VM's checkout layout,
-  <code>~/&lt;host&gt;/&lt;group&gt;/&lt;repo&gt;</code>.</li>
-<li>In a git repository the new session works in a fresh worktree branched from
-  <code>origin/main</code>, unless you ask it to work in the directory itself.</li>
-<li>The new session starts in the permission mode of the session that asked.</li>
-<li>The skill requires Remote Control to be on by default
-  (<code>remoteControlAtStartup</code> in <code>~/.claude/settings.json</code>). If it is off, the
-  skill starts nothing and tells you how to turn it on: answer <strong>y</strong> to the
-  launcher's Remote Control question (see
-  <a href="../../getting-started/first-vm/">Your First VM</a>), or enable it later in Claude Code's <code>/config</code>
-  screen.</li>
-</ul>
-<p>The skill is sandbar's code, so it lives outside your home at
-<code>/usr/local/share/sandbar/skills/new-session</code> and every create or reset
-installs the current copy. Claude finds it through a symlink at
-<code>~/.claude/skills/new-session</code>. If something of yours already occupies that
-path, provisioning leaves it in place, prints a warning, and continues without
-linking the skill.</p>
+<p>The global agent instructions and the <code>sandbar-environment</code> skill are described in <a href="../../getting-started/coding-agents/#what-every-agent-gets">What every agent gets</a>, and Claude Code's <code>new-session</code> skill in <a href="../../getting-started/coding-agents/#start-a-new-session-from-your-phone">Start a new session from your phone</a>.</p>
 <h2 id="git">Git</h2>
 <ul>
 <li>The <a href="https://cli.github.com/">GitHub CLI (<code>gh</code>)</a>, configured as the git

@@ -250,7 +250,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../getting-started/" class="md-tabs__link">
+        <a href="../../getting-started/installation/" class="md-tabs__link">
           
   
   
@@ -493,34 +493,6 @@
   
   
     <li class="md-nav__item">
-      <a href="../../getting-started/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    About sandbar
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
       <a href="../../getting-started/installation/" class="md-nav__link">
         
   
@@ -528,7 +500,7 @@
   <span class="md-ellipsis">
     
   
-    Installation
+    Install sandbar
   
 
     
@@ -549,14 +521,70 @@
   
   
     <li class="md-nav__item">
-      <a href="../../getting-started/first-vm/" class="md-nav__link">
+      <a href="../../getting-started/quickstart/" class="md-nav__link">
         
   
   
   <span class="md-ellipsis">
     
   
-    Your first VM
+    Quickstart: a Drupal site with DDEV
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/first-pull-request/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Your first pull request
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/coding-agents/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Sign in to your coding agent
   
 
     
@@ -1468,6 +1496,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#regenerating-the-docs-screenshots" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Regenerating the docs screenshots
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1716,6 +1755,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#regenerating-the-docs-screenshots" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Regenerating the docs screenshots
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1887,6 +1937,28 @@ a <em>live</em> board with your own VMs and real host stats, the
 <a href="https://github.com/charmbracelet/vhs">VHS</a> tape next to the image still works
 (<code>cd docs/images &amp;&amp; vhs board.tape</code>); it drives a real <code>sandbar</code> session, so keep a
 VM or two around first.</p>
+<h2 id="regenerating-the-docs-screenshots">Regenerating the docs screenshots</h2>
+<p>The board and form images on docs pages, such as the quickstart's, live under
+<code>docs/images/&lt;section&gt;/</code>. They come from <code>TestGenerateDocShots</code> in
+<code>internal/ui/docshots_test.go</code>, which renders sandbar's real screens with a fake
+provider and fixed values, so they never show your own VMs or host stats. Each
+scene reaches its screen with the same keys a reader presses, so a change that
+breaks that path fails the generator instead of leaving a stale image.</p>
+<p>Regenerate them all when the TUI's look changes, or when you add a scene:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>go install github.com/charmbracelet/freeze@v0.2.2
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>DOC_SHOTS_DIR=/tmp/docshots go test ./internal/ui/ -run TestGenerateDocShots -count=1
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>font="$(go env GOMODCACHE)"/github.com/charmbracelet/freeze@v0.2.2/font/JetBrainsMono-Regular.ttf
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>for f in /tmp/docshots/*.ansi; do
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>  out=docs/images/getting-started/$(basename "$f" .ansi).png
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>  rm -f "$out"  # freeze asks before overwriting
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>  freeze "$f" -o "$out" --font.file "$font" \
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>    --font.family "JetBrains Mono" --font.size 20 --line-height 1.6 \
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>    --background "#0d1117" --padding 24 --window --border.radius 8
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>done
+</code></pre></div>
+<p>Every scene uses a 100×30 terminal so the images line up across pages. When
+you add a scene for another section, write it to that section's folder under
+<code>docs/images/</code>.</p>
 
 
 
