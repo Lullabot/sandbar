@@ -131,7 +131,8 @@ Flags:
 	fs.BoolVar(&cfg.WithOpenCode, "with-opencode", cfg.WithOpenCode, "Install OpenCode when creating this VM (default: last submitted selection)")
 	fs.BoolVar(&cfg.WithPi, "with-pi", cfg.WithPi, "Install Pi when creating this VM (default: last submitted selection)")
 	recreate := fs.Bool("recreate", false, "Delete and re-clone the named instance if it is sandbar-managed. The older spelling of 'sandbar reset NAME', which does the same thing and can also preserve agent settings, the project, selected paths, or the whole home directory")
-	fs.BoolVar(&cfg.DisableStartAtBoot, "no-start-at-boot", false, "Disable automatic startup when the Proxmox host boots")
+	startAtBoot := fs.String("start-at-boot", vm.StartAtBootAlways, startAtBootUsage)
+	noStartAtBoot := fs.Bool("no-start-at-boot", false, "Same as --start-at-boot=never")
 	rebuild := fs.Bool("rebuild", false, "Destroy the base image and rebuild it from scratch before creating (a stale base is otherwise converged in place)")
 	templateFlag := fs.String("template", "", "Clone from a named golden template (see 'sandbar template list') instead of the shared base image; mutually exclusive with --rebuild/--base-name/--recreate")
 	profileFlag := fs.String("profile", "", "Connection profile to create on (default: the last-used profile, else \"local\")")
@@ -165,6 +166,11 @@ Flags:
 	// fieldLocked.)
 	if err := refuseRecreateWithCloneURL(*recreate, explicit, cfg.Name); err != nil {
 		return err
+	}
+	if mode, err := startAtBootFromFlags(explicit, *startAtBoot, *noStartAtBoot); err != nil {
+		return fmt.Errorf("sandbar create: %w", err)
+	} else if mode != "" {
+		_ = cfg.SetStartAtBoot(mode) // validated by startAtBootFromFlags
 	}
 
 	n, err := vm.ParseCPUs(*cpusFlag)
@@ -476,8 +482,11 @@ func adoptRecordedConfig(cfg *vm.CreateConfig, rec vm.CreateConfig, explicit map
 	if !explicit["domain"] && rec.Domain != "" {
 		cfg.Domain = rec.Domain
 	}
-	if !explicit["no-start-at-boot"] {
+	// Both start-at-boot fields adopt together: they are one setting, and
+	// adopting half of it could combine a passed mode with a recorded one.
+	if !startAtBootExplicit(explicit) {
 		cfg.DisableStartAtBoot = rec.DisableStartAtBoot
+		cfg.BootFollowsPower = rec.BootFollowsPower
 	}
 	if !explicit["docker-proxy-host"] {
 		cfg.DockerProxyHost = rec.DockerProxyHost

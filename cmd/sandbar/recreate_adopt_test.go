@@ -161,3 +161,29 @@ func TestAdoptRecordedConfigKeepsSelectedForge(t *testing.T) {
 		t.Fatalf("explicit forge overwritten: %q", cfg.CloneForge)
 	}
 }
+
+// The two start-at-boot fields are one setting: a recreate either adopts both
+// from the record or takes the mode the user passed, never half of each.
+func TestAdoptRecordedConfigStartAtBoot(t *testing.T) {
+	rec := recordedConfig()
+	if err := rec.SetStartAtBoot(vm.StartAtBootIfRunning); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := flagDefaultConfig()
+	adoptRecordedConfig(&cfg, rec, map[string]bool{})
+	if got := cfg.StartAtBoot(); got != vm.StartAtBootIfRunning {
+		t.Errorf("no flag: mode = %q, want the recorded if-running", got)
+	}
+
+	for _, flagName := range []string{"start-at-boot", "no-start-at-boot"} {
+		cfg := flagDefaultConfig()
+		if err := cfg.SetStartAtBoot(vm.StartAtBootNever); err != nil {
+			t.Fatal(err)
+		}
+		adoptRecordedConfig(&cfg, rec, map[string]bool{flagName: true})
+		if got := cfg.StartAtBoot(); got != vm.StartAtBootNever {
+			t.Errorf("--%s passed: mode = %q, want the passed never", flagName, got)
+		}
+	}
+}
