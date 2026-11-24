@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.20.0](https://github.com/Lullabot/sandbar/compare/v0.19.1...v0.20.0) (2026-11-24)
+
+
+### Features
+
+* **proxmox:** optionally restore only running VMs at host boot ([#389](https://github.com/Lullabot/sandbar/issues/389)) ([9b901c7](https://github.com/Lullabot/sandbar/commit/9b901c72961c70b44916764bb5204b371fcaab53))
+* **ui:** delete the last word of the board search with ctrl+w ([#373](https://github.com/Lullabot/sandbar/issues/373)) ([6408844](https://github.com/Lullabot/sandbar/commit/6408844253dae8c6f9cbd5ffe4fde9c02e6a0a70))
+* **ui:** toggle the board between alphabetical and running-first order ([#371](https://github.com/Lullabot/sandbar/issues/371)) ([b4e132f](https://github.com/Lullabot/sandbar/commit/b4e132ff7efab490d22e7b8de09b3e5a8c3588a0))
+
+
+### Bug Fixes
+
+* **deps:** update github.com/charmbracelet/x/exp/teatest/v2 digest to ee8f503 ([#382](https://github.com/Lullabot/sandbar/issues/382)) ([9d6f7fe](https://github.com/Lullabot/sandbar/commit/9d6f7fe9650796047f46bf5fa6dc24824092ae54))
+* **deps:** update module charm.land/bubbles/v2 to v2.2.2 ([#386](https://github.com/Lullabot/sandbar/issues/386)) ([91851b5](https://github.com/Lullabot/sandbar/commit/91851b51097700cce1a5804356c3033a87301f2f))
+* **deps:** update module charm.land/bubbletea/v2 to v2.1.2 ([#381](https://github.com/Lullabot/sandbar/issues/381)) ([6ac3edf](https://github.com/Lullabot/sandbar/commit/6ac3edf792c2b3642f7ef989427ee70dc8211169))
+* **deps:** update module charm.land/lipgloss/v2 to v2.1.1 ([#374](https://github.com/Lullabot/sandbar/issues/374)) ([c1f9cab](https://github.com/Lullabot/sandbar/commit/c1f9cab223aeecc9e294d77a91b848d57b12bc49))
+* **deps:** update module github.com/charmbracelet/x/ansi to v0.11.10 ([#383](https://github.com/Lullabot/sandbar/issues/383)) ([2bb204a](https://github.com/Lullabot/sandbar/commit/2bb204a08866ad376c9b081445d34027eb713f4e))
+* **provision:** renew the guest ssh login so the first shell has docker ([#392](https://github.com/Lullabot/sandbar/issues/392)) ([2e06c00](https://github.com/Lullabot/sandbar/commit/2e06c000e7f4c8a81541ca083262a0597174f7e9)), closes [#390](https://github.com/Lullabot/sandbar/issues/390)
+* **ui:** open the board on the first VM, not the new-VM tile ([#370](https://github.com/Lullabot/sandbar/issues/370)) ([d0f63f4](https://github.com/Lullabot/sandbar/commit/d0f63f4821b0e6ccbd0e68a4063a15cfc4b0ff80))
+
 ## [0.19.1](https://github.com/Lullabot/sandbar/compare/v0.19.0...v0.19.1) (2026-11-17)
 
 
