@@ -10,7 +10,7 @@ require (
 	charm.land/lipgloss/v2 v2.1.1
 	github.com/charmbracelet/x/ansi v0.11.10
 	github.com/charmbracelet/x/exp/golden v0.1.0
-	github.com/charmbracelet/x/exp/teatest/v2 v2.0.0-20261118134922-ee8f5034ce23
+	github.com/charmbracelet/x/exp/teatest/v2 v2.0.0-20261122002409-8aab43ea2d8f
 	github.com/ebitengine/purego v0.11.3
 	github.com/godbus/dbus/v5 v5.2.4
 	golang.org/x/sys v0.50.0
