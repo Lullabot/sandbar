@@ -279,6 +279,9 @@ Flags:
 	if err := checkBackendName(p, cfg.Name, *recreate); err != nil {
 		return fmt.Errorf("sandbar create: %w", err)
 	}
+	if err := checkBackendBaseName(p, cfg.BaseName, explicit["base-name"]); err != nil {
+		return fmt.Errorf("sandbar create: %w", err)
+	}
 
 	// Reconcile against the live instance list before acting, exactly like the
 	// TUI does on every list load — so a VM deleted outside sandbar isn't wrongly
@@ -526,6 +529,26 @@ func checkBackendName(p provider.Provider, name string, recreate bool) error {
 		return nil
 	}
 	return p.ValidateName(name)
+}
+
+// checkBackendBaseName applies the same backend rule to a --base-name the user
+// typed. The base name becomes an instance name too, and a path under the Lima
+// home: unchecked, `--base-name ..` reached a failed base build whose cleanup
+// removed the Lima home's parent, the user's home directory.
+//
+// Only a name given on the command line is checked, --recreate included: that
+// is a name the user is choosing now. A base name sandbar supplies (the
+// default, a template's instance, or the one recorded for a VM being
+// recreated) is left alone, for the reason checkBackendName exempts recreate:
+// a base that already exists was accepted by its backend when it was made.
+func checkBackendBaseName(p provider.Provider, base string, explicit bool) error {
+	if !explicit {
+		return nil
+	}
+	if err := p.ValidateName(base); err != nil {
+		return fmt.Errorf("base image name: %w", err)
+	}
+	return nil
 }
 
 // doHeadlessCreate drives the create/recreate/rebuild flow and then performs

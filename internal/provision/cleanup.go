@@ -57,6 +57,11 @@ func (p *Provisioner) cleanupInstance(name string, out io.Writer) {
 	hf := p.hostFiles()
 	dir := instanceDir(hf, name)
 	if dir == "" {
+		if name != "" && hf.LimaHome() != "" {
+			// Say so rather than return silently: the create is failing, and the
+			// user should know nothing was removed on its behalf.
+			step(out, "Not cleaning up %q: it does not name a directory inside the Lima home.", name)
+		}
 		return
 	}
 	if _, err := hf.Stat(dir); err != nil {
@@ -181,10 +186,24 @@ func tailBytes(data []byte, max int) []byte {
 // instanceDir is a Lima instance's own directory under the Lima home. "" when the
 // name is empty or the Lima home cannot be determined, which the caller reads as
 // "nothing to clean up".
+//
+// It is also "" for any name that does not resolve to a DIRECT child of the Lima
+// home. filepath.Join cleans its result, so a name of ".." is the Lima home's
+// parent — the user's home directory — and "." is the Lima home itself, holding
+// every VM. cleanupInstance hands this path to RemoveAll precisely when limactl
+// has refused the name, and limactl refuses exactly these names, so without this
+// check a base name that was never validated turned a failed create into the
+// deletion of the user's home. Names are validated where they are typed; this is
+// the guard that holds for every other caller, including a name read back from a
+// registry, a marker or a reset manifest.
 func instanceDir(hf lima.HostFiles, name string) string {
 	home := hf.LimaHome()
 	if name == "" || home == "" {
 		return ""
 	}
-	return filepath.Join(home, name)
+	dir := filepath.Join(home, name)
+	if filepath.Dir(dir) != filepath.Clean(home) || filepath.Base(dir) != name {
+		return ""
+	}
+	return dir
 }
