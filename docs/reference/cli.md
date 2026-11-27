@@ -71,7 +71,8 @@ not a prompt.
 | `--domain` | string | `lan` | Domain suffix. |
 | `--docker-proxy-host` | string | *(empty — disabled)* | Docker registry pull-through proxy host. Optional; when set, `sandbar` also forces on `devtools_docker_registry_proxy_enabled`. |
 | `--clone-url` | string | *(empty — no clone)* | HTTPS repo to clone into the VM. Optional. |
-| `--clone-token` | string | *(empty)* | GitHub or GitLab token for `--clone-url`. Optional; see [credential handling](#-clone-token-is-a-credential) below. |
+| `--clone-token` | string | *(empty)* | GitHub or GitLab token for `--clone-url`. Optional. The value is visible in this host's process list; prefer `--clone-token-file`. See [credential handling](#-clone-token-is-a-credential) below. |
+| `--clone-token-file` | path | *(empty)* | Read the token from this file, or from stdin when the path is `-`. The file must not be readable by group or other (`chmod 600`) and must be a regular file. One trailing newline is removed. Cannot be combined with `--clone-token`. See [credential handling](#-clone-token-is-a-credential) below. |
 | `--clone-forge` | string | `auto` | `auto`, `github`, or `gitlab`. Auto detects `github.com` and `gitlab.com`; select `gitlab` for self-hosted GitLab. |
 | `--recreate` | bool | `false` | Delete and re-clone `--name` if it is **sand-managed**. The older spelling of [`sandbar reset NAME`](#sandbar-reset-name), which does the same thing and can additionally preserve state — see [`--rebuild` vs `--recreate`](#-rebuild-vs-recreate). |
 | `--rebuild` | bool | `false` | Delete and rebuild the base image first, then create. |
@@ -189,12 +190,19 @@ rebuild.
 
 ### `--clone-token` is a credential
 
+`--clone-token` puts the token in the command line of the `sandbar` process on
+your workstation. Other local users can read it with `ps` or from
+`/proc/<pid>/cmdline` for as long as the command runs, which includes the whole
+build. Use `--clone-token-file` instead. It reads the token from a file that only
+you can read, or from stdin when the path is `-`, so the token never appears in
+a process listing. The same applies to `sandbar reset`.
+
 `--clone-token` (and the rest of the create-time variables) is never placed on
 a command line inside the guest. `sandbar` streams the rendered Ansible
 extra-vars — including the token, when set — over stdin into `/dev/shm`
 (tmpfs) inside the VM, writes it with mode `0600`, and removes it in an `EXIT`
 trap once the provisioning run for that phase finishes. It never touches the
-VM's persistent disk and never appears in a process listing.
+VM's persistent disk and never appears in a process listing inside the guest.
 
 ### `--rebuild` vs `--recreate`
 
@@ -253,11 +261,15 @@ sandbar create
 
 # Clone a private repo into the VM at create time.
 sandbar create --name myproj --clone-url https://github.com/org/repo.git \
-  --clone-token "$GITHUB_TOKEN"
+  --clone-token-file ~/.config/sandbar/github.token
+
+# The same, reading the token from stdin (for example from a password manager).
+op read op://Private/github/token | sandbar create --name myproj \
+  --clone-url https://github.com/org/repo.git --clone-token-file -
 
 # Clone from a self-hosted GitLab instance (explicit forge selection required).
 sandbar create --name tools --clone-url https://git.example.internal/platform/tools/app.git \
-  --clone-forge gitlab --clone-token "$GITLAB_TOKEN"
+  --clone-forge gitlab --clone-token-file ~/.config/sandbar/gitlab.token
 
 # Non-default resources, explicit identity.
 sandbar create --name big --cpus 8 --memory 16GiB --disk 200GiB \
@@ -292,7 +304,9 @@ Flags:
   -clone-forge string
 	Git service: auto detects github.com and gitlab.com; choose gitlab for self-hosted GitLab (default "auto")
   -clone-token string
-	Token for github.com or gitlab.com (self-hosted GitLab: --clone-forge gitlab; never placed on guest argv)
+	Token for github.com or gitlab.com (self-hosted GitLab: --clone-forge gitlab); visible to other local users in the process list, so prefer --clone-token-file
+  -clone-token-file PATH
+    	Read the clone token from PATH (mode 0600; - reads stdin) so it stays out of this process's argv; cannot be combined with --clone-token
   -clone-url string
     	HTTPS repo to clone into the VM (optional)
   -cpus string
@@ -525,7 +539,8 @@ before creating a VM.
 | `--domain` | string | *this VM's* | Domain suffix. |
 | `--docker-proxy-host` | string | *this VM's* | Docker registry pull-through proxy host. |
 | `--with-claude` / `--with-codex` / `--with-opencode` / `--with-pi` | bool | *this VM's* | Install that agent in the rebuilt VM. Use `=false` to remove one. Does not change the remembered choices for new VMs. |
-| `--clone-token` | string | *(empty)* | GitHub or GitLab token for this VM's recorded repo. Blank reuses the saved global GitHub or matching scoped GitLab token. An explicit token replaces the saved token after success. A restored checkout skips cloning. |
+| `--clone-token` | string | *(empty)* | GitHub or GitLab token for this VM's recorded repo. Blank reuses the saved global GitHub or matching scoped GitLab token. An explicit token replaces the saved token after success. A restored checkout skips cloning. The value is visible in this host's process list; prefer `--clone-token-file`. |
+| `--clone-token-file` | path | *(empty)* | Read the token from this file, or from stdin when the path is `-`. Same checks as on `sandbar create`. Cannot be combined with `--clone-token`. |
 | `--from-backup` | string (directory) | *(none)* | Finish a reset that failed after the VM was deleted: rebuild `NAME` and restore the backup in this directory. See [If a reset fails after the VM was deleted](#if-a-reset-fails-after-the-vm-was-deleted). |
 | `--profile` | string | *the profile that owns NAME* | Which [Connection Profile](../advanced/connection-profiles.md) `NAME` lives on. Only needed when the same name exists under more than one enabled profile. With `--from-backup`, the default is the profile recorded in the backup. |
 
@@ -592,6 +607,8 @@ There is no --clone-url: a reset rebuilds the project this VM already has. To
 work on a different repo, create another VM with 'sandbar create'.
 A blank --clone-token reuses the saved GitHub or scoped GitLab token for cloning.
 An explicit token replaces the saved token after a successful reset.
+Prefer --clone-token-file PATH (or - for stdin) to --clone-token: a value on the
+command line is visible to other local users in the process listing.
 
 A reset that loses its SSH connection (a locked SSH agent, a dropped network)
 waits up to two hours for it to come back, then finishes on its own.
@@ -617,6 +634,8 @@ Examples:
 Flags:
   -clone-token string
         Token for this VM's recorded repo (GitHub or GitLab); blank reuses its saved token
+  -clone-token-file PATH
+    	Read the clone token from PATH (mode 0600; - reads stdin) so it stays out of this process's argv; cannot be combined with --clone-token
   -cpus string
     	vCPUs (default: whatever this VM has)
   -disk string

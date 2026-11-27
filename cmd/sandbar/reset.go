@@ -66,6 +66,7 @@ type resetOptions struct {
 	preservePaths   repeatedString
 	fromBackup      string
 	profile         string
+	cloneTokenFile  string
 	values          resetFlagValues
 }
 
@@ -120,6 +121,7 @@ func newResetFlagSet(o *resetOptions) *flag.FlagSet {
 	fs.StringVar(&o.values.domain, "domain", "", "Domain suffix (default: whatever this VM has)")
 	fs.StringVar(&o.values.dockerProxy, "docker-proxy-host", "", "Docker registry pull-through proxy host (default: whatever this VM has)")
 	fs.StringVar(&o.values.cloneToken, "clone-token", "", "Token for this VM's recorded repo (GitHub or GitLab); blank reuses its saved token")
+	fs.StringVar(&o.cloneTokenFile, "clone-token-file", "", "Read the clone token from `PATH` (mode 0600; - reads stdin) so it stays out of this process's argv; cannot be combined with --clone-token")
 	// Agents install per VM during finalize, so a reset may change them without
 	// touching the shared base. Each flag defaults to the VM's recorded choice;
 	// unlike create, the remembered global preference plays no part here.
@@ -163,6 +165,8 @@ There is no --clone-url: a reset rebuilds the project this VM already has. To
 work on a different repo, create another VM with 'sandbar create'.
 A blank --clone-token reuses the saved GitHub or scoped GitLab token for cloning.
 An explicit token replaces the saved token after a successful reset.
+Prefer --clone-token-file PATH (or - for stdin) to --clone-token: a value on the
+command line is visible to other local users in the process listing.
 
 A reset that loses its SSH connection (a locked SSH agent, a dropped network)
 waits up to two hours for it to come back, then finishes on its own.
@@ -207,6 +211,13 @@ func resetParsed(fs *flag.FlagSet, o *resetOptions) error {
 
 	explicit := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+
+	// Before any backend is contacted, so a bad token file fails fast.
+	cloneToken, err := resolveCloneToken(o.values.cloneToken, o.cloneTokenFile, explicit["clone-token"], explicit["clone-token-file"])
+	if err != nil {
+		return fmt.Errorf("sandbar reset: %w", err)
+	}
+	o.values.cloneToken = cloneToken
 
 	store := loadStore()
 	reg, loadErr := registry.Load()

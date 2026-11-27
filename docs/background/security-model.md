@@ -83,10 +83,13 @@ tenant or a determined attacker.
   Selecting them installs the CLI, without importing host authentication.
   Claude's session hooks remain Claude-specific; the image-only clipboard
   integration is shared by all four agents.
-- **Credentials never touch argv.** A `--clone-token` and every secret value
-  are streamed into the guest over stdin into tmpfs and removed via an exit
-  trap — never passed as a command-line argument — so they cannot appear in
-  a host or guest process listing.
+- **Credentials never touch argv inside the guest.** A clone token and every
+  secret value are streamed into the guest over stdin into tmpfs and removed
+  via an exit trap, so they cannot appear in a guest process listing. On your
+  workstation, `--clone-token VALUE` is part of the `sandbar` process's command
+  line, which other local users can read with `ps` for the length of the build.
+  Pass the token with `--clone-token-file` (a file only you can read, or `-`
+  for stdin) to keep it out of the host process listing.
 - **Host-side secrets are stored unencrypted at `0600`.** See
   [Files and State](../reference/files-and-state.md) for the path and what deleting it
   costs. Treat that file as sensitive: anyone who can read your user

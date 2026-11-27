@@ -161,7 +161,7 @@ in the damage it can do. See further details in the
 ### Supplying it and where it lands
 
 Provide the token at VM-create time — the TUI's `Clone token` field or
-`sandbar create --clone-token` — alongside a repository URL. GitHub URLs select
+`sandbar create --clone-token-file` — alongside a repository URL. GitHub URLs select
 GitHub automatically; `gitlab.com` selects GitLab automatically. For a
 self-hosted GitLab URL, choose GitLab in the form or pass
 `--clone-forge gitlab`. `--clone-forge` also accepts `auto` (the default) and

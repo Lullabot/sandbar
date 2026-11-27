@@ -118,7 +118,8 @@ Flags:
 	fs.StringVar(&cfg.DockerProxyHost, "docker-proxy-host", cfg.DockerProxyHost, "Docker registry pull-through proxy host (optional)")
 	fs.StringVar(&cfg.CloneURL, "clone-url", cfg.CloneURL, "HTTPS repo to clone into the VM (optional)")
 	fs.StringVar(&cfg.CloneForge, "clone-forge", "auto", "Git service: auto detects github.com and gitlab.com; choose gitlab for self-hosted GitLab")
-	fs.StringVar(&cfg.CloneToken, "clone-token", cfg.CloneToken, "Token for github.com or gitlab.com (self-hosted GitLab: --clone-forge gitlab; never placed on guest argv)")
+	fs.StringVar(&cfg.CloneToken, "clone-token", cfg.CloneToken, "Token for github.com or gitlab.com (self-hosted GitLab: --clone-forge gitlab); visible to other local users in the process list, so prefer --clone-token-file")
+	cloneTokenFile := fs.String("clone-token-file", "", "Read the clone token from `PATH` (mode 0600; - reads stdin) so it stays out of this process's argv; cannot be combined with --clone-token")
 	// DDEV, Go and Java ship in the published base image, so there is nothing to
 	// choose. The flags are still accepted (and ignored) so existing scripts and
 	// CI invocations keep working rather than failing on an unknown flag.
@@ -157,6 +158,12 @@ Flags:
 	// VM already was" rather than this flag set's default.
 	explicit := map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+
+	cloneToken, err := resolveCloneToken(cfg.CloneToken, *cloneTokenFile, explicit["clone-token"], explicit["clone-token-file"])
+	if err != nil {
+		return fmt.Errorf("sandbar create: %w", err)
+	}
+	cfg.CloneToken = cloneToken
 
 	// A recreate is a reset, and a reset never changes which project the VM has.
 	// The two settings mean opposite things — "rebuild this VM" and "make it a
