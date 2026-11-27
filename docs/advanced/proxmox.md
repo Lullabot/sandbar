@@ -464,6 +464,17 @@ Existing VMs keep the disk settings they were created with. To apply these
 settings, rebuild the base template with `sandbar create --rebuild`, then reset
 or recreate the VM from it.
 
+## The base template is shared
+
+The base template belongs to the pool, not to one workstation. `sandbar` records the version it built the template from in the template's *Notes* field, inside a block marked `sandbar:begin` and `sandbar:end`. Text you write in *Notes* stays as it is. `sandbar` does not add the `sandbar` tag, so the template never appears on the board.
+
+Every workstation that uses the pool reads that version on `sandbar create` and `sandbar reset`. It rebuilds the template only when the recorded version differs from the one it would build now, or when you pass `--rebuild`. Deleting the local state directory, or creating a VM from a second workstation, does not rebuild a current template.
+
+A template with no recorded version, such as one built by an older `sandbar`, is handled like this:
+
+- If this workstation has a matching local stamp, `sandbar` copies the version into the template's *Notes*. It writes the same field as the markers on your VMs, so the role in this guide is enough.
+- If nothing records the version, `sandbar` uses the template as it is and prints that its version is unknown. VMs cloned from it have no recorded base version either. Run `sandbar create --rebuild` to refresh the template and record its version.
+
 ## A separate pool for automated tests
 
 If you run `sandbar`'s opt-in end-to-end test suite (or otherwise want a throwaway

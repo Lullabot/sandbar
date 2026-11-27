@@ -464,7 +464,14 @@ func TestProxmoxCreateRegeneratesCloudInitAfterWrite(t *testing.T) {
 		t.Fatalf("successful create did not capture source/setup revisions: base=%q setup=%q", capturedBase, capturedSetup)
 	}
 
-	got := rec.ci()
+	// The base build's own version stamp is a config write on the base VM (100);
+	// this test is about the clone's cloud-init sequence.
+	var got []string
+	for _, c := range rec.ci() {
+		if !strings.HasSuffix(c, ":100") {
+			got = append(got, c)
+		}
+	}
 	want := []string{"config-write:101", "cloudinit-regen:101"}
 	if len(got) < len(want) {
 		t.Fatalf("cloud-init call sequence = %v; want a write then a regenerate %v", got, want)
@@ -1136,8 +1143,8 @@ func TestProxmoxCreateCleansUpWhenCloneResizeFails(t *testing.T) {
 }
 
 // TestProxmoxCreateRebuildsStaleBase covers ensureBaseTemplate's "base exists
-// but is stale" branch: an existing base template with no recorded playbook
-// version is destroyed and rebuilt before the clone. This is also the path that
+// but is stale" branch: an existing base template stamped with an older version
+// is destroyed and rebuilt before the clone. This is also the path that
 // exercises destroyVM (stop-if-running then purge).
 func TestProxmoxCreateRebuildsStaleBase(t *testing.T) {
 	m := newPVEMock(t)
@@ -1145,7 +1152,7 @@ func TestProxmoxCreateRebuildsStaleBase(t *testing.T) {
 	registerBaseBuild(m, rec)
 
 	// The base template already exists (VMID 100, running so destroyVM must stop
-	// it first). No version stamp is written, so baseStale reports it stale.
+	// it first). Its only stamp is an older local one, so baseStale reports it stale.
 	m.data("/cluster/resources", `[
 	  {"vmid":100,"name":"sandbar-base","node":"pve1","pool":"sandbar","status":"running","type":"qemu","template":1}
 	]`)
@@ -1160,6 +1167,9 @@ func TestProxmoxCreateRebuildsStaleBase(t *testing.T) {
 	})
 
 	p := newCreateProvider(t, m)
+	if err := provision.WriteBaseVersion(p.files, "sandbar-base", "an-older-image"+templateGeneration, time.Now()); err != nil {
+		t.Fatal(err)
+	}
 	if err := p.Create(context.Background(), webConfig(), provision.CreateOptions{}, nil); err != nil {
 		t.Fatalf("Create over a stale base: %v", err)
 	}
@@ -1500,6 +1510,7 @@ func TestProxmoxBaseBuildResetsMachineIdentityBeforeTemplating(t *testing.T) {
 // current templateVersion reads as current.
 func TestProxmoxTemplateGenerationInvalidatesPreFixTemplates(t *testing.T) {
 	m := newPVEMock(t)
+	m.data("/nodes/pve1/qemu/100/config", `{}`) // a template with no server-side stamp
 	stubProvisioning(t)
 	p := newProxmoxForTest(t, m)
 
@@ -1514,7 +1525,7 @@ func TestProxmoxTemplateGenerationInvalidatesPreFixTemplates(t *testing.T) {
 	if err := provision.WriteBaseVersion(p.files, "sandbar-base", preFix, time.Now()); err != nil {
 		t.Fatalf("WriteBaseVersion: %v", err)
 	}
-	stale, why := p.baseStale(webConfig())
+	stale, why := p.baseStale(context.Background(), 100, webConfig(), nil)
 	if !stale {
 		t.Fatal("a template stamped before the identity reset was judged current; it must rebuild")
 	}
@@ -1529,7 +1540,7 @@ func TestProxmoxTemplateGenerationInvalidatesPreFixTemplates(t *testing.T) {
 	if err := provision.WriteBaseVersion(p.files, "sandbar-base", current, time.Now()); err != nil {
 		t.Fatalf("WriteBaseVersion: %v", err)
 	}
-	if stale, why := p.baseStale(webConfig()); stale {
+	if stale, why := p.baseStale(context.Background(), 100, webConfig(), nil); stale {
 		t.Fatalf("a template stamped with the current version was judged stale (%s); it must be reused", why)
 	}
 }

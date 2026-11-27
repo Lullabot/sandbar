@@ -33,6 +33,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -50,6 +51,7 @@ import (
 	"github.com/lullabot/sandbar/internal/profiles"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/pve"
+	"github.com/lullabot/sandbar/internal/version"
 	"github.com/lullabot/sandbar/internal/vm"
 )
 
@@ -220,9 +222,10 @@ func (p *proxmoxProvider) ensureBaseAndClone(ctx context.Context, cfg vm.CreateC
 	}
 	cloneVMID, err := p.cloneFromTemplate(ctx, templateVMID, cfg, out)
 	if err == nil && opts.OnSourceRevision != nil {
-		revision := provision.ReadBaseVersion(p.files, cloneSource)
-		if opts.TemplateSource != "" {
-			revision = ""
+		var revision string
+		if opts.TemplateSource == "" {
+			revision = p.baseRevision(ctx, templateVMID, cloneSource)
+		} else {
 			if marker, ok, e := p.ProvenanceOf(ctx, cloneSource); e == nil && ok {
 				revision = marker.BaseRevision
 			}
@@ -230,6 +233,18 @@ func (p *proxmoxProvider) ensureBaseAndClone(ctx context.Context, cfg vm.CreateC
 		opts.OnSourceRevision(revision)
 	}
 	return cloneVMID, err
+}
+
+// baseRevision is the version the base template was built from, as recorded in
+// the VM a clone starts: the template's own stamp, else this workstation's, else
+// "" — unknown. It must never be filled in with the wanted version, because a
+// VM whose base revision reads as current would never be offered a reset after
+// the template it came from fell behind.
+func (p *proxmoxProvider) baseRevision(ctx context.Context, vmid int, name string) string {
+	if v, _, err := p.readServerBaseStamp(ctx, vmid); err == nil && v != "" {
+		return v
+	}
+	return provision.ReadBaseVersion(p.files, name)
 }
 
 // resolveCloneSource makes the clone source template exist and be current, and
@@ -306,7 +321,7 @@ func (p *proxmoxProvider) ensureBaseTemplate(ctx context.Context, cfg vm.CreateC
 		case opts.Rebuild:
 			progress(out, "Rebuilding base template %s from scratch (requested)\n", cfg.BaseName)
 		default:
-			if stale, why := p.baseStale(cfg); stale {
+			if stale, why := p.baseStale(ctx, vmid, cfg, out); stale {
 				progress(out, "Base template %s is stale (%s); rebuilding it from scratch\n", cfg.BaseName, why)
 				rebuild = true
 			}
@@ -341,25 +356,108 @@ func (p *proxmoxProvider) lookupTemplate(ctx context.Context, name string) (vmid
 }
 
 // baseStale reports whether the existing template was built from a different
-// version — source image or template preparation (see
-// templateGeneration) — than the one that would be used now, and a short
-// reason. A missing/unreadable stamp counts as stale (build it once with a
-// stamp); a version-lookup failure counts as NOT stale (reuse rather than
-// churn), matching the Lima flow's posture.
-func (p *proxmoxProvider) baseStale(cfg vm.CreateConfig) (bool, string) {
+// version — source image or template preparation (see templateGeneration) —
+// than the one that would be used now, and a short reason.
+//
+// The template is shared, server-side state that every controller of the pool
+// sees, so the version it was built from is read from the template itself (a
+// fenced block in its description, see readServerBaseStamp), never from a file
+// on this workstation alone. A local-only stamp made a second laptop, a wiped
+// state directory or a CI runner read a current template as stale and destroy
+// it, possibly under another controller's clone. In order:
+//
+//   - A server stamp is the truth: stale iff it differs from the wanted
+//     version. The local file is refreshed from it and stays a cache.
+//   - No server stamp but a local one (a template this workstation built with
+//     an older sandbar): judged by the local stamp, and a current one is copied
+//     onto the template so other controllers can see it.
+//   - Neither: the version is UNKNOWN. The template is used as it is, never
+//     destroyed and never stamped current, because a stamp on a template this
+//     run did not build would be a false record. `--rebuild` refreshes it.
+//
+// A failure to read the template's config counts as NOT stale (reuse rather than
+// churn), like a failure to compute the wanted version, matching the Lima flow's
+// posture. The caller holds the base lock, so the read-then-act is not raced by
+// another process on this workstation.
+func (p *proxmoxProvider) baseStale(ctx context.Context, vmid int, cfg vm.CreateConfig, out io.Writer) (bool, string) {
 	want, err := p.templateVersion(cfg)
 	if err != nil {
 		return false, ""
 	}
-	have := provision.ReadBaseVersion(p.files, cfg.BaseName)
-	switch {
-	case have == want:
+	server, desc, err := p.readServerBaseStamp(ctx, vmid)
+	if err != nil {
+		progress(out, "Note: could not read base template %s's recorded version (%v); reusing it\n", cfg.BaseName, err)
 		return false, ""
-	case have == "":
-		return true, "it has no recorded image version"
-	default:
+	}
+	local := provision.ReadBaseVersion(p.files, cfg.BaseName)
+
+	if server != "" {
+		if local != server {
+			p.cacheBaseVersion(cfg.BaseName, server, out)
+		}
+		if server == want {
+			return false, ""
+		}
 		return true, "the source image or template preparation has changed since it was built"
 	}
+
+	if local != "" {
+		if local != want {
+			return true, "the source image or template preparation has changed since it was built"
+		}
+		if err := p.writeServerBaseStamp(ctx, vmid, cfg, desc, want); err != nil {
+			progress(out, "Note: could not record base template %s's version on the template itself (%v); other controllers will not see it\n", cfg.BaseName, err)
+		}
+		return false, ""
+	}
+
+	progress(out, "Base template %s has no recorded version, so its freshness is unknown to this workstation; using it as it is. Run `sandbar create --rebuild` to refresh it.\n", cfg.BaseName)
+	return false, ""
+}
+
+// cacheBaseVersion refreshes the local stamp file from a server stamp. The file
+// is a cache of the template's own record, so a failed write is only noted.
+func (p *proxmoxProvider) cacheBaseVersion(name, version string, out io.Writer) {
+	if err := provision.WriteBaseVersion(p.files, name, version, time.Now()); err != nil {
+		progress(out, "Note: could not cache base template %s's version locally (%v)\n", name, err)
+	}
+}
+
+// readServerBaseStamp returns the version recorded in the template's own
+// description ("" when it has none) and the whole description, so a writer can
+// splice the block in without touching operator text around it.
+func (p *proxmoxProvider) readServerBaseStamp(ctx context.Context, vmid int) (version, description string, err error) {
+	conf, err := p.client.GetConfig(ctx, vmid)
+	if err != nil {
+		return "", "", err
+	}
+	description, _ = conf["description"].(string)
+	if pv, ok := decodeProvenanceBlock(description); ok {
+		version = pv.BaseRevision
+	}
+	return version, description, nil
+}
+
+// writeServerBaseStamp records stamp in the template's description, in the
+// same fenced block golden templates use for their source revision. It writes
+// the description key only, so tags and any operator text are left alone, and it
+// deliberately does not add the sandbar tag: a template is a clone source and
+// must not become a tile on the board. The block carries no create config, so no
+// git identity lands on a template every controller can read.
+func (p *proxmoxProvider) writeServerBaseStamp(ctx context.Context, vmid int, cfg vm.CreateConfig, description, stamp string) error {
+	pv := Provenance{
+		SchemaVersion:  MarkerSchemaVersion,
+		Base:           cfg.BaseName,
+		SandbarVersion: version.String(""),
+		CreatedAt:      time.Now().UTC().Format(time.RFC3339),
+		BaseRevision:   stamp,
+	}
+	pv.Config.Name = cfg.BaseName
+	payload, err := json.Marshal(pv)
+	if err != nil {
+		return err
+	}
+	return p.client.SetConfigSync(ctx, vmid, url.Values{"description": {spliceDescriptionBlock(description, payload)}})
 }
 
 // buildBaseTemplate creates the base VM from the baked image, boots it to
@@ -441,6 +539,11 @@ func (p *proxmoxProvider) provisionBase(ctx context.Context, vmid int, cfg vm.Cr
 	if err := p.stop(ctx, cfg.BaseName, out); err != nil {
 		return err
 	}
+	// Record the version on the VM itself so every controller of this pool can
+	// judge the template, not just this workstation. This is written BEFORE the
+	// conversion, while the VM is still an ordinary one whose config PUT is known
+	// to work; a build that fails after this point deletes the VM, stamp included.
+	p.stampBaseOnServer(ctx, vmid, cfg, out)
 	progress(out, "Converting %s to a template\n", cfg.BaseName)
 	tUPID, err := p.client.ConvertToTemplate(ctx, vmid)
 	if err != nil {
@@ -450,8 +553,8 @@ func (p *proxmoxProvider) provisionBase(ctx context.Context, vmid int, cfg vm.Cr
 		return fmt.Errorf("proxmox: converting %s to a template: %w", cfg.BaseName, err)
 	}
 	// Stamp the image version this base was built from so a later create can
-	// detect drift and rebuild. Best-effort: an unstamped base simply reads as
-	// stale and is rebuilt next time.
+	// detect drift and rebuild. Best-effort: a base without a stamp reads as
+	// unknown and is reused as it is until `--rebuild`.
 	p.stampBaseVersion(cfg, out)
 	return nil
 }
@@ -577,13 +680,31 @@ func (p *proxmoxProvider) ensureCloudImage(ctx context.Context, out io.Writer) (
 // templateVersion baseStale compares against, so what is stamped is exactly
 // what is judged. Best-effort, exactly like the Lima flow.
 func (p *proxmoxProvider) stampBaseVersion(cfg vm.CreateConfig, out io.Writer) {
-	version, err := p.templateVersion(cfg)
+	want, err := p.templateVersion(cfg)
 	if err != nil {
-		progress(out, "Note: could not compute the base template's image version (%v); it will rebuild on the next create\n", err)
+		progress(out, "Note: could not compute the base template's image version (%v); its version will read as unknown\n", err)
 		return
 	}
-	if err := provision.WriteBaseVersion(p.files, cfg.BaseName, version, time.Now()); err != nil {
-		progress(out, "Note: could not record the base template's image version (%v); it will rebuild on the next create\n", err)
+	if err := provision.WriteBaseVersion(p.files, cfg.BaseName, want, time.Now()); err != nil {
+		progress(out, "Note: could not record the base template's image version locally (%v)\n", err)
+	}
+}
+
+// stampBaseOnServer is the server-side half of stampBaseVersion: the same
+// version, written into the base VM's description. Best-effort — the local file
+// still covers this workstation, and other controllers read the template as
+// unknown rather than stale.
+func (p *proxmoxProvider) stampBaseOnServer(ctx context.Context, vmid int, cfg vm.CreateConfig, out io.Writer) {
+	want, err := p.templateVersion(cfg)
+	if err != nil {
+		return
+	}
+	_, desc, err := p.readServerBaseStamp(ctx, vmid)
+	if err == nil {
+		err = p.writeServerBaseStamp(ctx, vmid, cfg, desc, want)
+	}
+	if err != nil {
+		progress(out, "Note: could not record the base template's version on the template itself (%v); other controllers will see it as unknown\n", err)
 	}
 }
 
