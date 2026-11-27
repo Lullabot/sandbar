@@ -399,6 +399,7 @@ func (m *model) openResetForm(scope registry.Scope, name string, cfg vm.CreateCo
 	m.hostDiskFree = freeDiskBytes()
 	m.formStartAtBoot = cfg.StartAtBoot()
 	m.resetMode = true
+	m.resetUnrecorded = false // the caller sets it after opening, from manage.Recorded
 	m.resetName = cfg.Name
 	m.resetBaseName = cfg.BaseName
 	m.resetCloneURL = cfg.CloneURL
@@ -1433,6 +1434,10 @@ func (m model) submitReset(cfg vm.CreateConfig) (tea.Model, tea.Cmd) {
 		opts.PreserveAgents = m.preserveAgents
 		opts.PreserveProject = m.preserveProject && m.projectToggleEnabled
 		opts.PreservePaths = m.selectedPreservePaths()
+	}
+	if err := manage.RefuseUnrecordedPreserve(cfg.Name, !m.resetUnrecorded, opts); err != nil {
+		m.formErr = err
+		return m, nil
 	}
 	// A VM whose registry entry carries golden-template provenance
 	// (registry.AddScopedWithTemplate — the create form's source selector, or

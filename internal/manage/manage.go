@@ -20,6 +20,7 @@ import (
 	"fmt"
 
 	"github.com/lullabot/sandbar/internal/provider"
+	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 )
@@ -76,25 +77,104 @@ func Reconcile(reg *registry.Registry, live []vm.VM, scope registry.Scope) ([]st
 // NEITHER a marker NOR a registry entry is found for name under scope —
 // recreate must never run against an unmanaged/unknown VM.
 func RecreateBase(reg *registry.Registry, name string, scope registry.Scope, prov ...provider.Provenancer) (base string, ok bool) {
-	if p := firstProvenancer(prov); p != nil {
-		if pv, found, err := p.ProvenanceOf(context.Background(), name); err == nil && found {
-			if pv.Base != "" {
-				return pv.Base, true
+	rec, ok, _ := Recorded(context.Background(), reg, name, scope, firstProvenancer(prov))
+	return rec.Base, ok
+}
+
+// RecordedVM is what a rebuild of an existing managed VM starts from: the base
+// it clones and the configuration it was last built with.
+type RecordedVM struct {
+	// Base is the image to clone from, resolved exactly as RecreateBase
+	// resolves it (it never comes back empty for a managed VM).
+	Base string
+	// Config is the VM's recorded create configuration, with BaseName set to
+	// Base. It never holds a CloneToken: neither the marker nor the registry
+	// stores one. Zero when HasConfig is false.
+	Config vm.CreateConfig
+	// HasConfig reports that Config came from a record rather than being
+	// absent. A VM can be managed with no usable config: an index entry from
+	// before configs were recorded, or a marker adopted from one.
+	HasConfig bool
+}
+
+// Recorded resolves name's base AND recorded configuration in one read, for
+// every entrypoint that rebuilds an existing VM (`sandbar reset`, `sandbar
+// create --recreate`, the TUI's reset form). ok is false exactly when
+// RecreateBase refuses: neither a marker nor a registry entry claims name.
+//
+// The marker is consulted first for the config as well as the base, because it
+// is the record every controller of the host can see. Reading the config from
+// the local registry alone meant a VM managed only by its marker — created by
+// another controller on a shared profile, or one whose index entry was lost —
+// passed the reset gate and was then rebuilt from defaults: no project clone,
+// default sizing, no agents, and RecordSuccess then wrote that loss back into
+// the marker, making it permanent. The registry remains the fallback for a
+// marker-less (legacy) instance, and for a marker whose config is empty.
+//
+// prov may be nil (registry only), which is also what makes this safe to call
+// with no I/O.
+//
+// markerErr is a failed marker read. The result is still filled from the
+// registry, as RecreateBase always has, but a caller about to destroy the VM
+// should refuse on it: the registry may hold nothing, or something older than
+// the marker it could not read, and a rebuild from that is the loss this
+// function exists to prevent.
+func Recorded(ctx context.Context, reg *registry.Registry, name string, scope registry.Scope, prov provider.Provenancer) (rec RecordedVM, ok bool, markerErr error) {
+	managed := false
+	if prov != nil {
+		pv, found, err := prov.ProvenanceOf(ctx, name)
+		markerErr = err
+		if err == nil && found {
+			managed = true
+			rec.Base = pv.Base
+			if pv.Config.Name != "" {
+				rec.Config, rec.HasConfig = pv.Config, true
 			}
-			return vm.DefaultCreateConfig().BaseName, true
 		}
 	}
 
-	// legacy, remove after one release: registry fallback for a marker-less
-	// instance (see the doc comment above).
-	b, managed := reg.BaseInScope(name, scope)
 	if !managed {
-		return "", false
+		// legacy, remove after one release: registry fallback for a
+		// marker-less instance (see RecreateBase's doc comment).
+		b, inRegistry := reg.BaseInScope(name, scope)
+		if !inRegistry {
+			return RecordedVM{}, false, markerErr
+		}
+		rec.Base = b
 	}
-	if b != "" {
-		return b, true
+	if !rec.HasConfig {
+		if cfg, found := reg.ConfigInScope(name, scope); found && cfg.Name != "" {
+			rec.Config, rec.HasConfig = cfg, true
+		}
 	}
-	return vm.DefaultCreateConfig().BaseName, true
+	if rec.Base == "" {
+		rec.Base = vm.DefaultCreateConfig().BaseName
+	}
+	if rec.HasConfig {
+		rec.Config.Name = name
+		rec.Config.BaseName = rec.Base
+		rec.Config.CloneToken = ""
+	}
+	return rec, true, markerErr
+}
+
+// RefuseUnrecordedPreserve rejects a reset that asks to keep something from a
+// VM with no recorded configuration. Without a record the rebuild would run
+// from defaults: --preserve-project has no project to name and archives
+// nothing, without saying so, and a whole-home or agents restore would land in
+// a VM sized and configured unlike the one it came from, after the original
+// was already deleted. Refusing here, before anything is staged or deleted,
+// leaves the VM untouched. A plain reset still proceeds: it discards the
+// guest's contents by definition, and refusing it would leave no entrypoint
+// able to rebuild such a VM at all.
+func RefuseUnrecordedPreserve(name string, hasConfig bool, opts provision.ResetOptions) error {
+	if hasConfig {
+		return nil
+	}
+	if !opts.PreserveAgents && !opts.PreserveProject && !opts.PreserveHome && len(opts.PreservePaths) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%q has no recorded configuration (neither its provenance marker nor this machine's managed index holds one), so a reset would rebuild it from defaults; refusing to preserve anything into that rebuild. Reset it without preserve options, or copy what you need out of the VM first", name)
 }
 
 // RecordSuccess records cfg as a managed VM owned by scope after a successful

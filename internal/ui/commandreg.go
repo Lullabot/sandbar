@@ -246,7 +246,16 @@ var vmCommands = []vmCommand{
 		},
 		action: func(m *model, v boardVM) tea.Cmd {
 			name := v.Name
-			base, ok := manage.RecreateBase(m.reg, name, v.scope, provenancerFor(*m, v.scope))
+			// The same record `sandbar reset` rebuilds from (manage.Recorded):
+			// the provenance marker first, then this machine's index, so a VM
+			// another controller created resets with its own project and sizing.
+			rec, ok, markerErr := manage.Recorded(context.Background(), m.reg, name, v.scope, provenancerFor(*m, v.scope))
+			if markerErr != nil {
+				// The index may know nothing of this VM, or an older config than
+				// the marker; a form pre-filled from it would rebuild the wrong VM.
+				m.logMsg("reset " + name + ": could not read its recorded configuration: " + markerErr.Error())
+				return nil
+			}
 			if !ok {
 				// Unreachable via normal dispatch — enabledFor above already excludes
 				// this VM. Guarded anyway so a direct call never opens a form with a
@@ -256,20 +265,23 @@ var vmCommands = []vmCommand{
 			// Pre-fill the reset form from the VM's recorded config (sizing,
 			// hostname, identity) rather than resetting to defaults. The clone
 			// token is not stored, so a VM that cloned a private repo will need it
-			// re-supplied. Fall back to a minimal config if no snapshot exists
-			// (e.g. a pre-snapshot index entry).
-			cfg, found := m.reg.ConfigInScope(name, v.scope)
-			if !found || cfg.Name == "" {
+			// re-supplied. Fall back to a minimal config if nothing recorded one
+			// (e.g. a pre-snapshot index entry); submitReset then refuses any
+			// preserve option, as `sandbar reset` does.
+			cfg := rec.Config
+			if !rec.HasConfig {
 				cfg = vm.DefaultCreateConfig()
 				cfg.Name = name
 				cfg.User = hostUser()
 				cfg.GitName = hostGit("user.name")
 				cfg.GitEmail = hostGit("user.email")
 			}
-			cfg.BaseName = base
+			cfg.BaseName = rec.Base
 			// A reset targets the VM's OWN member — the form's provider, host
 			// defaults and bookkeeping resolve through v.scope, not the active one.
-			return m.openResetForm(v.scope, name, cfg)
+			cmd := m.openResetForm(v.scope, name, cfg)
+			m.resetUnrecorded = !rec.HasConfig
+			return cmd
 		},
 	},
 	{

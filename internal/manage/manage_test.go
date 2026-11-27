@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/lullabot/sandbar/internal/provider"
+	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
 )
@@ -418,5 +419,86 @@ func TestRecreateBase_FallsBackToRegistryWhenProvenanceUnreadable(t *testing.T) 
 	}
 	if base != "registry-base" {
 		t.Fatalf("RecreateBase(provenance read error) base = %q, want registry fallback %q", base, "registry-base")
+	}
+}
+
+// TestRecorded is the record every rebuild of an existing VM starts from. The
+// marker's config wins (it is what every controller of the host can see); the
+// index fills in for a marker-less VM or a marker with no config; a failed
+// marker read still fills from the index, as RecreateBase always has, but is
+// reported so a destructive caller can refuse.
+func TestRecorded(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	markerCfg := vm.CreateConfig{Name: "web", BaseName: "marker-base", CloneURL: "https://github.com/octocat/hello", Disk: "300GiB", WithPi: true}
+	indexCfg := vm.CreateConfig{Name: "web", BaseName: "index-base", CloneURL: "https://github.com/octocat/old", Disk: "100GiB"}
+
+	t.Run("marker only", func(t *testing.T) {
+		prov := newFakeProvenancer()
+		prov.markers["web"] = provider.NewProvenance(markerCfg, false)
+		rec, ok, err := Recorded(context.Background(), registry.NewEmpty(), "web", registry.LocalScope, prov)
+		if err != nil || !ok || !rec.HasConfig || rec.Base != "marker-base" {
+			t.Fatalf("Recorded = %+v, %v, %v", rec, ok, err)
+		}
+		if rec.Config.CloneURL != markerCfg.CloneURL || rec.Config.Disk != "300GiB" || !rec.Config.WithPi || rec.Config.BaseName != "marker-base" {
+			t.Errorf("config = %+v, want the marker's", rec.Config)
+		}
+	})
+	t.Run("marker over index", func(t *testing.T) {
+		reg := registry.NewEmpty()
+		if err := reg.Add(indexCfg); err != nil {
+			t.Fatal(err)
+		}
+		prov := newFakeProvenancer()
+		prov.markers["web"] = provider.NewProvenance(markerCfg, false)
+		rec, _, _ := Recorded(context.Background(), reg, "web", registry.LocalScope, prov)
+		if rec.Config.CloneURL != markerCfg.CloneURL || rec.Base != "marker-base" {
+			t.Errorf("config = %+v base %q, want the marker's", rec.Config, rec.Base)
+		}
+	})
+	t.Run("marker without config falls back to index", func(t *testing.T) {
+		reg := registry.NewEmpty()
+		if err := reg.Add(indexCfg); err != nil {
+			t.Fatal(err)
+		}
+		prov := newFakeProvenancer()
+		prov.markers["web"] = provider.Provenance{Base: "marker-base"}
+		rec, ok, _ := Recorded(context.Background(), reg, "web", registry.LocalScope, prov)
+		if !ok || !rec.HasConfig || rec.Config.CloneURL != indexCfg.CloneURL || rec.Config.BaseName != "marker-base" {
+			t.Errorf("Recorded = %+v, %v; want the index's config on the marker's base", rec, ok)
+		}
+	})
+	t.Run("nothing recorded", func(t *testing.T) {
+		prov := newFakeProvenancer()
+		prov.markers["web"] = provider.Provenance{}
+		rec, ok, _ := Recorded(context.Background(), registry.NewEmpty(), "web", registry.LocalScope, prov)
+		if !ok || rec.HasConfig || rec.Base != vm.DefaultCreateConfig().BaseName {
+			t.Errorf("Recorded = %+v, %v; want managed, no config, default base", rec, ok)
+		}
+	})
+	t.Run("unreadable marker", func(t *testing.T) {
+		reg := registry.NewEmpty()
+		if err := reg.Add(indexCfg); err != nil {
+			t.Fatal(err)
+		}
+		prov := newFakeProvenancer()
+		prov.readErr = errors.New("host unreachable")
+		rec, ok, err := Recorded(context.Background(), reg, "web", registry.LocalScope, prov)
+		if err == nil || !ok || rec.Config.CloneURL != indexCfg.CloneURL {
+			t.Errorf("Recorded = %+v, %v, %v; want the index's config and the read error", rec, ok, err)
+		}
+	})
+}
+
+func TestRefuseUnrecordedPreserve(t *testing.T) {
+	if err := RefuseUnrecordedPreserve("web", false, provision.ResetOptions{}); err != nil {
+		t.Errorf("plain reset refused: %v", err)
+	}
+	if err := RefuseUnrecordedPreserve("web", true, provision.ResetOptions{PreserveHome: true}); err != nil {
+		t.Errorf("recorded preserve refused: %v", err)
+	}
+	for _, opts := range []provision.ResetOptions{{PreserveAgents: true}, {PreserveProject: true}, {PreserveHome: true}, {PreservePaths: []string{"x"}}} {
+		if err := RefuseUnrecordedPreserve("web", false, opts); err == nil {
+			t.Errorf("unrecorded %+v allowed", opts)
+		}
 	}
 }
