@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -562,8 +563,13 @@ func (p *Provisioner) createVM(ctx context.Context, cfg vm.CreateConfig, opts Cr
 		// in there can leave one half-written — and a half-written instance dir
 		// (disk + cidata, no lima.yaml) makes every later `limactl list` FATAL, which
 		// wedges the whole board, not just this VM. Clean up what we started. See
-		// cleanup.go.
-		p.cleanupInstance(cfg.Name, out)
+		// cleanup.go. Only what we started: a failure before the clone (the target
+		// was taken while this create queued for the lock, or the base could not
+		// be prepared) leaves nothing of ours under that name, and the instance
+		// that may be there is another create's VM.
+		if clonedTarget(err) {
+			p.cleanupInstance(cfg.Name, out)
+		}
 		return err
 	}
 	// STAMP THE IN-FLIGHT MARKER THE MOMENT THE CLONE LANDS — not after the boot
@@ -715,7 +721,18 @@ func (p *Provisioner) hasLiveTmux(ctx context.Context, name string) bool {
 // a writer rebuilds) buys back that minute at the price of lock-upgrade semantics
 // nobody should have to reason about while a VM's disk is being deleted underneath
 // them.
-func (p *Provisioner) prepareBaseAndClone(ctx context.Context, cfg vm.CreateConfig, opts CreateOptions, out io.Writer, timer *phaseTimer) error {
+//
+// A failure returned before this run's clone began is wrapped in
+// *notClonedError (see clonedTarget): nothing under cfg.Name is this run's, so
+// the caller's failed-clone cleanup must leave that name alone.
+func (p *Provisioner) prepareBaseAndClone(ctx context.Context, cfg vm.CreateConfig, opts CreateOptions, out io.Writer, timer *phaseTimer) (err error) {
+	cloning := false
+	defer func() {
+		if err != nil && !cloning {
+			err = &notClonedError{err: err}
+		}
+	}()
+
 	// A template-sourced create/reset is a completely separate, much shorter
 	// critical section: verify the template instance is actually there, take
 	// the SAME lock (keyed on the template instance rather than the base) so a
@@ -735,6 +752,10 @@ func (p *Provisioner) prepareBaseAndClone(ctx context.Context, cfg vm.CreateConf
 		}
 		defer release()
 
+		if err := p.requireFreeCloneTarget(cfg.Name); err != nil {
+			return err
+		}
+		cloning = true
 		step(out, "Cloning %q from template %q…", cfg.Name, opts.TemplateSource)
 		if err := timer.time("clone", func() error {
 			return p.Lima.CloneStreaming(ctx, opts.TemplateSource, cfg.Name, out)
@@ -765,6 +786,10 @@ func (p *Provisioner) prepareBaseAndClone(ctx context.Context, cfg vm.CreateConf
 		return err
 	}
 
+	if err := p.requireFreeCloneTarget(cfg.Name); err != nil {
+		return err
+	}
+	cloning = true
 	step(out, "Cloning %q from base image %q…", cfg.Name, cfg.BaseName)
 	if err := timer.time("clone", func() error {
 		return p.Lima.CloneStreaming(ctx, cfg.BaseName, cfg.Name, out)
@@ -775,6 +800,52 @@ func (p *Provisioner) prepareBaseAndClone(ctx context.Context, cfg vm.CreateConf
 		opts.OnSourceRevision(readBaseVersionFn(p.hostFiles(), cfg.BaseName))
 	}
 	return nil
+}
+
+// requireFreeCloneTarget refuses to clone onto a name that is already taken.
+// It runs under the lock, immediately before the clone, because CreateVM's own
+// "already exists" guard runs before the lock and the wait for it can last
+// minutes: two creates of one name both pass that guard, and the first to get
+// the lock clones the VM and starts booting it. The second must stop here. If it
+// went on, `limactl clone` would refuse the existing directory, and the
+// failed-clone cleanup would then find that directory and force-delete the other
+// create's VM.
+//
+// It asks the same question `limactl clone` does: does the instance directory
+// exist? A directory limactl cannot load (another clone still writing it) is
+// taken too. A stat that fails for any other reason is not an answer, so it
+// stops the create rather than guessing the name is free.
+func (p *Provisioner) requireFreeCloneTarget(name string) error {
+	hf := p.hostFiles()
+	dir := instanceDir(hf, name)
+	if dir == "" {
+		return nil
+	}
+	_, err := hf.Stat(dir)
+	switch {
+	case err == nil:
+		return fmt.Errorf("instance %q already exists — delete it first, or choose a different name", name)
+	case errors.Is(err, fs.ErrNotExist):
+		return nil
+	default:
+		return fmt.Errorf("check whether %q already exists before cloning it: %w", name, err)
+	}
+}
+
+// notClonedError marks a prepareBaseAndClone failure that happened before this
+// run started cloning the target. Whatever is under the target's name then
+// belongs to someone else, or does not exist.
+type notClonedError struct{ err error }
+
+func (e *notClonedError) Error() string { return e.err.Error() }
+func (e *notClonedError) Unwrap() error { return e.err }
+
+// clonedTarget reports whether a prepareBaseAndClone failure came after this run
+// began cloning the target, which is the only case in which a directory under
+// the target's name can be this run's to clean up.
+func clonedTarget(err error) bool {
+	var nc *notClonedError
+	return !errors.As(err, &nc)
 }
 
 // requireTemplate fails unless the named golden-template instance exists.
@@ -1423,7 +1494,11 @@ func (p *Provisioner) Reset(ctx context.Context, cfg vm.CreateConfig, opts Reset
 	// would have to get past. The name is known to be free here (deleted above,
 	// or proved absent by a resume), so anything under it is this run's.
 	if err := p.prepareBaseAndClone(ctx, cfg, cloneOpts, out, newPhaseTimer(out)); err != nil {
-		p.cleanupInstance(cfg.Name, out)
+		// A failure before the clone leaves nothing of this run's under the name;
+		// anything there was made by someone else after the delete above.
+		if clonedTarget(err) {
+			p.cleanupInstance(cfg.Name, out)
+		}
 		return stage.Fail(err)
 	}
 	MarkRebuildCloned(ctx, stage, opts, cfg.Name, out)
