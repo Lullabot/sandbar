@@ -263,7 +263,7 @@ func TestCreateVMSSHKeysNeverUsesPlusForSpace(t *testing.T) {
 		t.Fatalf("CreateVM: %v", err)
 	}
 
-	// encodeSSHKeys itself must never leave the space as a raw '+':
+	// EncodeSSHKeys itself must never leave the space as a raw '+':
 	// double-encoding "%20" is what must reach the wire in place of the
 	// space, and a bare '+' character must never appear where the space
 	// was — a literal '+' would be decoded to a space on the SERVER's
@@ -278,15 +278,15 @@ func TestCreateVMSSHKeysNeverUsesPlusForSpace(t *testing.T) {
 }
 
 func TestEncodeSSHKeysDirectly(t *testing.T) {
-	got := encodeSSHKeys([]string{"ssh-rsa AAAA", "ssh-ed25519 BBBB"})
+	got := EncodeSSHKeys([]string{"ssh-rsa AAAA", "ssh-ed25519 BBBB"})
 	if strings.Contains(got, "+") {
-		t.Errorf("encodeSSHKeys result contains '+': %q", got)
+		t.Errorf("EncodeSSHKeys result contains '+': %q", got)
 	}
 	if !strings.Contains(got, "%20") {
-		t.Errorf("encodeSSHKeys result missing %%20 for spaces: %q", got)
+		t.Errorf("EncodeSSHKeys result missing %%20 for spaces: %q", got)
 	}
 	if !strings.Contains(got, "%0A") {
-		t.Errorf("encodeSSHKeys result missing %%0A between keys: %q", got)
+		t.Errorf("EncodeSSHKeys result missing %%0A between keys: %q", got)
 	}
 }
 
