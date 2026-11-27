@@ -473,9 +473,9 @@ func (r *Registry) Set(scope registry.Scope, vm string, c VMCheckouts) error {
 // rewritten whole, so saving this process's map without the re-read would
 // erase every VM another sandbar process recorded since this one loaded —
 // and the delete guard reads exactly those records to warn about unpushed
-// work. A file from a newer schema is refused rather than overwritten; any
-// other re-read failure keeps the in-memory map as the best recovery source,
-// matching internal/registry.
+// work. A file from a newer schema, or one that is present but unreadable,
+// is refused rather than overwritten; one whose bytes do not parse is moved
+// aside to "<path>.corrupt" first. This matches internal/registry.
 func (r *Registry) mutate(apply func(vms map[vmHandle]VMCheckouts)) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -492,11 +492,24 @@ func (r *Registry) mutate(apply func(vms map[vmHandle]VMCheckouts)) error {
 	defer release()
 
 	vms, err := readFile(r.path)
+	var ce *corruptError
 	switch {
-	case errors.Is(err, errNewerSchema):
-		return err
 	case err == nil:
 		r.vms = vms
+	case errors.As(err, &ce):
+		// Move unparseable bytes aside, as LoadFrom does, so saving this
+		// process's map replaces nothing recoverable.
+		_ = os.Rename(r.path, r.path+".corrupt")
+	case errors.Is(err, errNewerSchema):
+		return err
+	default:
+		// The file is in place but cannot be read right now. This process's
+		// map may be the empty one LoadFrom returned for that same file, and
+		// saving it would erase every VM's records. Refuse; the file is
+		// untouched.
+		if _, statErr := os.Lstat(r.path); statErr == nil {
+			return fmt.Errorf("not saving the checkout registry: %w", err)
+		}
 	}
 	apply(r.vms)
 	return r.save()
