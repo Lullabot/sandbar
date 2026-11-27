@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lullabot/sandbar/internal/provider"
+	"github.com/lullabot/sandbar/internal/providerfake"
 	"github.com/lullabot/sandbar/internal/provision"
 	"github.com/lullabot/sandbar/internal/registry"
 	"github.com/lullabot/sandbar/internal/vm"
@@ -85,7 +87,7 @@ func seededRegistry(t *testing.T) *registry.Registry {
 // VM wearing the same name (the exact bug `sandbar create --recreate` shipped
 // with: memory 24→8GiB, disk 300→100GiB, and the project gone).
 func TestResetConfigUsesTheVMsOwnSettings(t *testing.T) {
-	got, err := resetConfigFor(seededRegistry(t), "web", registry.LocalScope, "work-base", map[string]bool{}, resetFlagValues{}, "hostuser")
+	got, err := indexResetConfig(seededRegistry(t), "web", registry.LocalScope, "work-base", map[string]bool{}, resetFlagValues{}, "hostuser")
 	if err != nil {
 		t.Fatalf("resetConfigFor: %v", err)
 	}
@@ -100,7 +102,7 @@ func TestResetConfigUsesTheVMsOwnSettings(t *testing.T) {
 // through. Everything else stays as recorded.
 func TestResetConfigAppliesExplicitFlags(t *testing.T) {
 	explicit := map[string]bool{"cpus": true, "memory": true, "disk": true, "timezone": true}
-	got, err := resetConfigFor(seededRegistry(t), "web", registry.LocalScope, "work-base", explicit, resetFlagValues{
+	got, err := indexResetConfig(seededRegistry(t), "web", registry.LocalScope, "work-base", explicit, resetFlagValues{
 		cpus:     "12",
 		memory:   "48GiB",
 		disk:     "400GiB",
@@ -141,7 +143,7 @@ func TestResetConfigAgentFlags(t *testing.T) {
 	if err := reg.AddScoped(rec, registry.LocalScope); err != nil {
 		t.Fatalf("seed registry: %v", err)
 	}
-	got, err := resetConfigFor(reg, "web", registry.LocalScope, "work-base", explicit, o.values, "hostuser")
+	got, err := indexResetConfig(reg, "web", registry.LocalScope, "work-base", explicit, o.values, "hostuser")
 	if err != nil {
 		t.Fatalf("resetConfigFor: %v", err)
 	}
@@ -158,7 +160,7 @@ func TestResetConfigAgentFlags(t *testing.T) {
 	}
 	explicit = map[string]bool{}
 	fs.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
-	got, err = resetConfigFor(reg, "web", registry.LocalScope, "work-base", explicit, o.values, "hostuser")
+	got, err = indexResetConfig(reg, "web", registry.LocalScope, "work-base", explicit, o.values, "hostuser")
 	if err != nil {
 		t.Fatalf("resetConfigFor: %v", err)
 	}
@@ -186,7 +188,7 @@ func TestResetConfigKeepsTheRecordedRepo(t *testing.T) {
 		}
 	}
 
-	got, err := resetConfigFor(seededRegistry(t), "web", registry.LocalScope, "work-base", map[string]bool{}, resetFlagValues{}, "hostuser")
+	got, err := indexResetConfig(seededRegistry(t), "web", registry.LocalScope, "work-base", map[string]bool{}, resetFlagValues{}, "hostuser")
 	if err != nil {
 		t.Fatalf("resetConfigFor: %v", err)
 	}
@@ -195,27 +197,190 @@ func TestResetConfigKeepsTheRecordedRepo(t *testing.T) {
 	}
 }
 
-// TestResetConfigWithoutARecordStillResets: a VM with a provenance marker but
-// no local registry entry (created by another controller on the same host) must
-// still be resettable — from defaults plus this host's identity — rather than
-// being refused by the one entrypoint that can rebuild it.
-func TestResetConfigWithoutARecordStillResets(t *testing.T) {
-	got, err := resetConfigFor(registry.NewEmpty(), "orphan", registry.LocalScope, "sandbar-base", map[string]bool{}, resetFlagValues{
-		gitName:  "Ada",
-		gitEmail: "ada@example.com",
-	}, "hostuser")
-	// The git identity is required by Validate and is not on the flag path here,
-	// so supply it the way the host would.
-	if err != nil && !strings.Contains(err.Error(), "git") {
+// indexResetConfig is resetConfigFor for a VM known only to the managed index
+// (no Provenancer), the setting most of these tests are about. base is the
+// base the caller expects the index to report; it is what the seed recorded.
+func indexResetConfig(reg *registry.Registry, name string, scope registry.Scope, base string, explicit map[string]bool, flags resetFlagValues, hostUser string) (vm.CreateConfig, error) {
+	cfg, err := resetConfigFor(context.Background(), reg, name, scope, nil, provision.ResetOptions{}, explicit, flags, hostUser, io.Discard)
+	if err == nil && cfg.BaseName != base {
+		return cfg, errors.New("reset base " + cfg.BaseName + ", want " + base)
+	}
+	return cfg, err
+}
+
+// markerOnlyProvider is a VM's host as another controller left it: the VM
+// carries a provenance marker, and this machine's index has never heard of it.
+// It records every guest command, so a test can tell "preserved nothing" from
+// "looked and found nothing", and every marker write.
+type markerOnlyProvider struct {
+	*providerfake.Provider
+	markers    map[string]provider.Provenance
+	markerErr  error
+	guestCalls int
+}
+
+func newMarkerOnlyProvider(markers map[string]provider.Provenance) *markerOnlyProvider {
+	p := &markerOnlyProvider{markers: markers}
+	p.Provider = &providerfake.Provider{
+		ShellOutFunc: func(context.Context, string, ...string) ([]byte, error) {
+			p.guestCalls++
+			return nil, nil
+		},
+		ShellFunc: func(context.Context, string, io.Reader, io.Writer, ...string) error {
+			p.guestCalls++
+			return nil
+		},
+		ShellStreamOutFunc: func(context.Context, string, io.Reader, io.Writer, ...string) error {
+			p.guestCalls++
+			return nil
+		},
+	}
+	return p
+}
+
+func (p *markerOnlyProvider) Provenance(context.Context) (map[string]provider.Provenance, error) {
+	return p.markers, p.markerErr
+}
+func (p *markerOnlyProvider) ProvenanceOf(_ context.Context, name string) (provider.Provenance, bool, error) {
+	if p.markerErr != nil {
+		return provider.Provenance{}, false, p.markerErr
+	}
+	pv, ok := p.markers[name]
+	return pv, ok, nil
+}
+func (p *markerOnlyProvider) MarkManaged(_ context.Context, name string, pv provider.Provenance) error {
+	p.markers[name] = pv
+	return nil
+}
+func (p *markerOnlyProvider) Unmark(_ context.Context, name string) error {
+	delete(p.markers, name)
+	return nil
+}
+
+// TestResetOfAMarkerOnlyVMKeepsItsProject is "a reset keeps the target VM's
+// identity and project" for a VM this machine did not create: one another
+// controller built on a shared profile, or whose index entry was lost. Its
+// marker is the only record, and the reset must rebuild from it — the project
+// it cloned, its sizing and its agents — rather than from defaults. The far
+// side is checked too: preserve-project really reaches the guest for the
+// recorded checkout, and the marker written after the reset still names the
+// project, so the next reset is not the one that loses it.
+func TestResetOfAMarkerOnlyVMKeepsItsProject(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	t.Setenv("TMPDIR", t.TempDir())
+	rec := recordedVM()
+	p := newMarkerOnlyProvider(map[string]provider.Provenance{"web": provider.NewProvenance(rec, false)})
+	reg := registry.NewEmpty()
+	opts := provision.ResetOptions{PreserveProject: true}
+
+	cfg, err := resetConfigFor(context.Background(), reg, "web", registry.LocalScope, p, opts, map[string]bool{}, resetFlagValues{}, "hostuser", io.Discard)
+	if err != nil {
 		t.Fatalf("resetConfigFor: %v", err)
 	}
-	if err == nil {
-		if got.Name != "orphan" || got.BaseName != "sandbar-base" {
-			t.Errorf("marker-only reset targeted %q on base %q", got.Name, got.BaseName)
+	if cfg.CloneURL != rec.CloneURL {
+		t.Errorf("clone URL = %q, want the marker's %q", cfg.CloneURL, rec.CloneURL)
+	}
+	if cfg.CPUs != rec.CPUs || cfg.Memory != rec.Memory || cfg.Disk != rec.Disk || cfg.Hostname != rec.Hostname {
+		t.Errorf("sizing = %d/%s/%s host %q, want the marker's %d/%s/%s host %q",
+			cfg.CPUs, cfg.Memory, cfg.Disk, cfg.Hostname, rec.CPUs, rec.Memory, rec.Disk, rec.Hostname)
+	}
+	if !cfg.WithClaude || !cfg.WithCodex || !cfg.WithOpenCode || !cfg.WithPi {
+		t.Errorf("agents = %+v, want the marker's (all on)", cfg.AgentPtrs())
+	}
+	if cfg.BaseName != rec.BaseName {
+		t.Errorf("base = %q, want %q", cfg.BaseName, rec.BaseName)
+	}
+
+	// Preserve-project derives the guest directory from that URL. With the
+	// URL lost it asked the guest nothing and archived nothing, silently.
+	stage, err := provision.NewStageGuard()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stage.Done()
+	plan, err := provision.StagePreserve(context.Background(), p, "web", "/home/ada", "ada", cfg.CloneURL, opts, stage, io.Discard)
+	if err != nil {
+		t.Fatalf("StagePreserve: %v", err)
+	}
+	if plan.Project.OrgRel != "github.com/octocat" || p.guestCalls == 0 {
+		t.Errorf("preserve-project planned %+v after %d guest calls; want it to look for ~/github.com/octocat", plan.Project, p.guestCalls)
+	}
+
+	stub := &stubResetter{}
+	if err := doReset(context.Background(), reg, stub, cfg, registry.LocalScope, opts, io.Discard, p); err != nil {
+		t.Fatalf("doReset: %v", err)
+	}
+	if stub.cfg.CloneURL != rec.CloneURL {
+		t.Errorf("Reset was handed clone URL %q, want %q", stub.cfg.CloneURL, rec.CloneURL)
+	}
+	if got := p.markers["web"].Config; got.CloneURL != rec.CloneURL || got.Disk != rec.Disk {
+		t.Errorf("marker after reset: clone URL %q disk %q, want %q %q", got.CloneURL, got.Disk, rec.CloneURL, rec.Disk)
+	}
+	if got := p.markers["web"].Config.CloneToken; got != "" {
+		t.Errorf("marker after reset holds a clone token %q", got)
+	}
+}
+
+// TestResetWithoutAnyRecord covers a managed VM with no config anywhere: an
+// index entry, or a marker adopted from one, written before configs were
+// recorded. A plain reset proceeds from defaults (it discards the guest's
+// contents by definition, and nothing else can rebuild such a VM), with a
+// warning; a reset asked to preserve anything is refused before any of it
+// happens, since it would otherwise be preserving into a VM unlike the source.
+func TestResetWithoutAnyRecord(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	legacy := provider.NewProvenance(vm.CreateConfig{BaseName: "sandbar-base"}, false)
+	flags := resetFlagValues{gitName: "Ada", gitEmail: "ada@example.com"}
+	explicit := map[string]bool{"git-name": true, "git-email": true}
+
+	for _, opts := range []provision.ResetOptions{
+		{PreserveProject: true},
+		{PreserveAgents: true},
+		{PreserveHome: true},
+		{PreservePaths: []string{"src/app"}},
+	} {
+		p := newMarkerOnlyProvider(map[string]provider.Provenance{"orphan": legacy})
+		_, err := resetConfigFor(context.Background(), registry.NewEmpty(), "orphan", registry.LocalScope, p, opts, explicit, flags, "hostuser", io.Discard)
+		if err == nil || !strings.Contains(err.Error(), "no recorded configuration") {
+			t.Errorf("preserve %+v on an unrecorded VM: err = %v, want a refusal", opts, err)
 		}
-		if got.User != "hostuser" {
-			t.Errorf("marker-only reset user = %q, want the provider's host user", got.User)
-		}
+	}
+
+	p := newMarkerOnlyProvider(map[string]provider.Provenance{"orphan": legacy})
+	var warn strings.Builder
+	got, err := resetConfigFor(context.Background(), registry.NewEmpty(), "orphan", registry.LocalScope, p, provision.ResetOptions{}, explicit, flags, "hostuser", &warn)
+	if err != nil {
+		t.Fatalf("plain reset of an unrecorded VM: %v", err)
+	}
+	if got.Name != "orphan" || got.BaseName != "sandbar-base" || got.User != "hostuser" {
+		t.Errorf("unrecorded reset = name %q base %q user %q", got.Name, got.BaseName, got.User)
+	}
+	if !strings.Contains(warn.String(), "no recorded configuration") {
+		t.Errorf("plain reset from defaults gave no warning; got %q", warn.String())
+	}
+}
+
+// TestResetRefusesWhenTheMarkerCannotBeRead: a failed marker read must not
+// fall through to the index, which may know nothing of the VM (or an older
+// config) — the VM is about to be deleted.
+func TestResetRefusesWhenTheMarkerCannotBeRead(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	p := newMarkerOnlyProvider(map[string]provider.Provenance{})
+	p.markerErr = errors.New("ssh: connection reset")
+	_, err := resetConfigFor(context.Background(), seededRegistry(t), "web", registry.LocalScope, p, provision.ResetOptions{}, map[string]bool{}, resetFlagValues{}, "hostuser", io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "connection reset") {
+		t.Fatalf("err = %v, want the marker read failure", err)
+	}
+}
+
+// TestResetRefusesAnUnmanagedVM: no marker and no index entry is not a
+// sandbar VM, and a reset would replace whatever it is.
+func TestResetRefusesAnUnmanagedVM(t *testing.T) {
+	p := newMarkerOnlyProvider(map[string]provider.Provenance{})
+	_, err := resetConfigFor(context.Background(), registry.NewEmpty(), "stranger", registry.LocalScope, p, provision.ResetOptions{}, map[string]bool{}, resetFlagValues{}, "hostuser", io.Discard)
+	if err == nil || !strings.Contains(err.Error(), "not a sandbar-managed VM") {
+		t.Fatalf("err = %v, want a refusal", err)
 	}
 }
 
@@ -425,7 +590,7 @@ func TestRecreateRefusesToChangeTheCloneURL(t *testing.T) {
 // user had just typed, sending them to fix an index file that was fine.
 func TestResetValidationBlamesTheRightValue(t *testing.T) {
 	// The user's own flag: report it plainly.
-	_, err := resetConfigFor(seededRegistry(t), "web", registry.LocalScope, "work-base",
+	_, err := indexResetConfig(seededRegistry(t), "web", registry.LocalScope, "work-base",
 		map[string]bool{"disk": true}, resetFlagValues{disk: "10GiB"}, "hostuser")
 	if err == nil {
 		t.Fatal("a disk below the base floor should be refused")
@@ -442,7 +607,7 @@ func TestResetValidationBlamesTheRightValue(t *testing.T) {
 	if err := reg.AddScoped(bad, registry.LocalScope); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	_, err = resetConfigFor(reg, "web", registry.LocalScope, "work-base", map[string]bool{}, resetFlagValues{}, "hostuser")
+	_, err = indexResetConfig(reg, "web", registry.LocalScope, "work-base", map[string]bool{}, resetFlagValues{}, "hostuser")
 	if err == nil {
 		t.Fatal("an unusable recorded config should be refused")
 	}

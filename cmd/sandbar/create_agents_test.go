@@ -215,3 +215,33 @@ func TestRecreateFirstMigratesRecordedBaseBeforeProvisioning(t *testing.T) {
 		t.Fatal("recreate did not reach provider")
 	}
 }
+
+// TestRecreateOfAMarkerOnlyVMKeepsItsProjectAndSizing: `sandbar create
+// --recreate` on a VM known only by its marker rebuilds from the marker's
+// whole config, not just its agents, and does not write a URL-less config
+// back into the marker.
+func TestRecreateOfAMarkerOnlyVMKeepsItsProjectAndSizing(t *testing.T) {
+	isolateCreateState(t)
+	rec := recordedVM()
+	rec.Name = "existing"
+	var got vm.CreateConfig
+	fake := &providerfake.Provider{
+		HostFilesFunc: lima.LocalFiles,
+		ListFunc:      func() ([]vm.VM, error) { return []vm.VM{{Name: "existing"}}, nil },
+		RecreateFunc: func(_ context.Context, cfg vm.CreateConfig, _ provision.CreateOptions, _ io.Writer) error {
+			got = cfg
+			return nil
+		},
+	}
+	p := &createMarkerProvider{Provider: fake, marker: provider.NewProvenance(rec, false)}
+	if err := runCreateWithBinding(createAgentArgs("existing", "--recreate"), bindCreateFake(p)); err != nil {
+		t.Fatal(err)
+	}
+	if got.CloneURL != rec.CloneURL || got.CPUs != rec.CPUs || got.Memory != rec.Memory || got.Disk != rec.Disk || got.BaseName != rec.BaseName {
+		t.Errorf("recreate config = url %q cpus %d mem %s disk %s base %s; want the marker's %q %d %s %s %s",
+			got.CloneURL, got.CPUs, got.Memory, got.Disk, got.BaseName, rec.CloneURL, rec.CPUs, rec.Memory, rec.Disk, rec.BaseName)
+	}
+	if p.marker.Config.CloneURL != rec.CloneURL {
+		t.Errorf("marker after recreate names clone URL %q, want %q", p.marker.Config.CloneURL, rec.CloneURL)
+	}
+}

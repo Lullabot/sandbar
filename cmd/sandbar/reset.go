@@ -291,11 +291,7 @@ func resetParsed(fs *flag.FlagSet, o *resetOptions) error {
 			}
 		}
 	} else {
-		base, ok := manage.RecreateBase(reg, name, scope, provenancer)
-		if !ok {
-			return fmt.Errorf("sandbar reset: %q is not a sandbar-managed VM — refused (a reset clones from a sandbar base image and would replace whatever instance it was pointed at)", name)
-		}
-		cfg, err = resetConfigFor(reg, name, scope, base, explicit, o.values, p.HostUser())
+		cfg, err = resetConfigFor(ctx, reg, name, scope, provenancer, opts, explicit, o.values, p.HostUser(), os.Stderr)
 		if err != nil {
 			return fmt.Errorf("sandbar reset: %w", err)
 		}
@@ -411,13 +407,35 @@ type resetFlagValues struct {
 // The recorded config is the SOURCE, not a fallback, and that is the whole
 // contract of the verb — the same one `sandbar create --recreate` was fixed to
 // honour and the TUI's reset form has always had: `sandbar reset web` means "give
-// me this VM back", never "give me a default VM with this name". A VM with no
-// recorded config (a marker-only instance created by another controller) still
-// resets, from defaults plus this host's identity, because refusing would leave
-// the one entrypoint that can rebuild it unable to.
-func resetConfigFor(reg *registry.Registry, name string, scope registry.Scope, base string, explicit map[string]bool, flags resetFlagValues, hostUser string) (vm.CreateConfig, error) {
-	rec, found := reg.ConfigInScope(name, scope)
-	return resetConfigFromRecord(rec, found, name, base, explicit, flags, hostUser)
+// me this VM back", never "give me a default VM with this name".
+//
+// It is also the managed-VM gate. The record comes from manage.Recorded, so a
+// VM managed only by its provenance marker (created by another controller on a
+// shared profile, or whose index entry this machine lost) resets from the
+// config its marker carries, exactly as one this machine created does.
+//
+// A VM with no recorded config anywhere (an index entry or adopted marker from
+// before configs were recorded) still resets from defaults plus this host's
+// identity, with a warning on warn, because refusing would leave the one
+// entrypoint that can rebuild it unable to. Asking to preserve anything from
+// such a VM is refused instead: see manage.RefuseUnrecordedPreserve.
+func resetConfigFor(ctx context.Context, reg *registry.Registry, name string, scope registry.Scope, prov provider.Provenancer, opts provision.ResetOptions, explicit map[string]bool, flags resetFlagValues, hostUser string, warn io.Writer) (vm.CreateConfig, error) {
+	rec, ok, markerErr := manage.Recorded(ctx, reg, name, scope, prov)
+	if markerErr != nil {
+		// Not a fallback to the index: it may know nothing of this VM, or an
+		// older config than the marker, and the VM is about to be deleted.
+		return vm.CreateConfig{}, fmt.Errorf("read %s's recorded configuration: %w", name, markerErr)
+	}
+	if !ok {
+		return vm.CreateConfig{}, fmt.Errorf("%q is not a sandbar-managed VM — refused (a reset clones from a sandbar base image and would replace whatever instance it was pointed at)", name)
+	}
+	if err := manage.RefuseUnrecordedPreserve(name, rec.HasConfig, opts); err != nil {
+		return vm.CreateConfig{}, err
+	}
+	if !rec.HasConfig {
+		fmt.Fprintf(warn, "warning: %s has no recorded configuration; rebuilding it from defaults, with no project clone.\n", name)
+	}
+	return resetConfigFromRecord(rec.Config, rec.HasConfig, name, rec.Base, explicit, flags, hostUser)
 }
 
 // resetConfigFromRecord is resetConfigFor with the recorded config supplied by

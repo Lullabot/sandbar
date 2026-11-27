@@ -314,8 +314,33 @@ Flags:
 	// wish. Which is also why that block runs AFTER this one: --base-name is
 	// adopted here, and the tool-set has to be read off the base this VM is
 	// really cloned from.
+	//
+	// The record is manage.Recorded's, the same one `sandbar reset` and the
+	// TUI's reset form read: the provenance marker first, then this machine's
+	// index. Reading the index alone rebuilt a VM another controller created
+	// (or one whose index entry was lost) from the flag defaults, project
+	// included, and then wrote that loss into its marker.
+	//
+	// A cancellable context lets ctrl+c abort the run mid-flight, killing the
+	// limactl subprocess it is currently blocked on — matching the TUI's cancel.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	// p satisfies provider.Provenancer for every backend that has one today
+	// (local and remote Lima — see internal/provider/limaprovenance.go); the
+	// type assertion degrades to a nil Provenancer, not a panic, for a future
+	// backend that does not, in which case doHeadlessCreate's RecordSuccess
+	// call falls back to the registry-only behavior.
+	provenancer, _ := p.(provider.Provenancer)
+
+	var recorded manage.RecordedVM
 	if *recreate {
-		if rec, ok := reg.ConfigInScope(cfg.Name, scope); ok && rec.Name != "" {
+		var markerErr error
+		recorded, _, markerErr = manage.Recorded(ctx, reg, cfg.Name, scope, provenancer)
+		if markerErr != nil {
+			return fmt.Errorf("read VM configuration: %w", markerErr)
+		}
+		if rec := recorded.Config; recorded.HasConfig {
 			adoptRecordedConfig(&cfg, rec, explicit)
 			// The record was valid when it was written, but it is a file on disk
 			// and this is the last point anything checks it.
@@ -330,35 +355,11 @@ Flags:
 		}
 	}
 
-	// A cancellable context lets ctrl+c abort the run mid-flight, killing the
-	// limactl subprocess it is currently blocked on — matching the TUI's cancel.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	// p satisfies provider.Provenancer for every backend that has one today
-	// (local and remote Lima — see internal/provider/limaprovenance.go); the
-	// type assertion degrades to a nil Provenancer, not a panic, for a future
-	// backend that does not, in which case doHeadlessCreate's RecordSuccess
-	// call falls back to the registry-only behavior.
-	provenancer, _ := p.(provider.Provenancer)
-
-	// A VM's durable marker takes precedence over the host cache. Preserve its
-	// recorded agent choices on recreate, with explicit flags still winning.
-	previous, recorded := reg.ConfigInScope(cfg.Name, scope)
-	if *recreate && provenancer != nil {
-		marker, found, err := provenancer.ProvenanceOf(ctx, cfg.Name)
-		if err != nil {
-			return fmt.Errorf("read VM configuration: %w", err)
-		}
-		if found {
-			previous, recorded = marker.Config, true
-			if marker.Base != "" {
-				previous.BaseName = marker.Base
-			}
-		}
-	}
+	// Preserve the recorded agent choices on recreate (manage.Recorded puts
+	// the marker ahead of the host cache), with explicit flags still winning.
+	previous, hasPrevious := recorded.Config, recorded.HasConfig
 	migrationBase := cfg.BaseName
-	if *recreate && recorded && previous.BaseName != "" {
+	if *recreate && hasPrevious && previous.BaseName != "" {
 		migrationBase = previous.BaseName
 	}
 	selection, err := agentprefs.LoadOrMigrate(p.HostFiles(), migrationBase)
@@ -367,7 +368,7 @@ Flags:
 	}
 	defaults := vm.DefaultCreateConfig()
 	selection.Apply(&defaults)
-	if *recreate && recorded {
+	if *recreate && hasPrevious {
 		defaults = previous
 	}
 	for agent, selected := range cfg.AgentPtrs() {

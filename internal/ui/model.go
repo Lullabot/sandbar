@@ -419,6 +419,10 @@ type model struct {
 	// toggle and the clone can never name two different orgs.
 	resetCloneURL   string
 	resetCloneForge string
+	// resetUnrecorded is set when neither the target's marker nor the index
+	// held a config, so the form was pre-filled from defaults. submitReset then
+	// refuses every preserve option (manage.RefuseUnrecordedPreserve).
+	resetUnrecorded bool
 	formCloneForge  string
 	// The reset target's RECORDED tool-set, captured in openResetForm. The reset
 	// form shows no tool toggles, so without carrying these the rebuilt config
