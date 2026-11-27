@@ -1948,7 +1948,9 @@ func (r *baseRaceRunner) Output(_ context.Context, args ...string) ([]byte, erro
 	if len(args) > 2 && args[0] == "list" && args[1] == "sandbar-base" {
 		s := r.baseStatus()
 		if s == "" {
-			return nil, errors.New("instance not found")
+			// limactl's own words for an unknown name: anything else is a failed
+			// query, which the provisioner must not read as an absent base.
+			return nil, errors.New(`No instance matching sandbar-base found.` + "\n" + `fatal msg="unmatched instances"`)
 		}
 		return []byte(s + "\n"), nil
 	}

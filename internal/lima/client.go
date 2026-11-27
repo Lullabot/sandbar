@@ -177,9 +177,19 @@ func (c *Client) Get(name string) (vm.VM, error) {
 }
 
 // Status reports a single instance's status (e.g. "Running", "Stopped").
+//
+// An unknown name is reported as vm.ErrNotFound, as Get does. Any other error
+// means limactl could not answer — on remote Lima a dropped ssh connection is
+// the routine case — and says nothing about whether the instance exists. A
+// caller about to build, clone or delete because a name looks free must not
+// read that error as "absent": the cleanup after the build or clone it then
+// attempts force-deletes the instance that was there all along.
 func (c *Client) Status(name string) (string, error) {
 	out, err := c.r.Output(context.Background(), "list", name, "--format", "{{.Status}}")
 	if err != nil {
+		if isNoInstance(err) {
+			return "", fmt.Errorf("%w: %s", vm.ErrNotFound, name)
+		}
 		return "", fmt.Errorf("limactl status %s: %w", name, err)
 	}
 	return strings.TrimSpace(string(out)), nil
@@ -489,7 +499,7 @@ func (c *Client) runStream(ctx context.Context, out io.Writer, args ...string) e
 func (c *Client) Exists(name string) (bool, error) {
 	status, err := c.Status(name)
 	if err != nil {
-		if isNoInstance(err) {
+		if errors.Is(err, vm.ErrNotFound) {
 			return false, nil
 		}
 		return false, err

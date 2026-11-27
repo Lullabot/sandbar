@@ -541,11 +541,16 @@ func (p *Provisioner) CreateVM(ctx context.Context, cfg vm.CreateConfig, out io.
 // internal/ui/progress.go — and every job it starts is a plain create).
 func (p *Provisioner) CreateVMWithOptions(ctx context.Context, cfg vm.CreateConfig, opts CreateOptions, out io.Writer) error {
 	// Refuse an existing target rather than colliding on clone — the original
-	// bash provisioner has the same guard. A definite status (no error,
-	// non-empty) means the instance is already there. Recreate calls createVM
-	// directly (it just deleted the target), so it bypasses this check instead
-	// of racing a just-removed VM.
-	if status, err := p.Lima.Status(cfg.Name); err == nil && status != "" {
+	// bash provisioner has the same guard. Only a definite "no such instance"
+	// lets the create go on: a query that failed proves nothing, and going on
+	// would end in the failed-clone cleanup deleting whatever is under that
+	// name. Recreate calls createVM directly (it just deleted the target), so
+	// it bypasses this check instead of racing a just-removed VM.
+	exists, err := p.Lima.Exists(cfg.Name)
+	if err != nil {
+		return fmt.Errorf("check whether %q already exists: %w", cfg.Name, err)
+	}
+	if exists {
 		return fmt.Errorf("instance %q already exists — delete it first, or choose a different name", cfg.Name)
 	}
 	return p.createVM(ctx, cfg, opts, out)
@@ -844,8 +849,10 @@ func (p *Provisioner) migrateLegacyBase(ctx context.Context, cfg vm.CreateConfig
 		return
 	}
 	// Target already present (a prior create migrated or built it) — leave both
-	// alone and let ensureBaseStopped reconcile the target as usual.
-	if status, err := p.Lima.Status(cfg.BaseName); err == nil && status != "" {
+	// alone and let ensureBaseStopped reconcile the target as usual. A query
+	// that failed is not an absent target: cloning onto a base that is there
+	// fails, and the cleanup after that failure would delete it.
+	if exists, err := p.Lima.Exists(cfg.BaseName); err != nil || exists {
 		return
 	}
 	oldStatus, err := p.Lima.Status(legacyBaseName)
@@ -891,6 +898,24 @@ func (p *Provisioner) migrateLegacyBase(ctx context.Context, cfg vm.CreateConfig
 	_ = hf.RemoveAll(baseLockPath(hf, legacyBaseName))
 }
 
+// baseStatus reads the base image's status for the decision ensureBaseStopped
+// and ensurePublishedBaseStopped make on it. Only limactl's definite "no such
+// instance" means the base is absent and may be built. A query that failed (a
+// dropped ssh connection to a remote Lima host, a limactl that died) is returned
+// as an error: read as "absent", it started a build over the healthy base, the
+// build's `limactl start --name` refused the existing instance, and the
+// failed-build cleanup force-deleted the shared base every VM is cloned from.
+func (p *Provisioner) baseStatus(name string) (status string, exists bool, err error) {
+	status, err = p.Lima.Status(name)
+	switch {
+	case errors.Is(err, vm.ErrNotFound):
+		return "", false, nil
+	case err != nil:
+		return "", false, fmt.Errorf("check base image %q (it was left untouched): %w", name, err)
+	}
+	return status, status != "", nil
+}
+
 // ensureBaseStopped makes sure the base image exists, is current, and is stopped —
 // a clone needs an idle source disk carrying the playbook this create was asked
 // for. It has four outcomes: build the base from scratch (it is absent, or
@@ -911,8 +936,10 @@ func (p *Provisioner) ensureBaseStopped(ctx context.Context, cfg vm.CreateConfig
 	if p.UsePublishedBase {
 		return p.ensurePublishedBaseStopped(ctx, cfg, opts, out, timer)
 	}
-	status, err := p.Lima.Status(cfg.BaseName)
-	exists := err == nil && status != ""
+	status, exists, err := p.baseStatus(cfg.BaseName)
+	if err != nil {
+		return err
+	}
 
 	// --rebuild: destroy the base and build it again from the raw Debian image.
 	// THIS is where that destroy belongs — under the lock, with no clone in flight
@@ -1007,8 +1034,10 @@ func (p *Provisioner) ensureBaseStopped(ctx context.Context, cfg vm.CreateConfig
 // release under the same lock as the clone. An older base is replaced from
 // verified bytes; in-guest playbook convergence and apt refresh do not run.
 func (p *Provisioner) ensurePublishedBaseStopped(ctx context.Context, cfg vm.CreateConfig, opts CreateOptions, out io.Writer, timer *phaseTimer) error {
-	status, err := p.Lima.Status(cfg.BaseName)
-	exists := err == nil && status != ""
+	status, exists, err := p.baseStatus(cfg.BaseName)
+	if err != nil {
+		return err
+	}
 	if exists {
 		have := readBaseVersionFn(p.hostFiles(), cfg.BaseName)
 		if opts.Rebuild || have != baseimage.PinnedManifest.Version {

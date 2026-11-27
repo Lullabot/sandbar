@@ -277,3 +277,26 @@ func TestGetUnknownInstance(t *testing.T) {
 		t.Errorf("Get(unknown) = %v, want vm.ErrNotFound", err)
 	}
 }
+
+// Status must keep "there is no such instance" apart from "limactl could not
+// say". The provisioner builds a base, or goes on with a create, only on the
+// first; on the second it would act on a guess, and the cleanup after that
+// guess fails force-deletes an instance that was there all along.
+func TestStatusSeparatesAbsenceFromFailure(t *testing.T) {
+	// What limactl 2.2.1 prints, exit 1, for `limactl list web` with no such instance.
+	absent := &fakeRunner{err: errors.New("exit status 1: level=warning msg=\"No instance matching web found.\"\nlevel=fatal msg=\"unmatched instances\"")}
+	if _, err := New(absent).Status("web"); !errors.Is(err, vm.ErrNotFound) {
+		t.Errorf("Status(unknown) = %v, want vm.ErrNotFound", err)
+	}
+	if ok, err := New(absent).Exists("web"); ok || err != nil {
+		t.Errorf("Exists(unknown) = %v, %v; want false, nil", ok, err)
+	}
+
+	broken := &fakeRunner{err: errors.New("exit status 255: Connection to 192.0.2.1 closed by remote host.")}
+	if _, err := New(broken).Status("web"); err == nil || errors.Is(err, vm.ErrNotFound) {
+		t.Errorf("Status(failed query) = %v, want an error that is NOT vm.ErrNotFound", err)
+	}
+	if ok, err := New(broken).Exists("web"); ok || err == nil {
+		t.Errorf("Exists(failed query) = %v, %v; want false and the error", ok, err)
+	}
+}
