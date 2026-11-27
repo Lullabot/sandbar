@@ -1742,9 +1742,6 @@ func TestProxmoxCloneCarriesCurrentPublicKey(t *testing.T) {
 
 	// The stamp does not cover the key, so the template is still reused; the
 	// per-clone write is what has to make up for it.
-	if stale, why := p.baseStale(webConfig()); stale {
-		t.Logf("template now stale after rotation (%s); the clone must still carry key B", why)
-	}
 	if err := p.applyCloudInitIdentity(context.Background(), 101, webConfig(), io.Discard); err != nil {
 		t.Fatal(err)
 	}
