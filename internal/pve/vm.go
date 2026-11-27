@@ -251,12 +251,12 @@ func (o CreateVMOptions) formValues() (url.Values, error) {
 		form.Set("ciuser", o.CIUser)
 	}
 	if len(o.SSHKeys) > 0 {
-		form.Set("sshkeys", encodeSSHKeys(o.SSHKeys))
+		form.Set("sshkeys", EncodeSSHKeys(o.SSHKeys))
 	}
 	return form, nil
 }
 
-// encodeSSHKeys encodes keys for the sshkeys form field. PVE's server does
+// EncodeSSHKeys encodes keys for the sshkeys form field. PVE's server does
 // URI::Escape::uri_unescape on this value, and the request body is itself
 // form-urlencoded — so url.Values.Encode() escapes this a second time while
 // the server decodes only once: two encodes, one decode. That double-encode
@@ -266,7 +266,7 @@ func (o CreateVMOptions) formValues() (url.Values, error) {
 // undoes only one layer — producing a literal "ssh-rsa%20AAAA..." in the
 // guest's authorized_keys. Do not "simplify" this; it is what mature Go PVE
 // clients converged on.
-func encodeSSHKeys(keys []string) string {
+func EncodeSSHKeys(keys []string) string {
 	joined := strings.Join(keys, "\n")
 	return strings.ReplaceAll(url.QueryEscape(joined), "+", "%20")
 }

@@ -657,9 +657,15 @@ func (p *proxmoxProvider) finalizeClone(ctx context.Context, vmid int, cfg vm.Cr
 // regenerate is the load-bearing second call: a config write ALONE does not
 // rebuild the cloud-init drive (only a start, this call, or hotplug do, and
 // cloudinit is not in the default hotplug set), so without it the write would
-// never take effect. The SSH key itself is inherited from the template (baked in
-// at base-create time, where its double-encoding is handled), so it is not
-// rewritten here.
+// never take effect.
+//
+// The operator's SSH public key is rewritten here on every clone rather than
+// left to the template. The template carries whichever key was current when the
+// base was built, and nothing in its version stamp changes when identity_path is
+// rotated, so an inherited key would leave a rotated-out (possibly compromised)
+// key authorized in every new VM and lock the new key out. Writing it per clone
+// also keeps templates shared between workstations that use different keys from
+// needing a rebuild whenever one of them changes.
 //
 // The same write also sizes the clone. A clone inherits cores and memory from
 // its template, and the template was sized by whichever create first built the
@@ -668,6 +674,10 @@ func (p *proxmoxProvider) finalizeClone(ctx context.Context, vmid int, cfg vm.Cr
 // keeps the template's setting instead of sending PVE a zero.
 func (p *proxmoxProvider) applyCloudInitIdentity(ctx context.Context, vmid int, cfg vm.CreateConfig, out io.Writer) error {
 	progress(out, "Applying cloud-init identity to VMID %d\n", vmid)
+	pubkey, err := readPublicKey(p.identityPath)
+	if err != nil {
+		return fmt.Errorf("proxmox: the VM needs an SSH public key for cloud-init: %w", err)
+	}
 	onboot := "1"
 	if cfg.DisableStartAtBoot {
 		onboot = "0"
@@ -676,6 +686,9 @@ func (p *proxmoxProvider) applyCloudInitIdentity(ctx context.Context, vmid int, 
 		"onboot":    {onboot},
 		"ciuser":    {p.ciUser},
 		"ipconfig0": {"ip=dhcp"},
+		// pve.EncodeSSHKeys, not a plain Set: PVE decodes this field once more
+		// than the form encoding accounts for (see its doc comment).
+		"sshkeys": {pve.EncodeSSHKeys([]string{pubkey})},
 	}
 	if cfg.CPUs > 0 {
 		form.Set("cores", strconv.Itoa(cfg.CPUs))

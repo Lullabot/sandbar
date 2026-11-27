@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1693,6 +1694,62 @@ func TestProxmoxCloneStartAtBoot(t *testing.T) {
 				t.Fatalf("config writes = %d", writes)
 			}
 		})
+	}
+}
+
+// The operator's public key is baked into the template when the base is built,
+// but the key can change afterwards (identity_path rotated because the old key
+// is suspected compromised). Every clone must carry the CURRENT key, whatever
+// the template holds: a clone that inherits the old one is unreachable with the
+// new key and keeps the revoked key authorized.
+func TestProxmoxCloneCarriesCurrentPublicKey(t *testing.T) {
+	const keyA = "ssh-ed25519 AAAAkeyA+/old sand@a"
+	const keyB = "ssh-ed25519 AAAAkeyB+/new sand@b"
+
+	m := newPVEMock(t)
+	p := newCreateProvider(t, m)
+
+	// Model PVE's clone semantics: the clone starts with the template's
+	// sshkeys (built with key A) and a config write replaces it only when the
+	// write names the field.
+	effective := keyA
+	m.on("/nodes/pve1/qemu/101/config", func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Error(err)
+		}
+		if v := r.Form.Get("sshkeys"); v != "" {
+			// PVE URI-unescapes the (already form-decoded) value once.
+			dec, err := url.PathUnescape(v)
+			if err != nil {
+				t.Errorf("sshkeys %q does not unescape: %v", v, err)
+			}
+			effective = dec
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":null}`))
+	})
+	m.data("/nodes/pve1/qemu/101/cloudinit", `null`)
+
+	// The template was stamped current while key A was in use; rotate to B.
+	want, err := p.templateVersion(webConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := provision.WriteBaseVersion(p.files, "sandbar-base", want, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	readPublicKey = func(string) (string, error) { return keyB, nil }
+
+	// The stamp does not cover the key, so the template is still reused; the
+	// per-clone write is what has to make up for it.
+	if stale, why := p.baseStale(webConfig()); stale {
+		t.Logf("template now stale after rotation (%s); the clone must still carry key B", why)
+	}
+	if err := p.applyCloudInitIdentity(context.Background(), 101, webConfig(), io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if effective != keyB {
+		t.Errorf("clone's effective sshkeys = %q, want exactly %q", effective, keyB)
 	}
 }
 
