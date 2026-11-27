@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -189,5 +192,38 @@ func TestSettleSecretsDefaultsTheGuestUser(t *testing.T) {
 	}
 	if applied.user != vm.HostUser() {
 		t.Errorf("applied as %q, want the host user %q", applied.user, vm.HostUser())
+	}
+}
+
+// TestSettleSecretsLeavesANewerStoreFileUntouched drives the real store: a
+// secrets file from a newer sandbar fails to load, settleSecrets carries on
+// with the store it was handed, and its save of the clone token must refuse
+// rather than replace every VM's saved secrets.
+func TestSettleSecretsLeavesANewerStoreFileUntouched(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dir)
+	path := filepath.Join(dir, "sandbar", "secrets.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	newer := []byte(`{"version":99,"scopes":[{"provider":"lima","vms":{"web":{"":{"GH_TOKEN":"keep-me"}}}}]}`)
+	if err := os.WriteFile(path, newer, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	captureApply(t, nil)
+
+	var out strings.Builder
+	cfg := vm.CreateConfig{Name: "other", User: "ada", CloneURL: "https://github.com/acme/web", CloneToken: "ghp_new"}
+	settleSecrets(context.Background(), nil, registry.LocalScope, cfg, &out)
+
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, newer) {
+		t.Fatalf("secrets file was rewritten:\n got %s\nwant %s", got, newer)
+	}
+	if !strings.Contains(out.String(), "token could not be saved") {
+		t.Errorf("want a warning that the token was not saved; got:\n%s", out.String())
 	}
 }
