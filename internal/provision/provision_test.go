@@ -2351,14 +2351,18 @@ func TestCreateVM_CanceledCloneRemovesTheHalfWrittenInstanceDir(t *testing.T) {
 	t.Setenv("LIMA_HOME", limaHomeDir)
 
 	// The half-written instance: a disk, a cidata.iso, and no lima.yaml — exactly
-	// what a killed `limactl clone` leaves behind.
+	// what a killed `limactl clone` leaves behind. The clone writes it: a
+	// directory already there before the clone is another instance, which the
+	// create must refuse rather than clone onto or clean up.
 	dir := filepath.Join(limaHomeDir, testConfig().Name)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatalf("seed instance dir: %v", err)
-	}
-	for _, f := range []string{"disk", "cidata.iso"} {
-		if err := os.WriteFile(filepath.Join(dir, f), []byte("x"), 0o644); err != nil {
-			t.Fatalf("seed %s: %v", f, err)
+	seed := func() {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Errorf("seed instance dir: %v", err)
+		}
+		for _, f := range []string{"disk", "cidata.iso"} {
+			if err := os.WriteFile(filepath.Join(dir, f), []byte("x"), 0o644); err != nil {
+				t.Errorf("seed %s: %v", f, err)
+			}
 		}
 	}
 
@@ -2370,6 +2374,11 @@ func TestCreateVM_CanceledCloneRemovesTheHalfWrittenInstanceDir(t *testing.T) {
 			return len(args) > 0 && (args[0] == "clone" || args[0] == "delete")
 		},
 		failErr: errors.New("context canceled"),
+		hook: func(args []string) {
+			if len(args) > 0 && args[0] == "clone" {
+				seed()
+			}
+		},
 	}
 	p := &Provisioner{Lima: lima.New(f), PlaybookDir: t.TempDir()}
 	stubBaseVersion(t, "v2:same:claude+ddev+go+java", nil, map[string]string{"sandbar-base": "v2:same:claude+ddev+go+java"})
@@ -2464,26 +2473,32 @@ func TestCreateVM_MarksProvenanceAsSoonAsTheCloneLands(t *testing.T) {
 // would have lived in — so a name that is later reused cannot inherit a stale
 // marker from a build that failed.
 func TestCreateVM_NoMarkerWhenTheCloneFails(t *testing.T) {
+	// A half-written instance dir with a marker already in it — the state a
+	// clone that dies partway through leaves behind, now that the marker is
+	// written early. Cleanup must take the WHOLE directory, marker included.
+	// The failing clone writes it, as a real one would: a directory present
+	// before the clone is another instance, which the create refuses instead.
+	home := t.TempDir()
+	t.Setenv("LIMA_HOME", home)
+	dir := filepath.Join(home, "claude")
+	marker := filepath.Join(dir, lima.MarkerFilename)
 	f := &fakeRunner{
 		status:  map[string][]byte{"sandbar-base": []byte("Stopped\n")},
 		failOn:  func(args []string) bool { return len(args) > 0 && args[0] == "clone" },
 		failErr: errors.New("no space left on device"),
+		hook: func(args []string) {
+			if len(args) == 0 || args[0] != "clone" {
+				return
+			}
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				t.Errorf("mkdir instance: %v", err)
+			}
+			if err := os.WriteFile(marker, []byte(`{"schema":3}`), 0o600); err != nil {
+				t.Errorf("write marker: %v", err)
+			}
+		},
 	}
 	p := &Provisioner{Lima: lima.New(f), PlaybookDir: "/playbook"}
-
-	// A half-written instance dir with a marker already in it — the state a
-	// clone that dies partway through leaves behind, now that the marker is
-	// written early. Cleanup must take the WHOLE directory, marker included.
-	home := t.TempDir()
-	t.Setenv("LIMA_HOME", home)
-	dir := filepath.Join(home, "claude")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatalf("mkdir instance: %v", err)
-	}
-	marker := filepath.Join(dir, lima.MarkerFilename)
-	if err := os.WriteFile(marker, []byte(`{"schema":3}`), 0o600); err != nil {
-		t.Fatalf("write marker: %v", err)
-	}
 
 	marked := false
 	opts := CreateOptions{OnCloned: func(context.Context) error { marked = true; return nil }}
